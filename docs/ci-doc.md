@@ -12,6 +12,26 @@ The **Where** column uses **Both** for pre-commit and required CI, **CI** for
 required GitHub CI, **Scheduled** for weekly CI, and **Later** for the intended
 placement of a guardrail that has not been implemented.
 
+## Measured feedback time
+
+Measurements from September 15, 2026 establish the current baseline. GitHub's
+Verify and Security jobs run in parallel, so the slower Verify job determines
+the overall CI duration.
+
+| Environment | Cache state | Result |
+| --- | --- | ---: |
+| Local staged pre-commit | Warm development environment | **5.9 seconds** |
+| Pull-request Verify | Cold cache for new analysis tools | **1 minute 30 seconds** |
+| Pull-request Verify | Warm cache | **1 minute 12 seconds** |
+| `main` Verify | Warm cache | **1 minute 1 second** |
+| `main` Security | Warm cache, parallel with Verify | **17 seconds** |
+| `main` overall CI | Warm cache | **1 minute 1 second** |
+
+These are observations, not permanent budgets. Re-measure after materially
+changing dependencies, test volume, runners, or cache configuration. Keep the
+local hook near its current duration so agents receive feedback before pushing,
+while leaving expensive and feed-dependent checks in remote or scheduled CI.
+
 ## Build, quality, and tests
 
 | Status | Guardrail | Tools | Where | Current state |
@@ -58,7 +78,7 @@ placement of a guardrail that has not been implemented.
 | ✅ | Parallel CI lanes | GitHub Actions | CI | Verify and Security run independently |
 | ✅ | CI caching | GitHub cache actions | CI | Go, Bun, and security tools are cached |
 | ✅ | Superseded-run cancellation | GitHub Actions | CI | Older branch runs are cancelled |
-| ✅ | Local time budget | Timed pre-commit hook | Pre-commit | Complete hook currently runs in a few seconds |
+| ✅ | Local time budget | Timed pre-commit hook | Pre-commit | Complete staged hook measured at 5.9 seconds |
 | 🟡 | Worktree isolation | Git worktrees, `AGENTS.md` | Agent workflow | Policy exists; automation does not |
 | 🟡 | Guardrail self-tests | Defect fixtures | CI | Test-policy and artifact-size gates have rejection fixtures |
 | 🟡 | Machine-readable reports | Coverage JSON and Go profiles | Both | Coverage artifacts exist; no unified gate report |
