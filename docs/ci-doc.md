@@ -13,7 +13,9 @@ policy gates.
 `make gates` runs every repository-specific policy gate. Their executables live
 in `scripts/gates/`; generic build, staged-snapshot, and smoke helpers remain in
 `scripts/`. `make verify` invokes `make gates`, so the same policies run in the
-staged pre-commit snapshot and required CI.
+staged pre-commit snapshot and required CI. Each major verification phase emits
+a `✅` success or `❌` failure status so local and CI logs identify progress and
+the failing layer at a glance.
 
 Changes to `Makefile`, workflow YAML under `.github/workflows/`, or an executable
 in `scripts/gates/` must update this document in the same change. A refactor
@@ -69,7 +71,7 @@ while leaving expensive and feed-dependent checks in remote or scheduled CI.
 | ✅ | Frontend lint and formatting | ESLint, Prettier | Pre-commit + required CI | Enforced locally and remotely |
 | ✅ | Svelte production build | Bun, Vite | Pre-commit + required CI | Runs locally and remotely |
 | ✅ | Embedded Go executable | `go build`, `go:embed` | Pre-commit + required CI | Produces the static executable |
-| ✅ | Go behavioral tests | `go test` | Pre-commit + required CI | Status API and static asset serving are tested |
+| ✅ | Go behavioral tests | `go test` | Pre-commit + required CI | Status API, static asset serving, and the fake-OpenCode agent-evaluation path are tested |
 | ✅ | Svelte component tests | Vitest, Testing Library | Pre-commit + required CI | Success and failure states are tested |
 | 🟡 | API contract tests | Go and Svelte behavioral tests | Pre-commit + required CI | Not green because each side tests its own response assumptions; there is no shared schema that can detect contract drift automatically |
 | 🟡 | Compiled-application smoke test | Shell, curl | Required CI only | Not green because it probes the real binary and embedded page over HTTP but does not exercise them in a browser |
@@ -106,6 +108,7 @@ while leaving expensive and feed-dependent checks in remote or scheduled CI.
 | ✅ | Superseded-run cancellation | GitHub Actions | Required CI only | Older branch runs are cancelled |
 | ✅ | Local time budget | Timed pre-commit hook | Pre-commit only | Complete staged hook measured at 5.9 seconds |
 | 🟡 | Worktree isolation | Git worktrees, `AGENTS.md` | Agent workflow | Not green because agents are instructed to isolate work, but no automation verifies worktree creation, cleanup, or shared-output violations |
+| ✅ | Deterministic agent scenario evaluation | Go, fake OpenCode | Pre-commit + required CI | One diagnosis-only scenario verifies isolated worktree execution, evidence capture, deterministic scoring, and unauthorized-change detection; real model runs remain manual |
 | 🟡 | Guardrail self-tests | Defect fixtures | Required CI only | Rejection fixtures cover test policy, artifact sizes, the supported agent-skill inventory and adapter links, and CI-documentation drift; not every future custom gate is automatically covered |
 | 🟡 | Machine-readable reports | Coverage JSON and Go profiles | Pre-commit + required CI | Not green because coverage artifacts exist, but there is no single structured report summarizing all gate outcomes |
 | ⬜ | Failure-versus-crash reporting | Gate runner | Planned CI | Not green because there is no unified gate runner to distinguish a detected defect from an infrastructure or tool crash |
