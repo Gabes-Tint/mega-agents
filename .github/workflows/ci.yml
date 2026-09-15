@@ -5,8 +5,6 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: '23 8 * * 1'
 
 permissions:
   contents: read
@@ -18,7 +16,6 @@ concurrency:
 jobs:
   verify:
     name: Verify
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,10 +23,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: |
-            go.mod
-            go.sum
+          cache: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '26.7.0'
@@ -60,26 +54,16 @@ jobs:
           cache-dependency-path: |
             go.mod
             go.sum
-      # Exact tool-version cache: never reuse binaries from a different toolchain.
-      - name: Restore security tools
-        id: security-tools
+      # Exact tool-version cache: never reuse binaries from a different tool version.
+      - name: Restore Gitleaks
+        id: gitleaks
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: |
-            ~/go/bin/gitleaks
-            ~/go/bin/govulncheck
-          key: security-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod') }}-gitleaks-8.30.0-govulncheck-1.8.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '26.7.0'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: '1.3.9'
-      - name: Install security tools
-        if: steps.security-tools.outputs.cache-hit != 'true'
-        run: |
-          go install github.com/zricethezav/gitleaks/v8@v8.30.0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          path: ~/go/bin/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ runner.arch }}-8.30.0
+      - name: Install Gitleaks
+        if: steps.gitleaks.outputs.cache-hit != 'true'
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.0
       - name: Scan secrets (PR commits or full history)
         env:
           EVENT: ${{ github.event_name }}
@@ -91,16 +75,3 @@ jobs:
           else
             gitleaks git --redact --no-banner --ignore-gitleaks-allow .
           fi
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-${{ hashFiles('frontend/bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-
-      - run: make install
-      - name: Audit frontend dependencies
-        working-directory: frontend
-        run: bun audit
-      - name: Generate assets required by Go embedding
-        run: cd frontend && bun run build
-      - name: Check reachable Go vulnerabilities
-        run: govulncheck ./...

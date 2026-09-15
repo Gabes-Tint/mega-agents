@@ -1,0 +1,56 @@
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: '23 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26.7.0'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.3.9'
+      - name: Restore govulncheck
+        id: govulncheck
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-${{ runner.os }}-${{ runner.arch }}-1.8.0
+      - name: Install govulncheck
+        if: steps.govulncheck.outputs.cache-hit != 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-
+      - run: make install
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: bun audit
+      - name: Generate assets required by Go embedding
+        run: cd frontend && bun run build
+      - name: Check reachable Go vulnerabilities
+        run: govulncheck ./...

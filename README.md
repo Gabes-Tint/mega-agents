@@ -15,15 +15,19 @@ GitHub is not required for these local checks.
 
 ## Remote CI
 
-Pull requests and pushes to main run two independent jobs: **Verify** repeats
-local verification, and **Security** runs redacted secret scanning plus Bun and
-Go vulnerability checks. Security also runs weekly over the full Git history
-and current dependencies. Actions and tool versions are pinned; Dependabot
-proposes weekly GitHub Actions updates. Both jobs must pass before merging.
+Pull requests and pushes to main run two independent deterministic jobs:
+**Verify** repeats local verification, and **Security** runs redacted secret
+scanning. Actions and tool versions are pinned; both jobs must pass before
+merging.
+
+The separate **Dependency audit** workflow runs weekly and on manual request.
+It checks the current Bun and Go vulnerability feeds. Those findings remain
+visible without making an unchanged commit fail its merge checks because an
+external advisory database changed. Dependabot separately proposes weekly
+GitHub Actions updates.
 
 CI caches Go compilation and modules, Bun package downloads, and pinned security
-tool binaries. Frozen dependency installation and vulnerability scans still run
-on every execution; scan results and generated frontend assets are not cached.
+tool binaries. Scan results and generated frontend assets are not cached.
 Verify and Security run concurrently, and superseded runs are cancelled.
 Measure cold and warm GitHub runs before adding more jobs: extra runners also
 add setup costs. Tool-version changes invalidate the security binary cache.
