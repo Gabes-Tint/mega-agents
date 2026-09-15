@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+if git diff --cached --quiet; then exit 0; fi
+test -d frontend/node_modules || { echo 'Run make install before committing.' >&2; exit 1; }
+# Verify precisely the index, including on the first commit.
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/mega-agents-check.XXXXXX")
+trap 'rm -r -- "$snapshot"' EXIT
+git checkout-index --all --prefix="$snapshot/"
+for manifest in package.json bun.lock; do
+  cmp -s "frontend/$manifest" "$snapshot/frontend/$manifest" || {
+    echo "Stage frontend/$manifest consistently and run make install." >&2; exit 1;
+  }
+done
+ln -s "$root/frontend/node_modules" "$snapshot/frontend/node_modules"
+make -C "$snapshot" verify
