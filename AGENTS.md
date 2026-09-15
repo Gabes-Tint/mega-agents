@@ -1,9 +1,7 @@
 # Mega Agents development
 
-- Use test-driven development for behavior: observe the relevant test fail,
-  implement the behavior, then refactor with tests passing.
-- Include regression tests for bug fixes. Test observable behavior rather than
-  mirroring implementation. Styling and documentation do not require test-first work.
+- For feature implementation and bug fixes, read and follow
+  [the shared feature-development skill](.agents/skills/feature-development/SKILL.md).
 - Run focused tests while editing and `make verify` before reporting completion.
 - Use separate worktrees for concurrent agents. Do not share generated output.
 - Never commit credentials. Browser assets are public. Use placeholders in examples.

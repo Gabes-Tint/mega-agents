@@ -19,4 +19,18 @@ if MAX_BINARY_BYTES=1 bash scripts/check-artifact-sizes.sh "$fixture/app" "$fixt
   exit 1
 fi
 
+mkdir -p "$fixture/.agents/skills/feature-development"
+touch "$fixture/.agents/skills/feature-development/SKILL.md"
+printf '%s\n' \
+  '[feature workflow](.agents/skills/feature-development/SKILL.md)' \
+  > "$fixture/AGENTS.md"
+printf '@AGENTS.md\n' > "$fixture/CLAUDE.md"
+mkdir -p "$fixture/.claude/skills/feature-development"
+printf '%s\n' 'Adapter missing its canonical reference.' \
+  > "$fixture/.claude/skills/feature-development/SKILL.md"
+if bash scripts/check-agent-adapters.sh "$fixture" >/dev/null 2>&1; then
+  echo 'Agent-adapter gate accepted a broken skill adapter.' >&2
+  exit 1
+fi
+
 echo 'Custom gate rejection fixtures passed.'

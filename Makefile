@@ -33,7 +33,7 @@ verify:
 	test -x $(ACTIONLINT) || { echo 'Run make install to install actionlint'; exit 1; }
 	# Cap local concurrency so parallel agent work does not saturate the machine.
 	$(MAKE) -j2 --output-sync=target frontend-quality frontend
-	$(MAKE) -j2 --output-sync=target go-quality workflow-check test-policy
+	$(MAKE) -j2 --output-sync=target go-quality workflow-check policy-checks
 	$(MAKE) binary size-check
 
 frontend-quality: frontend-format frontend-check frontend-lint frontend-test
@@ -70,6 +70,11 @@ workflow-check:
 
 test-policy:
 	bash scripts/check-test-policy.sh .
+
+agent-adapters:
+	bash scripts/check-agent-adapters.sh .
+
+policy-checks: test-policy agent-adapters
 
 binary:
 	mkdir -p bin
