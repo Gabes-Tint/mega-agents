@@ -1,7 +1,16 @@
 # Mega Agents
 
-A Go server with an embedded Svelte frontend (built into `internal/web/dist`
-via `go:embed`).
+Mega Agents is an early-stage, local-first platform for designing and running
+bounded agent-development workflows against existing repositories. Its goal is
+to combine a Go orchestration engine, a visual block editor, and portable YAML
+workflows so the same flow can run from the web interface, CLI, or CI—with live
+progress, explicit scope, and repository-native quality gates.
+
+The current repository is the foundation of that product: a Go server with an
+embedded Svelte frontend, agent-development policy and evaluation tooling, and
+the product proposal that guides the next implementation stages. See the
+[product foundation](docs/product/agent-development-platform.md) for the full
+vision and constraints.
 
 ## Setup
 
@@ -50,6 +59,8 @@ The full per-tool examples and pass criteria are documented in
 
 ## Documentation
 
+- [`docs/product/agent-development-platform.md`](docs/product/agent-development-platform.md)
+  — product foundation for the proposed successor agent-development platform.
 - [`docs/agent-development.md`](docs/agent-development.md) — development-agent
   operating model, agent evaluation, controls, and planned gaps.
 - [`docs/ci-doc.md`](docs/ci-doc.md) — guardrail status and CI facts.
