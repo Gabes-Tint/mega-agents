@@ -1,5 +1,7 @@
 # Mega Agents
 
+![Mega Agents visual workflow banner](docs/assets/mega-agents-social-preview.png)
+
 Mega Agents is an early-stage, local-first platform for designing and running
 bounded agent-development workflows against existing repositories. Its goal is
 to combine a Go orchestration engine, a visual block editor, and portable YAML
