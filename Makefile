@@ -55,15 +55,15 @@ go-quality: go-test go-vet go-staticcheck
 
 go-test:
 	mkdir -p reports
-	go test -timeout=30s $$(go list ./... | rg -v '/frontend/node_modules/')
+	go test -timeout=30s $$(go list ./... | grep -v '/frontend/node_modules/')
 	go test -timeout=30s -coverprofile=reports/go-coverage.out ./internal/...
 	go tool cover -func=reports/go-coverage.out | awk '/^total:/ { value=$$3 + 0; if (value < 80) { print "Go coverage " value "% is below 80%"; exit 1 } }'
 
 go-vet:
-	go vet $$(go list ./... | rg -v '/frontend/node_modules/')
+	go vet $$(go list ./... | grep -v '/frontend/node_modules/')
 
 go-staticcheck:
-	$(STATICCHECK) $$(go list ./... | rg -v '/frontend/node_modules/')
+	$(STATICCHECK) $$(go list ./... | grep -v '/frontend/node_modules/')
 
 workflow-check:
 	$(ACTIONLINT) .github/workflows/*.yml
@@ -98,7 +98,7 @@ frontend: install
 
 check:
 	cd frontend && bun run check
-	go vet $$(go list ./... | rg -v '/frontend/node_modules/')
+	go vet $$(go list ./... | grep -v '/frontend/node_modules/')
 
 dev-frontend:
 	cd frontend && bun run dev

@@ -19,5 +19,5 @@ test "${response:-}" = '{"message":"Mega Agents backend is running"}' || {
   cat "$log" >&2
   exit 1
 }
-curl --fail --silent "http://127.0.0.1:$port/" | rg -q '<title>Mega Agents</title>'
+curl --fail --silent "http://127.0.0.1:$port/" | grep -q '<title>Mega Agents</title>'
 echo 'Embedded application smoke test passed.'
