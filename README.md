@@ -2,23 +2,45 @@
 
 ## Local checks
 
-Run `make install` once, then `make setup` to enable the tracked pre-commit
-hook. Go, Bun, Make, and Gitleaks must be installed. Run `make verify` for
+Run `make install` initially and after dependency or pinned-tool changes, then
+`make setup` to enable the tracked pre-commit hook. Go, Bun, Make, and Gitleaks
+must be installed. Run `make verify` for
 local type checks, Go tests, formatting checks, and the complete embedded build.
 The hook scans staged changes with redacted Gitleaks output and checks an
 isolated copy of staged files. It does not install dependencies or contact CI.
 The hook delegates to `make pre-commit`, which runs `secrets-staged`,
 `whitespace-staged`, and `verify-staged` in order. The snapshot helper lives in
 `scripts/verify-staged.sh` and calls `make verify` on the staged copy.
-After dependency changes, run `make install` and stage the manifest and lockfile.
-GitHub is not required for these local checks.
+After dependency changes, stage the manifest and lockfile together. Verification
+first checks that frontend dependencies and pinned Go tools are present; its
+frontend build then reruns the frozen, lockfile-verified install, which is
+normally a no-op. It never performs an unfrozen dependency resolution. GitHub is
+not required for these local checks.
 
 `make verify` also runs frontend behavioral tests with coverage, Go handler
 tests with coverage, ESLint, Prettier, Staticcheck, workflow linting, checks for
-focused or skipped tests, and binary/frontend size budgets. `make smoke`
+focused or skipped tests, agent-adapter consistency, CI-documentation drift,
+and binary/frontend size budgets. Repository policy executables live under
+`scripts/gates/` and can be run together with `make gates`. `make smoke`
 launches the compiled application and probes the status endpoint and embedded
-page. `make gate-self-test` proves the custom test-policy and size gates reject
-bad fixtures.
+page. `make gate-self-test` proves the test-policy, size, agent-adapter, and
+CI-documentation gates reject bad fixtures.
+
+When `Makefile`, `.github/workflows/*.yml`, or `scripts/gates/*` changes, update
+`docs/ci-doc.md`. A behavior-preserving refactor may instead include the
+content-bound `.ci-doc-no-impact` declaration described in that document; it
+does not waive factual synchronization checks.
+
+Reference documentation:
+
+- [`docs/agent-development.md`](docs/agent-development.md) inventories the
+  development-agent operating model, current controls, and planned gaps.
+- [`docs/ci-doc.md`](docs/ci-doc.md) records guardrail status and machine-checked
+  CI facts.
+- [`docs/ci-files.md`](docs/ci-files.md) indexes CI-defining files and their
+  roles.
+- [`docs/custom-gates.md`](docs/custom-gates.md) explains gate conventions,
+  fixtures, extension steps, and no-impact declarations.
 
 ## Remote CI
 

@@ -14,4 +14,4 @@ for manifest in package.json bun.lock; do
   }
 done
 ln -s "$root/frontend/node_modules" "$snapshot/frontend/node_modules"
-make -C "$snapshot" verify
+CI_CHANGED_FILES=$(git diff --cached --name-only) make -C "$snapshot" verify

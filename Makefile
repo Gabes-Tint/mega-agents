@@ -4,7 +4,7 @@ ACTIONLINT := $(GO_TOOL_BIN)/actionlint
 
 .PHONY: build install frontend check dev-frontend clean
 
-.PHONY: setup verify
+.PHONY: setup verify gates
 .PHONY: pre-commit secrets-staged whitespace-staged verify-staged
 # Run checks in sequence, including when the caller enables parallel Make.
 pre-commit:
@@ -33,8 +33,8 @@ verify:
 	test -x $(ACTIONLINT) || { echo 'Run make install to install actionlint'; exit 1; }
 	# Cap local concurrency so parallel agent work does not saturate the machine.
 	$(MAKE) -j2 --output-sync=target frontend-quality frontend
-	$(MAKE) -j2 --output-sync=target go-quality workflow-check policy-checks
-	$(MAKE) binary size-check
+	$(MAKE) -j2 --output-sync=target go-quality workflow-check
+	$(MAKE) gates
 
 frontend-quality: frontend-format frontend-check frontend-lint frontend-test
 
@@ -69,19 +69,22 @@ workflow-check:
 	$(ACTIONLINT) .github/workflows/*.yml
 
 test-policy:
-	bash scripts/check-test-policy.sh .
+	bash scripts/gates/check-test-policy.sh .
 
 agent-adapters:
-	bash scripts/check-agent-adapters.sh .
+	bash scripts/gates/check-agent-adapters.sh .
 
-policy-checks: test-policy agent-adapters
+ci-documentation:
+	bash scripts/gates/check-ci-documentation.sh .
+
+gates: binary test-policy agent-adapters ci-documentation size-check
 
 binary:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -o bin/mega-agents .
 
 size-check:
-	bash scripts/check-artifact-sizes.sh
+	bash scripts/gates/check-artifact-sizes.sh
 
 gate-self-test:
 	bash scripts/test-gates.sh

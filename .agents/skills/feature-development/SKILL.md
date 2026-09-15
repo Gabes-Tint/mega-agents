@@ -11,7 +11,8 @@ user's scope and avoid infrastructure that the behavior does not require.
 ## Define the behavior
 
 - Translate the request into observable acceptance criteria before editing code.
-- Identify the smallest test boundary that proves each criterion.
+- Identify the smallest public behavioral seam that proves each criterion. Test
+  through stable interfaces rather than private implementation details.
 - Surface a missing product decision only when different answers would materially
   change behavior; otherwise make a narrow, reversible assumption and state it.
 
@@ -21,13 +22,20 @@ user's scope and avoid infrastructure that the behavior does not require.
 2. Implement the smallest coherent behavior that makes the test pass.
 3. Refactor only while the focused tests remain green.
 
-For a bug, first reproduce it with a regression test. Test public behavior rather
-than private implementation details. Documentation, styling-only work, generated
-code, and exploratory spikes do not require a test-first cycle.
+For a bug, first reproduce it with a regression test. Derive expected values from
+the requirement, a fixed fixture, or another independent source; do not calculate
+them with the production logic under test. Avoid assertions that merely repeat
+the implementation or prove that a mock returned its configured value. Mock only
+the external boundaries needed for determinism or isolation, and prefer real,
+cheap collaborators when they expose meaningful integration behavior.
+
+Documentation, styling-only work, generated code, and exploratory spikes do not
+require a test-first cycle.
 
 ## Work across layers
 
 - Prefer a complete thin path over disconnected backend and frontend scaffolding.
+- Finish and verify one vertical slice before opening the next.
 - Keep domain logic outside UI components and transport handlers when it has its
   own rules or meaningful edge cases.
 - Treat browser-visible configuration as public. Keep secrets on the server.
