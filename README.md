@@ -1,66 +1,58 @@
 # Mega Agents
 
-## Local checks
+A Go server with an embedded Svelte frontend (built into `internal/web/dist`
+via `go:embed`).
 
-Run `make install` once, then `make setup` to enable the tracked pre-commit
-hook. Go, Bun, Make, and Gitleaks must be installed. Run `make verify` for
-local type checks, Go tests, formatting checks, and the complete embedded build.
-The hook scans staged changes with redacted Gitleaks output and checks an
-isolated copy of staged files. It does not install dependencies or contact CI.
-The hook delegates to `make pre-commit`, which runs `secrets-staged`,
-`whitespace-staged`, and `verify-staged` in order. The snapshot helper lives in
-`scripts/verify-staged.sh` and calls `make verify` on the staged copy.
-After dependency changes, run `make install` and stage the manifest and lockfile.
-GitHub is not required for these local checks.
+## Setup
 
-`make verify` also runs frontend behavioral tests with coverage, Go handler
-tests with coverage, ESLint, Prettier, Staticcheck, workflow linting, checks for
-focused or skipped tests, and binary/frontend size budgets. `make smoke`
-launches the compiled application and probes the status endpoint and embedded
-page. `make gate-self-test` proves the custom test-policy and size gates reject
-bad fixtures.
+Install Go, Bun, Make, and Gitleaks, then:
 
-## Remote CI
+```sh
+make install  # after dependency or pinned-tool changes
+make setup    # enables the tracked pre-commit hook
+```
 
-Pull requests and pushes to main run two independent deterministic jobs:
-**Verify** repeats local verification, and **Security** runs redacted secret
-scanning. Actions and tool versions are pinned; both jobs must pass before
-merging.
-
-The separate **Dependency audit** workflow runs weekly and on manual request.
-It checks the current Bun and Go vulnerability feeds. Those findings remain
-visible without making an unchanged commit fail its merge checks because an
-external advisory database changed. Dependabot separately proposes weekly
-GitHub Actions updates.
-
-CI caches Go compilation and modules, Bun package downloads, and pinned security
-tool binaries. Scan results and generated frontend assets are not cached.
-Verify and Security run concurrently, and superseded runs are cancelled.
-Measure cold and warm GitHub runs before adding more jobs: extra runners also
-add setup costs. Tool-version changes invalidate the security binary cache.
-
-Browser, race, and mutation suites will be added when the corresponding tests
-exist. No placeholder passing jobs stand in for those tests.
-
-The Svelte frontend uses Bun for dependency management and scripts. It is built
-into `internal/web/dist`, then embedded into the Go executable with `go:embed`.
+## Run
 
 ```sh
 make build
-./bin/mega-agents
+./bin/mega-agents  # PORT=3000 to override the default 8080
 ```
 
-Open <http://localhost:8080>. The JSON backend endpoint is available at
-<http://localhost:8080/api/status>.
+Open <http://localhost:8080> (status endpoint: `/api/status`).
 
-Set `PORT` at runtime if port 8080 is unavailable, for example
-`PORT=3000 ./bin/mega-agents`.
+For frontend development with hot reload: `make dev-frontend`. Re-run
+`make build` after frontend changes and restart the server.
 
-For frontend development with hot reload:
+## Checks
+
+- `make verify` — types, Go and frontend tests with coverage, formatting,
+  lint, static analysis, CI-doc sync, size budgets, and the embedded build.
+- `make gates` — repository policy executables under `scripts/gates/`.
+- `make smoke` — launches the app and probes the status endpoint.
+- `make gate-self-test` — proves the gates reject bad fixtures.
+
+When `Makefile`, `.github/workflows/*.yml`, or `scripts/gates/*` changes,
+update `docs/ci-doc.md`. A behavior-preserving refactor may instead include
+the content-bound `.ci-doc-no-impact` declaration described there.
+
+## Agent evaluation
+
+One deterministic, diagnosis-only scenario runs the selected agent tool in a
+disposable Git worktree:
 
 ```sh
-make dev-frontend
+make agent-eval TOOL=opencode MODEL=opencode-go/glm-5.3-flash
 ```
 
-For the Go server during development, run `make build` again whenever frontend
-assets change, then restart `./bin/mega-agents`.
+The full per-tool examples and pass criteria are documented in
+[`docs/agent-development.md`](docs/agent-development.md#agent-evaluation).
+
+## Documentation
+
+- [`docs/agent-development.md`](docs/agent-development.md) — development-agent
+  operating model, agent evaluation, controls, and planned gaps.
+- [`docs/ci-doc.md`](docs/ci-doc.md) — guardrail status and CI facts.
+- [`docs/ci-files.md`](docs/ci-files.md) — index of CI-defining files.
+- [`docs/custom-gates.md`](docs/custom-gates.md) — gate conventions and
+  extension steps.

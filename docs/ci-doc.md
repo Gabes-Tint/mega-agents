@@ -6,6 +6,34 @@ keep local pre-commit feedback and GitHub CI aligned without putting slow or
 feed-dependent work in the commit loop. Update this inventory whenever a
 guardrail is added, removed, or changes execution scope.
 
+See the [CI file index](ci-files.md) for the monitored configuration paths and
+the [custom gates guide](custom-gates.md) for operating and extending repository
+policy gates.
+
+`make gates` runs every repository-specific policy gate. Their executables live
+in `scripts/gates/`; generic build, staged-snapshot, and smoke helpers remain in
+`scripts/`. `make verify` invokes `make gates`, so the same policies run in the
+staged pre-commit snapshot and required CI. Each major verification phase emits
+a `✅` success or `❌` failure status so local and CI logs identify progress and
+the failing layer at a glance.
+
+Changes to `Makefile`, workflow YAML under `.github/workflows/`, or an executable
+in `scripts/gates/` must update this document in the same change. A refactor
+with genuinely no documentation impact may instead change `.ci-doc-no-impact`.
+That declaration must start with `CI_DOCUMENTATION_NO_IMPACT_V1`, contain a
+specific `reason=` of at least 21 characters, and list exactly every changed CI
+input as `<sha256><two spaces><path>`. Use `DELETED` in place of the hash for a
+deleted input. The gate requires the declaration itself to be part of the
+change, so old declarations cannot grant an exemption. This mechanism only
+waives the document-touch requirement: the machine-checked facts below are
+always validated and cannot be waived. Prefer updating this document whenever
+behavior or any documented fact changes.
+
+Run `scripts/gates/check-ci-documentation.sh --write-facts .` after an intentional
+configuration change, then review and stage the result. The generated block is
+bounded by markers; the gate compares it exactly and separately verifies its
+claims against the Makefile and workflows.
+
 Legend: ✅ implemented · 🟡 partial · ⬜ not implemented
 
 The **Where** column names the exact execution point: **Pre-commit + required
@@ -43,7 +71,7 @@ while leaving expensive and feed-dependent checks in remote or scheduled CI.
 | ✅ | Frontend lint and formatting | ESLint, Prettier | Pre-commit + required CI | Enforced locally and remotely |
 | ✅ | Svelte production build | Bun, Vite | Pre-commit + required CI | Runs locally and remotely |
 | ✅ | Embedded Go executable | `go build`, `go:embed` | Pre-commit + required CI | Produces the static executable |
-| ✅ | Go behavioral tests | `go test` | Pre-commit + required CI | Status API and static asset serving are tested |
+| ✅ | Go behavioral tests | `go test` | Pre-commit + required CI | Status API, static asset serving, and the fake-OpenCode agent-evaluation path are tested |
 | ✅ | Svelte component tests | Vitest, Testing Library | Pre-commit + required CI | Success and failure states are tested |
 | 🟡 | API contract tests | Go and Svelte behavioral tests | Pre-commit + required CI | Not green because each side tests its own response assumptions; there is no shared schema that can detect contract drift automatically |
 | 🟡 | Compiled-application smoke test | Shell, curl | Required CI only | Not green because it probes the real binary and embedded page over HTTP but does not exercise them in a browser |
@@ -80,11 +108,27 @@ while leaving expensive and feed-dependent checks in remote or scheduled CI.
 | ✅ | Superseded-run cancellation | GitHub Actions | Required CI only | Older branch runs are cancelled |
 | ✅ | Local time budget | Timed pre-commit hook | Pre-commit only | Complete staged hook measured at 5.9 seconds |
 | 🟡 | Worktree isolation | Git worktrees, `AGENTS.md` | Agent workflow | Not green because agents are instructed to isolate work, but no automation verifies worktree creation, cleanup, or shared-output violations |
-| 🟡 | Guardrail self-tests | Defect fixtures | Required CI only | Not green because rejection fixtures cover test policy and artifact sizes, but not every custom gate |
+| ✅ | Deterministic agent scenario evaluation | Go, fake OpenCode | Pre-commit + required CI | One diagnosis-only scenario verifies isolated worktree execution, evidence capture, deterministic scoring, and unauthorized-change detection; real model runs remain manual |
+| 🟡 | Guardrail self-tests | Defect fixtures | Required CI only | Rejection fixtures cover test policy, artifact sizes, the supported agent-skill inventory and adapter links, and CI-documentation drift; not every future custom gate is automatically covered |
 | 🟡 | Machine-readable reports | Coverage JSON and Go profiles | Pre-commit + required CI | Not green because coverage artifacts exist, but there is no single structured report summarizing all gate outcomes |
 | ⬜ | Failure-versus-crash reporting | Gate runner | Planned CI | Not green because there is no unified gate runner to distinguish a detected defect from an infrastructure or tool crash |
 | ⬜ | Threshold ratchets | Baselines and scripts | Planned CI | Not green because the project has too little historical data to set meaningful improving baselines without arbitrary limits |
 | ✅ | Reject focused/skipped tests | Custom shell gate | Pre-commit + required CI | Frontend and Go disabled-test patterns fail verification |
 | ⬜ | Change-aware verification | Git path detection | Planned pre-commit + CI | Not green because the full suite is currently fast and small; path mapping would add complexity before it saves meaningful time |
-| 🟡 | Local/CI contract test | `actionlint`, shared Make target | Pre-commit + required CI | Not green because workflows are linted and reuse `make verify`, but no structural test proves CI cannot omit a required local gate |
+| ✅ | Local/CI contract test | `actionlint`, CI-documentation gate | Pre-commit + required CI | Workflows are linted, required CI must call `make verify`, and verification must call the shared `make gates` entry point |
+| ✅ | CI-documentation drift | Custom shell gate, content-bound declaration | Pre-commit + required CI | CI-defining changes require updated documentation or an exact hashed no-impact declaration; factual checks cannot be waived |
+| ✅ | Canonical agent-skill parity | Custom shell gate | Pre-commit + required CI | The declared canonical skill set, concise `AGENTS.md` pointers, and same-name Claude adapters must remain complete; unregistered canonical skills or adapters are rejected |
 | 🟡 | Generated-file freshness | Vite, Git comparison | Planned pre-commit + CI | Deferred until generated assets become committed artifacts. Today they are untracked and rebuilt before Go compiles, so a freshness comparison would add no protection; if we commit them later, add a clean-tree comparison proving they match their sources |
+
+## Machine-checked CI facts
+
+<!-- ci-facts:start -->
+| Machine-checked fact | Configuration |
+| --- | --- |
+| Required verification entry point | `make verify` |
+| Repository policy entry point | `make gates` (test policy, agent adapters, CI-documentation drift, artifact sizes) |
+| Custom gate rejection tests | `make gate-self-test` |
+| Compiled application smoke test | `make smoke` |
+| Required CI workflows | `CI` (Verify + Security), `Dependency audit` (weekly + manual) |
+| Required vulnerability checks | `bun audit`, `govulncheck ./...` |
+<!-- ci-facts:end -->

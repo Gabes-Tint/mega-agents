@@ -2,9 +2,9 @@ GO_TOOL_BIN := $(shell go env GOPATH)/bin
 STATICCHECK := $(GO_TOOL_BIN)/staticcheck
 ACTIONLINT := $(GO_TOOL_BIN)/actionlint
 
-.PHONY: build install frontend check dev-frontend clean
+.PHONY: build install frontend check dev-frontend clean agent-eval
 
-.PHONY: setup verify
+.PHONY: setup verify gates
 .PHONY: pre-commit secrets-staged whitespace-staged verify-staged
 # Run checks in sequence, including when the caller enables parallel Make.
 pre-commit:
@@ -27,14 +27,14 @@ setup:
 	git config core.hooksPath .githooks
 
 verify:
-	# Require installed frontend dependencies; keep installation out of verification.
-	test -d frontend/node_modules || { echo 'Run make install first'; exit 1; }
-	test -x $(STATICCHECK) || { echo 'Run make install to install staticcheck'; exit 1; }
-	test -x $(ACTIONLINT) || { echo 'Run make install to install actionlint'; exit 1; }
-	# Cap local concurrency so parallel agent work does not saturate the machine.
-	$(MAKE) -j2 --output-sync=target frontend-quality frontend
-	$(MAKE) -j2 --output-sync=target go-quality workflow-check policy-checks
-	$(MAKE) binary size-check
+	@scripts/run-with-status.sh 'Verification prerequisites' sh -c \
+		'test -d frontend/node_modules && test -x "$(STATICCHECK)" && test -x "$(ACTIONLINT)"' || \
+		{ echo 'Run make install first' >&2; exit 1; }
+	@scripts/run-with-status.sh 'Frontend checks' \
+		$(MAKE) -j2 --output-sync=target frontend-quality frontend
+	@scripts/run-with-status.sh 'Go and workflow checks' \
+		$(MAKE) -j2 --output-sync=target go-quality workflow-check
+	@scripts/run-with-status.sh 'Repository gates' $(MAKE) gates
 
 frontend-quality: frontend-format frontend-check frontend-lint frontend-test
 
@@ -69,22 +69,26 @@ workflow-check:
 	$(ACTIONLINT) .github/workflows/*.yml
 
 test-policy:
-	bash scripts/check-test-policy.sh .
+	bash scripts/gates/check-test-policy.sh .
 
 agent-adapters:
-	bash scripts/check-agent-adapters.sh .
+	bash scripts/gates/check-agent-adapters.sh .
 
-policy-checks: test-policy agent-adapters
+ci-documentation:
+	bash scripts/gates/check-ci-documentation.sh .
+
+gates: binary test-policy agent-adapters ci-documentation size-check
 
 binary:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -o bin/mega-agents .
 
 size-check:
-	bash scripts/check-artifact-sizes.sh
+	bash scripts/gates/check-artifact-sizes.sh
 
 gate-self-test:
 	bash scripts/test-gates.sh
+	bash scripts/test-run-with-status.sh
 
 smoke: build
 	bash scripts/smoke.sh
@@ -110,3 +114,10 @@ dev-frontend:
 
 clean:
 	go clean
+
+TOOL ?= opencode
+OPENCODE ?= opencode
+RESULT ?= reports/agent-eval/result.json
+
+agent-eval:
+	go run ./cmd/agent-eval --tool "$(TOOL)" --model "$(MODEL)" --variant "$(VARIANT)" --executable "$(OPENCODE)" --output "$(RESULT)"
