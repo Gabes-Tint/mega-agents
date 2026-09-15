@@ -8,9 +8,9 @@ guardrail is added, removed, or changes execution scope.
 
 Legend: ✅ implemented · 🟡 partial · ⬜ not implemented
 
-The **Where** column uses **Both** for pre-commit and required CI, **CI** for
-required GitHub CI, **Scheduled** for weekly CI, and **Later** for the intended
-placement of a guardrail that has not been implemented.
+The **Where** column names the exact execution point: **Pre-commit + required
+CI**, **Pre-commit only**, **Required CI only**, **Weekly + manual CI**, or a
+planned location for a guardrail that has not been implemented.
 
 ## Measured feedback time
 
@@ -36,55 +36,55 @@ while leaving expensive and feed-dependent checks in remote or scheduled CI.
 
 | Status | Guardrail | Tools | Where | Current state |
 | ---: | --- | --- | --- | --- |
-| ✅ | Go formatting | `gofmt` | Both | Enforced locally and remotely |
-| ✅ | Svelte/TypeScript diagnostics | `svelte-check` | Both | Enforced locally and remotely |
-| ✅ | Go static analysis | `go vet` | Both | Enforced locally and remotely |
-| ✅ | Stronger Go analysis | `staticcheck` | Both | Enforced locally and remotely |
-| ✅ | Frontend lint and formatting | ESLint, Prettier | Both | Enforced locally and remotely |
-| ✅ | Svelte production build | Bun, Vite | Both | Runs locally and remotely |
-| ✅ | Embedded Go executable | `go build`, `go:embed` | Both | Produces the static executable |
-| ✅ | Go behavioral tests | `go test` | Both | Status API and static asset serving are tested |
-| ✅ | Svelte component tests | Vitest, Testing Library | Both | Success and failure states are tested |
-| 🟡 | API contract tests | Go and Svelte behavioral tests | Both | Response shape is exercised on both sides; no shared schema exists |
-| 🟡 | Compiled-application smoke test | Shell, curl | CI | The real binary and embedded page are probed without a browser |
-| ⬜ | Browser smoke tests | Playwright | CI later | Not configured |
-| ⬜ | Go fuzz tests | `go test -fuzz` | CI later | Not configured |
-| 🟡 | Coverage thresholds | Go coverage, Vitest V8 coverage | Both | 80% applies to backend application and tested frontend source; no changed-code policy |
-| ⬜ | Mutation testing | Gremlins, Stryker | Scheduled later | Not configured |
-| ✅ | Artifact-size budgets | Custom shell gate | Both | Go binary, frontend JavaScript, and CSS have explicit limits |
-| ✅ | Test timeouts | Go, Vitest, GitHub Actions | Both | Go, frontend, and CI jobs have explicit limits |
+| ✅ | Go formatting | `gofmt` | Pre-commit + required CI | Enforced locally and remotely |
+| ✅ | Svelte/TypeScript diagnostics | `svelte-check` | Pre-commit + required CI | Enforced locally and remotely |
+| ✅ | Go static analysis | `go vet` | Pre-commit + required CI | Enforced locally and remotely |
+| ✅ | Stronger Go analysis | `staticcheck` | Pre-commit + required CI | Enforced locally and remotely |
+| ✅ | Frontend lint and formatting | ESLint, Prettier | Pre-commit + required CI | Enforced locally and remotely |
+| ✅ | Svelte production build | Bun, Vite | Pre-commit + required CI | Runs locally and remotely |
+| ✅ | Embedded Go executable | `go build`, `go:embed` | Pre-commit + required CI | Produces the static executable |
+| ✅ | Go behavioral tests | `go test` | Pre-commit + required CI | Status API and static asset serving are tested |
+| ✅ | Svelte component tests | Vitest, Testing Library | Pre-commit + required CI | Success and failure states are tested |
+| 🟡 | API contract tests | Go and Svelte behavioral tests | Pre-commit + required CI | Not green because each side tests its own response assumptions; there is no shared schema that can detect contract drift automatically |
+| 🟡 | Compiled-application smoke test | Shell, curl | Required CI only | Not green because it probes the real binary and embedded page over HTTP but does not exercise them in a browser |
+| ⬜ | Browser smoke tests | Playwright | Planned required CI | Not green because the application has no critical browser workflow yet; adding Playwright now would add setup cost without meaningful coverage |
+| ⬜ | Go fuzz tests | `go test -fuzz` | Planned scheduled CI | Not green because the current API has no complex parser or untrusted structured input that would provide a valuable fuzz target |
+| 🟡 | Coverage thresholds | Go coverage, Vitest V8 coverage | Pre-commit + required CI | Not green because the 80% floor covers backend application and tested frontend source, but there is no changed-code coverage policy |
+| ⬜ | Mutation testing | Gremlins, Stryker | Planned scheduled CI | Not green because the test suite is still small; mutation runtime and maintenance are not justified until more domain behavior exists |
+| ✅ | Artifact-size budgets | Custom shell gate | Pre-commit + required CI | Go binary, frontend JavaScript, and CSS have explicit limits |
+| ✅ | Test timeouts | Go, Vitest, GitHub Actions | Pre-commit + required CI | Go, frontend, and CI jobs have explicit limits |
 
 ## Security and dependencies
 
 | Status | Guardrail | Tools | Where | Current state |
 | ---: | --- | --- | --- | --- |
-| ✅ | Secret scanning | Gitleaks | Both | Staged changes locally; commits/history remotely |
-| ✅ | Dependency vulnerability audit | `bun audit`, `govulncheck` | Scheduled | Weekly or manually triggered |
-| ✅ | Dependency updates | Dependabot | Scheduled | Checks GitHub Actions weekly |
-| ✅ | Reproducible dependencies | Bun lockfile | Both | Frozen lockfile used locally and remotely |
-| ✅ | Immutable CI actions | Git commit SHAs | CI | Actions are hash-pinned |
-| 🟡 | Source security analysis | CodeQL or Semgrep | CI later | Not configured beyond secret scanning |
-| 🟡 | Dependency/license policy | License scanner | CI later | Vulnerabilities checked; licenses are not |
-| 🟡 | Network timeout safety | Browser abort signal, Go HTTP server | Both | Current browser request and server headers have timeouts; no general enforcement rule |
+| ✅ | Secret scanning | Gitleaks | Pre-commit + required CI | Staged changes locally; commits/history remotely |
+| ✅ | Dependency vulnerability audit | `bun audit`, `govulncheck` | Weekly + manual CI | Weekly or manually triggered |
+| ✅ | Dependency updates | Dependabot | Weekly | Checks GitHub Actions weekly |
+| ✅ | Reproducible dependencies | Bun lockfile | Pre-commit + required CI | Frozen lockfile used locally and remotely |
+| ✅ | Immutable CI actions | Git commit SHAs | Required CI only | Actions are hash-pinned |
+| 🟡 | Source security analysis | CodeQL or Semgrep | Planned CI | Not green because only secret scanning is configured; a source analyzer and its false-positive policy have not been selected |
+| 🟡 | Dependency/license policy | License scanner | Planned CI | Not green because vulnerabilities are audited, but allowed and prohibited dependency licenses have not been defined |
+| 🟡 | Network timeout safety | Browser abort signal, Go HTTP server | Pre-commit + required CI | Not green because current request and server-header timeouts are tested indirectly; there is no repository-wide rule covering every future network operation |
 
 ## Agent and CI controls
 
 | Status | Guardrail | Tools | Where | Current state |
 | ---: | --- | --- | --- | --- |
-| ✅ | Shared verification | Make | Both | Both environments call `make verify` |
-| ✅ | Staged snapshot verification | Git, shell script | Pre-commit | Checks exactly what will be committed |
-| ✅ | Whitespace validation | `git diff --cached --check` | Pre-commit | Checks staged content |
-| ✅ | Protected main branch | GitHub protection | CI | Verify and Security are required |
-| ✅ | Parallel CI lanes | GitHub Actions | CI | Verify and Security run independently |
-| ✅ | CI caching | GitHub cache actions | CI | Go, Bun, and security tools are cached |
-| ✅ | Superseded-run cancellation | GitHub Actions | CI | Older branch runs are cancelled |
-| ✅ | Local time budget | Timed pre-commit hook | Pre-commit | Complete staged hook measured at 5.9 seconds |
-| 🟡 | Worktree isolation | Git worktrees, `AGENTS.md` | Agent workflow | Policy exists; automation does not |
-| 🟡 | Guardrail self-tests | Defect fixtures | CI | Test-policy and artifact-size gates have rejection fixtures |
-| 🟡 | Machine-readable reports | Coverage JSON and Go profiles | Both | Coverage artifacts exist; no unified gate report |
-| ⬜ | Failure-versus-crash reporting | Gate runner | CI later | Not implemented |
-| ⬜ | Threshold ratchets | Baselines and scripts | CI later | Not implemented |
-| ✅ | Reject focused/skipped tests | Custom shell gate | Both | Frontend and Go disabled-test patterns fail verification |
-| ⬜ | Change-aware verification | Git path detection | Both later | Not implemented |
-| 🟡 | Local/CI contract test | `actionlint`, shared Make target | Both | Workflows are linted and reuse `make verify`; no structural parity test |
-| 🟡 | Generated-file freshness | Vite, Git comparison | Both later | Assets rebuild; no comparison check exists |
+| ✅ | Shared verification | Make | Pre-commit + required CI | Both environments call `make verify` |
+| ✅ | Staged snapshot verification | Git, shell script | Pre-commit only | Checks exactly what will be committed |
+| ✅ | Whitespace validation | `git diff --cached --check` | Pre-commit only | Checks staged content |
+| ✅ | Protected main branch | GitHub protection | Required CI only | Verify and Security are required |
+| ✅ | Parallel CI lanes | GitHub Actions | Required CI only | Verify and Security run independently |
+| ✅ | CI caching | GitHub cache actions | Required CI only | Go, Bun, and security tools are cached |
+| ✅ | Superseded-run cancellation | GitHub Actions | Required CI only | Older branch runs are cancelled |
+| ✅ | Local time budget | Timed pre-commit hook | Pre-commit only | Complete staged hook measured at 5.9 seconds |
+| 🟡 | Worktree isolation | Git worktrees, `AGENTS.md` | Agent workflow | Not green because agents are instructed to isolate work, but no automation verifies worktree creation, cleanup, or shared-output violations |
+| 🟡 | Guardrail self-tests | Defect fixtures | Required CI only | Not green because rejection fixtures cover test policy and artifact sizes, but not every custom gate |
+| 🟡 | Machine-readable reports | Coverage JSON and Go profiles | Pre-commit + required CI | Not green because coverage artifacts exist, but there is no single structured report summarizing all gate outcomes |
+| ⬜ | Failure-versus-crash reporting | Gate runner | Planned CI | Not green because there is no unified gate runner to distinguish a detected defect from an infrastructure or tool crash |
+| ⬜ | Threshold ratchets | Baselines and scripts | Planned CI | Not green because the project has too little historical data to set meaningful improving baselines without arbitrary limits |
+| ✅ | Reject focused/skipped tests | Custom shell gate | Pre-commit + required CI | Frontend and Go disabled-test patterns fail verification |
+| ⬜ | Change-aware verification | Git path detection | Planned pre-commit + CI | Not green because the full suite is currently fast and small; path mapping would add complexity before it saves meaningful time |
+| 🟡 | Local/CI contract test | `actionlint`, shared Make target | Pre-commit + required CI | Not green because workflows are linted and reuse `make verify`, but no structural test proves CI cannot omit a required local gate |
+| 🟡 | Generated-file freshness | Vite, Git comparison | Planned pre-commit + CI | Not green because assets are rebuilt, but no clean-tree comparison proves committed generated files match their sources |
