@@ -10,7 +10,8 @@
     "sourceMap": true,
     "strict": true,
     "module": "ESNext",
-    "target": "ES2022"
+    "target": "ES2022",
+    "types": ["vitest/globals"]
   },
   "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte"]
 }

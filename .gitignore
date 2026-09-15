@@ -1,6 +1,8 @@
 /bin/
 /frontend/node_modules/
 /internal/web/dist/
+/frontend/coverage/
+/reports/
 .env
 .env.*
 !.env.example

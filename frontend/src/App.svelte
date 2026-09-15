@@ -1,8 +1,11 @@
 <script lang="ts">
   let backendMessage = 'Contacting the Go backend…';
 
-  fetch('/api/status')
-    .then((response) => response.json())
+  fetch('/api/status', { signal: AbortSignal.timeout(5000) })
+    .then((response) => {
+      if (!response.ok) throw new Error(`status request failed: ${response.status}`);
+      return response.json();
+    })
     .then((data: { message: string }) => (backendMessage = data.message))
     .catch(() => (backendMessage = 'Could not reach the Go backend'));
 </script>

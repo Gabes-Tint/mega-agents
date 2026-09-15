@@ -13,6 +13,13 @@ The hook delegates to `make pre-commit`, which runs `secrets-staged`,
 After dependency changes, run `make install` and stage the manifest and lockfile.
 GitHub is not required for these local checks.
 
+`make verify` also runs frontend behavioral tests with coverage, Go handler
+tests with coverage, ESLint, Prettier, Staticcheck, workflow linting, checks for
+focused or skipped tests, and binary/frontend size budgets. `make smoke`
+launches the compiled application and probes the status endpoint and embedded
+page. `make gate-self-test` proves the custom test-policy and size gates reject
+bad fixtures.
+
 ## Remote CI
 
 Pull requests and pushes to main run two independent deterministic jobs:
