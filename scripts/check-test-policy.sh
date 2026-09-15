@@ -2,7 +2,10 @@
 set -euo pipefail
 root=${1:-$(git rev-parse --show-toplevel)}
 
-if rg -n --glob '*.{test,spec}.{js,ts}' '\b(describe|it|test)\.(only|skip|todo)\s*\(' "$root/frontend/src"; then
+if rg -n \
+  --glob '*.test.js' --glob '*.test.ts' \
+  --glob '*.spec.js' --glob '*.spec.ts' \
+  '\b(describe|it|test)\.(only|skip|todo)\s*\(' "$root/frontend/src"; then
   echo 'Focused, skipped, and placeholder frontend tests are not allowed.' >&2
   exit 1
 fi
