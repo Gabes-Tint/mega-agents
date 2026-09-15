@@ -26,13 +26,22 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-          cache: false # No external Go modules/go.sum yet.
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '26.7.0'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: '1.3.9'
+      # Cache downloaded packages; always restore dependencies from the lockfile.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-
       - run: make install
       - run: make verify
 
@@ -47,7 +56,19 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+      # Exact tool-version cache: never reuse binaries from a different toolchain.
+      - name: Restore security tools
+        id: security-tools
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/go/bin/gitleaks
+            ~/go/bin/govulncheck
+          key: security-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod') }}-gitleaks-8.30.0-govulncheck-1.8.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '26.7.0'
@@ -55,6 +76,7 @@ jobs:
         with:
           bun-version: '1.3.9'
       - name: Install security tools
+        if: steps.security-tools.outputs.cache-hit != 'true'
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.0
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
@@ -69,6 +91,11 @@ jobs:
           else
             gitleaks git --redact --no-banner --ignore-gitleaks-allow .
           fi
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-1.3.9-
       - run: make install
       - name: Audit frontend dependencies
         working-directory: frontend

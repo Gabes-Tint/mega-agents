@@ -1,6 +1,24 @@
 .PHONY: build install frontend check dev-frontend clean
 
 .PHONY: setup verify
+.PHONY: pre-commit secrets-staged whitespace-staged verify-staged
+# Run checks in sequence, including when the caller enables parallel Make.
+pre-commit:
+	$(MAKE) secrets-staged
+	$(MAKE) whitespace-staged
+	$(MAKE) verify-staged
+
+secrets-staged:
+	@command -v gitleaks >/dev/null || { echo 'Install gitleaks before committing.' >&2; exit 1; }
+	gitleaks git --pre-commit --staged --redact --no-banner --ignore-gitleaks-allow .
+
+whitespace-staged:
+	git diff --cached --check
+
+# The helper isolates staged files, then runs the normal verification recipe.
+verify-staged:
+	bash scripts/verify-staged.sh
+
 setup:
 	git config core.hooksPath .githooks
 

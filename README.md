@@ -7,6 +7,9 @@ hook. Go, Bun, Make, and Gitleaks must be installed. Run `make verify` for
 local type checks, Go tests, formatting checks, and the complete embedded build.
 The hook scans staged changes with redacted Gitleaks output and checks an
 isolated copy of staged files. It does not install dependencies or contact CI.
+The hook delegates to `make pre-commit`, which runs `secrets-staged`,
+`whitespace-staged`, and `verify-staged` in order. The snapshot helper lives in
+`scripts/verify-staged.sh` and calls `make verify` on the staged copy.
 After dependency changes, run `make install` and stage the manifest and lockfile.
 GitHub is not required for these local checks.
 
@@ -17,6 +20,13 @@ local verification, and **Security** runs redacted secret scanning plus Bun and
 Go vulnerability checks. Security also runs weekly over the full Git history
 and current dependencies. Actions and tool versions are pinned; Dependabot
 proposes weekly GitHub Actions updates. Both jobs must pass before merging.
+
+CI caches Go compilation and modules, Bun package downloads, and pinned security
+tool binaries. Frozen dependency installation and vulnerability scans still run
+on every execution; scan results and generated frontend assets are not cached.
+Verify and Security run concurrently, and superseded runs are cancelled.
+Measure cold and warm GitHub runs before adding more jobs: extra runners also
+add setup costs. Tool-version changes invalidate the security binary cache.
 
 Browser, race, and mutation suites will be added when the corresponding tests
 exist. No placeholder passing jobs stand in for those tests.
