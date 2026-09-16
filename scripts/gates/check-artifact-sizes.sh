@@ -4,7 +4,10 @@ set -euo pipefail
 binary=${1:-bin/mega-agents}
 assets=${2:-internal/web/dist/assets}
 max_binary=${MAX_BINARY_BYTES:-16777216}
-max_javascript=${MAX_JAVASCRIPT_BYTES:-102400}
+# 110 KiB: the graph workspace added an SVG edge layer and node interaction
+# logic on top of the original workspace bundle; re-baselined deliberately in
+# review rather than trimming features.
+max_javascript=${MAX_JAVASCRIPT_BYTES:-112640}
 max_css=${MAX_CSS_BYTES:-51200}
 
 test -f "$binary" || { echo "Missing binary: $binary" >&2; exit 1; }

@@ -792,4 +792,85 @@ describe("graph builder workspace", () => {
     expect(title).not.toBeNull();
     expect(title?.querySelector(".start-flag")).toBeInTheDocument();
   });
+
+  test("connects two top-level boxes with an arrow from properties", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await dropComponent("Tool", 400, 400);
+    await fireEvent.click(screen.getByText("Agent 1"));
+
+    const connect = screen.getByRole("button", { name: "Connect" });
+    await fireEvent.click(connect);
+    expect(connect).toBePressed();
+
+    await fireEvent.click(screen.getByText("Tool 1"));
+
+    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(1);
+    expect(connect).not.toBePressed();
+  });
+
+  test("rejects connecting a box to a node on another level", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    await dropComponent("Agent");
+    const child = screen.getByRole("button", { name: "Agent 1" });
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await fireEvent.click(screen.getByText("Project 1"));
+
+    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(0);
+    expect(child).toBeInTheDocument();
+  });
+
+  test("ignores a second connection attempt for the same pair", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await dropComponent("Tool", 400, 400);
+    await fireEvent.click(screen.getByText("Agent 1"));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(screen.getByText("Tool 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(screen.getByText("Tool 1"));
+
+    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(1);
+  });
+
+  test("ends the arrow at the target box border so the head stays visible", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await dropComponent("Tool", 400, 400);
+    await fireEvent.click(screen.getByText("Agent 1"));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(screen.getByText("Tool 1"));
+
+    // Tool 1 centers at (480, 432); the trimmed line must stop on its top
+    // edge (y = 400) rather than at the hidden center point.
+    const line = canvas().querySelector(".edge-line");
+    expect(line).not.toBeNull();
+    expect(parseFloat(line!.getAttribute("y2") ?? "")).toBeCloseTo(400, 0);
+    const x2 = parseFloat(line!.getAttribute("x2") ?? "");
+    expect(x2).toBeGreaterThan(400);
+    expect(x2).toBeLessThan(560);
+  });
+
+  test("canceling connect mode deselects without drawing an edge", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await dropComponent("Tool", 400, 400);
+
+    const connect = screen.getByRole("button", { name: "Connect" });
+    await fireEvent.click(connect);
+    await fireEvent.click(connect);
+
+    expect(connect).not.toBePressed();
+    await fireEvent.click(screen.getByText("Tool 1"));
+    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(0);
+  });
 });

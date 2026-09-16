@@ -1,5 +1,11 @@
 export type NodeType = "agent" | "tool" | "project";
 
+export interface GraphEdge {
+  id: string;
+  from: string;
+  to: string;
+}
+
 export interface PaletteItem {
   type: NodeType;
   label: string;
@@ -35,7 +41,10 @@ function paletteLabel(type: NodeType): string {
 
 export class GraphStore {
   nodes = $state<GraphNode[]>([]);
+  edges = $state<GraphEdge[]>([]);
   selectedId = $state<string | null>(null);
+  connecting = $state(false);
+  connectFromId = $state<string | null>(null);
 
   get selected(): GraphNode | undefined {
     return this.nodes.find((node) => node.id === this.selectedId);
@@ -122,6 +131,38 @@ export class GraphStore {
       }
     }
     node.start = isStart;
+  }
+
+  startConnect(id: string): void {
+    this.connectFromId = id;
+    this.connecting = true;
+  }
+
+  cancelConnect(): void {
+    this.connecting = false;
+    this.connectFromId = null;
+  }
+
+  // Boxes connect through arrows only within their own level: two top-level
+  // boxes or two children of the same project. Level membership is validated
+  // at creation only; edges follow their endpoints afterward. Any number of
+  // arrows may leave or enter a box, but a pair is connected at most once in
+  // either direction.
+  connect(fromId: string, toId: string): boolean {
+    const from = this.nodes.find((candidate) => candidate.id === fromId);
+    const to = this.nodes.find((candidate) => candidate.id === toId);
+    if (!from || !to || fromId === toId) return false;
+    if ((from.parentId ?? null) !== (to.parentId ?? null)) return false;
+    if (
+      this.edges.some(
+        (edge) =>
+          (edge.from === fromId && edge.to === toId) ||
+          (edge.from === toId && edge.to === fromId),
+      )
+    )
+      return false;
+    this.edges.push({ id: crypto.randomUUID(), from: fromId, to: toId });
+    return true;
   }
 
   hasChildren(id: string): boolean {

@@ -287,6 +287,69 @@ test.describe("graph builder workspace", () => {
       .toBe(true);
   });
 
+  test("draws an arrow between two same-level boxes", async ({ page }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Agent", exact: true }),
+      canvas(page),
+    );
+    // Drop the tool box away from Agent 1 so they do not overlap.
+    const area = await canvas(page).boundingBox();
+    const paletteTool = page.getByRole("button", { name: "Tool", exact: true });
+    const toolBox = await paletteTool.boundingBox();
+    await page.mouse.move(
+      toolBox.x + toolBox.width / 2,
+      toolBox.y + toolBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(area.x + 300, area.y + 100, { steps: 10 });
+    await page.mouse.up();
+    await expect(page.getByRole("button", { name: "Tool 1" })).toBeVisible();
+
+    // Agent 1 is auto-selected by its drop, so it is the arrow source.
+    await page.getByRole("button", { name: "Agent 1" }).click();
+    await page.getByRole("button", { name: "Connect" }).click();
+    await page.getByRole("button", { name: "Tool 1" }).click();
+
+    await expect(page.locator(".edge-line")).toHaveCount(1);
+
+    // Moving a connected box keeps the arrow attached: both endpoints move
+    // with the boxes.
+    const node = page.getByRole("button", { name: "Tool 1" });
+    const before = await node.boundingBox();
+    await page.mouse.move(before.x + before.width / 2, before.y + 30);
+    await page.mouse.down();
+    await page.mouse.move(before.x + 120, before.y + 60, { steps: 8 });
+    await page.mouse.up();
+
+    const line = page.locator(".edge-line");
+    await expect(line).toHaveCount(1);
+    // The arrow tip is trimmed to the tool box's border on the side facing
+    // the agent. The line's x2 is canvas-content space, so convert it with
+    // the canvas box and its scroll offset before comparing.
+    await expect
+      .poll(async () => {
+        const x2 = parseFloat(
+          await line.evaluate((el) => el.getAttribute("x2") ?? "0"),
+        );
+        const canvasBox = await canvas(page).boundingBox();
+        const scrollLeft = await canvas(page).evaluate((el) => el.scrollLeft);
+        const toolBox = await node.boundingBox();
+        const agentBox = await page
+          .getByRole("button", { name: "Agent 1" })
+          .boundingBox();
+        const dx =
+          agentBox.x + agentBox.width / 2 - (toolBox.x + toolBox.width / 2);
+        const dy =
+          agentBox.y + agentBox.height / 2 - (toolBox.y + toolBox.height / 2);
+        const tx = dx === 0 ? Infinity : toolBox.width / 2 / Math.abs(dx);
+        const ty = dy === 0 ? Infinity : toolBox.height / 2 / Math.abs(dy);
+        const tip = toolBox.x + toolBox.width / 2 + dx * Math.min(tx, ty);
+        return Math.abs(canvasBox.x + x2 - scrollLeft - tip) < 3;
+      })
+      .toBe(true);
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {
