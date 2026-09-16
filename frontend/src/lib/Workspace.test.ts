@@ -108,7 +108,7 @@ describe("graph builder workspace", () => {
 
     await dropComponent("Agent");
 
-    expect(screen.getByText("Agent 1")).toHaveStyle({
+    expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
       left: "80px",
       top: "60px",
     });
@@ -404,7 +404,7 @@ describe("graph builder workspace", () => {
 
     expect(canvas()).toContainElement(screen.getByText("Agent 1"));
     // The child renders at its parent-relative position inside the project box.
-    expect(screen.getByText("Agent 1")).toHaveStyle({
+    expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
       left: "100px",
       top: "50px",
     });
@@ -769,5 +769,27 @@ describe("graph builder workspace", () => {
     await fireEvent.click(screen.getByText("Agent 1"));
 
     expect(screen.getByLabelText("Starting point")).toBeChecked();
+  });
+
+  test("renders the node name in a header with a separator below it", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const title = node.querySelector(".node-title");
+    expect(title).toHaveTextContent("Agent 1");
+    expect(node.querySelector(".node-separator")).toBeInTheDocument();
+  });
+
+  test("keeps the start badge inside the header", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const title = node.querySelector(".node-title");
+    expect(title).not.toBeNull();
+    expect(title?.querySelector(".start-flag")).toBeInTheDocument();
   });
 });

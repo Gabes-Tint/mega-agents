@@ -254,6 +254,39 @@ test.describe("graph builder workspace", () => {
     await expect(first).not.toContainText("▶");
   });
 
+  test("styles each node with a title header and separator", async ({
+    page,
+  }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Agent", exact: true }),
+      canvas(page),
+    );
+    const node = page.getByRole("button", { name: "Agent 1" });
+    await expect(node).toBeVisible();
+
+    const title = node.locator(".node-title");
+    await expect(title).toHaveText("Agent 1");
+    const separator = node.locator(".node-separator");
+    await expect(separator).toBeVisible();
+
+    // The separator renders below the header inside the box, leaving room in
+    // the body for nested children.
+    await expect
+      .poll(async () => {
+        const titleBox = await title.boundingBox();
+        const separatorBox = await separator.boundingBox();
+        const nodeBox = await node.boundingBox();
+        if (!titleBox || !separatorBox || !nodeBox) return false;
+        return (
+          separatorBox.y >= titleBox.y + titleBox.height - 1 &&
+          separatorBox.height >= 1 &&
+          nodeBox.height > titleBox.height + separatorBox.height
+        );
+      })
+      .toBe(true);
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {
