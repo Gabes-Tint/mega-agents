@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    canExistTopLevel,
     canHostChild,
     GraphStore,
     PALETTE,
@@ -154,8 +155,10 @@
         );
         return;
       }
-      // Incompatible containers ignore the drop, so the new box lands at
-      // the content position as a top-level box.
+      // A GitHub App cannot exist outside a GitHub box, so such a drop is
+      // rejected outright; incompatible containers otherwise fall through to
+      // a top-level box at the content position.
+      if (!canExistTopLevel(data)) return;
       graph.addNode(data, contentX, contentY);
       return;
     }

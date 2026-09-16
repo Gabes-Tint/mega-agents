@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import { GraphStore } from "./graph.svelte.js";
+  import { GraphStore, isForgeType } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -105,7 +105,7 @@
       >
         Connect
       </button>
-      {#if node.type === "project" || node.type === "gatebase"}
+      {#if node.type === "project"}
         <label>
           Path
           <input
@@ -117,7 +117,7 @@
         </label>
         <Dialog.Trigger class="trigger">Browse…</Dialog.Trigger>
       {/if}
-      {#if node.type === "github" || node.type === "gitlab"}
+      {#if isForgeType(node.type)}
         <label>
           Repository
           <input

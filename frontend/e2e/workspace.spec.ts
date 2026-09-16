@@ -376,37 +376,6 @@ test.describe("graph builder workspace", () => {
     );
   });
 
-  test("nests a component inside a GateBase box", async ({ page }) => {
-    await mouseDrag(
-      page,
-      page.getByRole("button", { name: "GateBase", exact: true }),
-      canvas(page),
-    );
-    const gate = page.getByRole("button", { name: "GateBase 1" });
-    await expect(gate).toBeVisible();
-
-    await mouseDrag(
-      page,
-      page.getByRole("button", { name: "Agent", exact: true }),
-      gate,
-    );
-    const child = page.getByRole("button", { name: "Agent 1" });
-    await expect(child).toBeVisible();
-
-    await expect
-      .poll(async () => {
-        const gateBox = await gate.boundingBox();
-        const childBox = await child.boundingBox();
-        return (
-          childBox.x >= gateBox.x &&
-          childBox.y >= gateBox.y &&
-          childBox.x < gateBox.x + gateBox.width &&
-          childBox.y < gateBox.y + gateBox.height
-        );
-      })
-      .toBe(true);
-  });
-
   test("nests a GitHub App inside a GitHub box and captures its properties", async ({
     page,
   }) => {

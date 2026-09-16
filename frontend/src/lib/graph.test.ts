@@ -2,11 +2,13 @@ import { describe, expect, test } from "vitest";
 import {
   DEFAULT_NODE_HEIGHT,
   DEFAULT_NODE_WIDTH,
+  GIT_BASE_TYPES,
   GraphStore,
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
   PALETTE,
   canHostChild,
+  isForgeType,
   type NodeType,
 } from "./graph.svelte.js";
 
@@ -502,15 +504,6 @@ describe("GraphStore", () => {
     expect(gitlab.name).toBe("GitLab 1");
   });
 
-  test("adds a GateBase node with a default name", () => {
-    const graph = new GraphStore();
-
-    const gate = graph.addNode("gatebase", 0, 0);
-
-    expect(gate.name).toBe("GateBase 1");
-    expect(gate.type).toBe("gatebase");
-  });
-
   test("sets a repository link on a forge box", () => {
     const graph = new GraphStore();
     const node = graph.addNode("github", 0, 0);
@@ -549,14 +542,14 @@ describe("GraphStore", () => {
     expect(graph.nodes[0]?.secretKey).toBeUndefined();
   });
 
-  test("a GateBase hosts nested children like a project", () => {
+  test("a GitHub hosts nested GitHub Apps as a container", () => {
     const graph = new GraphStore();
-    const gate = graph.addNode("gatebase", 100, 80);
+    const github = graph.addNode("github", 100, 80);
 
-    const child = graph.addNode("agent", 120, 100, gate.id);
+    const child = graph.addNode("githubapp", 120, 100, github.id);
 
-    expect(child.parentId).toBe(gate.id);
-    expect(graph.containerAt(110, 90)?.id).toBe(gate.id);
+    expect(child.parentId).toBe(github.id);
+    expect(graph.containerAt(110, 90)?.id).toBe(github.id);
   });
 
   test("adds a GitHub App node with a default name", () => {
@@ -725,12 +718,11 @@ describe("GraphStore", () => {
 });
 
 describe("PALETTE", () => {
-  test("offers the agent, tool, project, gatebase, github, gitlab, and github app components", () => {
+  test("offers the agent, tool, project, github, gitlab, and github app components", () => {
     expect(PALETTE).toEqual([
       { type: "agent", label: "Agent" },
       { type: "tool", label: "Tool" },
       { type: "project", label: "Project" },
-      { type: "gatebase", label: "GateBase" },
       { type: "github", label: "GitHub" },
       { type: "gitlab", label: "GitLab" },
       { type: "githubapp", label: "GitHub App" },
@@ -738,12 +730,22 @@ describe("PALETTE", () => {
   });
 });
 
+describe("GitBase abstraction", () => {
+  test("the GitHub and GitLab controllers derive from GitBase", () => {
+    expect(GIT_BASE_TYPES).toEqual(["github", "gitlab"]);
+    expect(isForgeType("github")).toBe(true);
+    expect(isForgeType("gitlab")).toBe(true);
+    expect(isForgeType("agent")).toBe(false);
+    expect(isForgeType("project")).toBe(false);
+    expect(isForgeType("githubapp")).toBe(false);
+  });
+});
+
 describe("canHostChild", () => {
-  test("containers host every component except the GitHub App", () => {
+  test("projects host every component except the GitHub App", () => {
     expect(canHostChild("project", "agent")).toBe(true);
-    expect(canHostChild("gatebase", "github")).toBe(true);
+    expect(canHostChild("project", "github")).toBe(true);
     expect(canHostChild("project", "githubapp")).toBe(false);
-    expect(canHostChild("gatebase", "githubapp")).toBe(false);
   });
 
   test("a GitHub hosts only GitHub Apps", () => {

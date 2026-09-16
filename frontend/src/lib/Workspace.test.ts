@@ -175,9 +175,6 @@ describe("graph builder workspace", () => {
       screen.getByRole("button", { name: "Project" }),
     );
     expect(palette).toContainElement(
-      screen.getByRole("button", { name: "GateBase" }),
-    );
-    expect(palette).toContainElement(
       screen.getByRole("button", { name: "GitHub" }),
     );
     expect(palette).toContainElement(
@@ -245,26 +242,16 @@ describe("graph builder workspace", () => {
     );
   });
 
-  test("nests a component inside a GateBase box", async () => {
+  test("rejects a GitHub App dropped outside a GitHub box", async () => {
     render(Workspace);
 
-    await dropComponent("GateBase");
+    await dropComponent("GitHub App", 30, 20);
 
-    // GateBase is a container: it offers the folder controls like a project.
-    expect(screen.getByLabelText("Path")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Browse…" })).toBeInTheDocument();
-
-    const dataTransfer = makeDataTransfer();
-    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
-      dataTransfer,
-    });
-    await fireEvent.dragOver(canvas(), {});
-    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
-
-    expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
-      left: "100px",
-      top: "50px",
-    });
+    // A GitHub App cannot exist at the top level: it only lives inside a
+    // GitHub box, so the drop is ignored.
+    expect(
+      screen.queryByRole("button", { name: "GitHub App 1" }),
+    ).not.toBeInTheDocument();
   });
 
   test("adds a node to the canvas when a palette component is dropped", async () => {
@@ -959,13 +946,14 @@ describe("graph builder workspace", () => {
   test("places a rejected palette drop at the exact content position", async () => {
     render(Workspace);
 
-    await dropComponent("Project");
+    await dropComponent("GitHub");
 
-    // A GitHub App is rejected by a project box: it must land at the drop
-    // point as a top-level box, not at parent-relative coordinates.
-    await dropComponent("GitHub App", 100, 50);
+    // GitHub hosts only GitHub Apps: an agent landing on its box falls
+    // through to a top-level box at the drop point (100..190, 50..114 covers
+    // GitHub 1's box at (30, 20)).
+    await dropComponent("Agent", 100, 50);
 
-    expect(screen.getByRole("button", { name: "GitHub App 1" })).toHaveStyle({
+    expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
       left: "100px",
       top: "50px",
     });

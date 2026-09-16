@@ -11,7 +11,7 @@ func workflowBody() string {
 	return `{
 		"name": "issue-to-pull-request",
 		"nodes": [
-			{"id": "n1", "type": "gatebase", "name": "GateBase 1", "x": 30, "y": 20, "w": 160, "h": 64, "path": "/home/user/my-agent"},
+			{"id": "n1", "type": "project", "name": "my-agent", "x": 30, "y": 20, "w": 160, "h": 64, "path": "/home/user/my-agent"},
 			{"id": "n2", "type": "github", "name": "GitHub 1", "x": 400, "y": 300, "w": 160, "h": 64, "repository": "https://github.com/example/project", "secretKey": "secret://github-bot"},
 			{"id": "n3", "type": "githubapp", "name": "GitHub App 1", "x": 10, "y": 10, "w": 160, "h": 64, "parentId": "n2", "appId": "123456", "privateKeyPath": "/home/user/.keys/github-app.pem"}
 		],
@@ -47,20 +47,20 @@ func TestWorkflowYAMLOrdering(t *testing.T) {
 		"apiVersion: megaagents.dev/v1alpha1",
 		"kind: Workflow",
 		"  name: issue-to-pull-request",
-		"  gatebase-1:",
-		"    uses: gatebase@v1",
+		"  my-agent:",
+		"    uses: project@v1",
 		`      path: "/home/user/my-agent"`,
 		"  github-1:",
 		"    uses: github@v1",
 		`      repository: "https://github.com/example/project"`,
 		`      secretKey: "secret://github-bot"`,
-		"  github-app-1:",
-		"    uses: githubapp@v1",
-		"    parent: github-1",
-		`      appId: "123456"`,
-		`      privateKeyPath: "/home/user/.keys/github-app.pem"`,
+		"    children:",
+		"      github-app-1:",
+		"        uses: githubapp@v1",
+		`        appId: "123456"`,
+		`        privateKeyPath: "/home/user/.keys/github-app.pem"`,
 		"    needs:",
-		"      - gatebase-1",
+		"      - my-agent",
 	}
 	for _, want := range expectations {
 		if !strings.Contains(body, want) {
@@ -117,12 +117,12 @@ func TestWorkflowYAMLDefaultsWorkflowName(t *testing.T) {
 func TestWorkflowYAMLResolvesEdgesDeclaredBeforeTheirTarget(t *testing.T) {
 	handler := NewHandler(testAssets())
 
-	// The edge points from the GitHub box (declared first) to the GateBase
+	// The edge points from the GitHub box (declared first) to the project
 	// box (declared last), so identifiers must exist before needs are emitted.
 	response := postWorkflow(t, handler, `{
 		"nodes": [
 			{"id": "n1", "type": "github", "name": "GitHub 1", "x": 0, "y": 0, "w": 160, "h": 64},
-			{"id": "n2", "type": "gatebase", "name": "GateBase 1", "x": 400, "y": 300, "w": 160, "h": 64}
+			{"id": "n2", "type": "project", "name": "my-agent", "x": 400, "y": 300, "w": 160, "h": 64}
 		],
 		"edges": [{"id": "e1", "from": "n1", "to": "n2"}]
 	}`)
@@ -131,7 +131,7 @@ func TestWorkflowYAMLResolvesEdgesDeclaredBeforeTheirTarget(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "  gatebase-1:\n    uses: gatebase@v1\n    needs:\n      - github-1\n") {
+	if !strings.Contains(body, "  my-agent:\n    uses: project@v1\n    needs:\n      - github-1\n") {
 		t.Errorf("expected needs on the later node, got:\n%s", body)
 	}
 }
@@ -211,7 +211,7 @@ func TestWorkflowYAMLQuotesValuesWithSpecialCharacters(t *testing.T) {
 	}
 }
 
-func TestWorkflowYAMLKeepsParentForChildDeclaredFirst(t *testing.T) {
+func TestWorkflowYAMLNestsChildrenInsideParents(t *testing.T) {
 	handler := NewHandler(testAssets())
 
 	response := postWorkflow(t, handler, `{
@@ -224,7 +224,101 @@ func TestWorkflowYAMLKeepsParentForChildDeclaredFirst(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
-	if !strings.Contains(response.Body.String(), "    parent: github-1\n") {
-		t.Errorf("expected parent link for a child declared first, got:\n%s", response.Body.String())
+	body := response.Body.String()
+	if strings.Contains(body, "parent:") {
+		t.Errorf("expected no parent tags, got:\n%s", body)
+	}
+	if !strings.Contains(
+		body,
+		"  github-1:\n    uses: github@v1\n    layout:\n      x: 0\n      y: 0\n      w: 160\n      h: 64\n    children:\n      github-app-1:\n        uses: githubapp@v1\n",
+	) {
+		t.Errorf("expected the app nested inside its GitHub object, got:\n%s", body)
+	}
+}
+
+func TestWorkflowYAMLRejectsGateBaseAsDisplayableType(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	response := postWorkflow(t, handler, `{
+		"nodes": [{"id": "n1", "type": "gatebase", "name": "GateBase 1", "x": 0, "y": 0, "w": 160, "h": 64}]
+	}`)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkflowYAMLRejectsTopLevelGitHubApp(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	response := postWorkflow(t, handler, `{
+		"nodes": [{"id": "n1", "type": "githubapp", "name": "GitHub App 1", "x": 0, "y": 0, "w": 160, "h": 64}]
+	}`)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkflowYAMLRejectsGitHubAppOutsideGitHub(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	response := postWorkflow(t, handler, `{
+		"nodes": [
+			{"id": "n1", "type": "project", "name": "my-agent", "x": 0, "y": 0, "w": 160, "h": 64},
+			{"id": "n2", "type": "githubapp", "name": "GitHub App 1", "x": 10, "y": 10, "w": 160, "h": 64, "parentId": "n1"}
+		]
+	}`)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkflowYAMLNestsForgeInsideProjectWithIndentedConfig(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	response := postWorkflow(t, handler, `{
+		"nodes": [
+			{"id": "n1", "type": "project", "name": "my-agent", "x": 0, "y": 0, "w": 160, "h": 64},
+			{"id": "n2", "type": "gitlab", "name": "GitLab 1", "x": 20, "y": 10, "w": 160, "h": 64, "parentId": "n1", "repository": "https://gitlab.com/example/project", "secretKey": "secret://gitlab-bot"}
+		]
+	}`)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(
+		body,
+		"    children:\n      gitlab-1:\n        uses: gitlab@v1\n        with:\n          repository: \"https://gitlab.com/example/project\"\n",
+	) {
+		t.Errorf("expected forge config indented inside the nested object, got:\n%s", body)
+	}
+}
+
+func TestWorkflowYAMLKeepsNeedsOnNestedNodes(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	// Two GitHub Apps inside one GitHub box are on the same level, so they
+	// may be connected; the nested node must keep its needs entry.
+	response := postWorkflow(t, handler, `{
+		"nodes": [
+			{"id": "n1", "type": "github", "name": "GitHub 1", "x": 0, "y": 0, "w": 160, "h": 64},
+			{"id": "n2", "type": "githubapp", "name": "GitHub App 1", "x": 10, "y": 10, "w": 160, "h": 64, "parentId": "n1"},
+			{"id": "n3", "type": "githubapp", "name": "GitHub App 2", "x": 20, "y": 20, "w": 160, "h": 64, "parentId": "n1"}
+		],
+		"edges": [{"id": "e1", "from": "n2", "to": "n3"}]
+	}`)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(
+		body,
+		"      github-app-2:\n        uses: githubapp@v1\n        needs:\n          - github-app-1\n",
+	) {
+		t.Errorf("expected the nested node to keep its needs, got:\n%s", body)
 	}
 }
