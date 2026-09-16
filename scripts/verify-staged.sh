@@ -14,4 +14,8 @@ for manifest in package.json bun.lock; do
   }
 done
 ln -s "$root/frontend/node_modules" "$snapshot/frontend/node_modules"
-CI_CHANGED_FILES=$(git diff --cached --name-only) make -C "$snapshot" verify
+# The snapshot has no .git directory. Drop hook-injected Git variables so Go's
+# VCS stamping does not read a stale relative GIT_DIR inside the snapshot.
+env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
+  -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+  CI_CHANGED_FILES="$(git diff --cached --name-only)" make -C "$snapshot" verify
