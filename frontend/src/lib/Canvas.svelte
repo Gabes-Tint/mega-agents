@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    canHostChild,
     GraphStore,
     PALETTE,
     type GraphNode,
@@ -143,16 +144,18 @@
     const contentY = event.clientY - rect.top + scrollTop;
     const data = event.dataTransfer?.getData("text/plain") ?? "";
     if (isComponentType(data)) {
-      const project = graph.projectAt(contentX, contentY);
-      if (project) {
+      const container = graph.containerAt(contentX, contentY);
+      if (container && canHostChild(container.type, data)) {
         graph.addNode(
           data,
-          contentX - project.x,
-          contentY - project.y,
-          project.id,
+          contentX - container.x,
+          contentY - container.y,
+          container.id,
         );
         return;
       }
+      // Incompatible containers ignore the drop, so the new box lands at
+      // the content position as a top-level box.
       graph.addNode(data, contentX, contentY);
       return;
     }
@@ -162,43 +165,56 @@
       const grab = dragState;
       dragState = null;
       if (!node || !grab || grab.id !== id) return;
-      const project = graph.projectAt(contentX, contentY);
-      if (
-        node.parentId === undefined &&
-        project &&
-        project.id !== id &&
-        !graph.hasChildren(id)
-      ) {
-        graph.attachToProject(
-          id,
-          project.id,
-          contentX - grab.dx,
-          contentY - grab.dy,
-        );
-        return;
-      }
-      if (node.parentId) {
-        const parent = nodeById(node.parentId);
-        if (parent && project && project.id === parent.id) {
-          graph.moveNode(
+      const container = graph.containerAt(contentX, contentY);
+      if (node.parentId === undefined) {
+        if (
+          container &&
+          container.id !== id &&
+          !graph.hasChildren(id) &&
+          canHostChild(container.type, node.type)
+        ) {
+          graph.attachToContainer(
             id,
-            contentX - grab.dx - parent.x,
-            contentY - grab.dy - parent.y,
-          );
-        } else if (project) {
-          // Re-parenting to another top-level project stays one level deep.
-          graph.attachToProject(
-            id,
-            project.id,
+            container.id,
             contentX - grab.dx,
             contentY - grab.dy,
           );
-        } else {
-          graph.detachNode(id, contentX - grab.dx, contentY - grab.dy);
+          return;
         }
+        graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
         return;
       }
-      graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
+      const parent = nodeById(node.parentId);
+      if (!parent) {
+        graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
+        return;
+      }
+      if (container && container.id === parent.id) {
+        graph.moveNode(
+          id,
+          contentX - grab.dx - parent.x,
+          contentY - grab.dy - parent.y,
+        );
+      } else if (container && canHostChild(container.type, node.type)) {
+        // Re-parenting to another compatible container stays one level deep.
+        graph.attachToContainer(
+          id,
+          container.id,
+          contentX - grab.dx,
+          contentY - grab.dy,
+        );
+      } else if (container) {
+        // An incompatible target container keeps the box in its own parent,
+        // repositioned under the pointer.
+        graph.moveNode(
+          id,
+          contentX - grab.dx - parent.x,
+          contentY - grab.dy - parent.y,
+        );
+      } else {
+        graph.detachNode(id, contentX - grab.dx, contentY - grab.dy);
+      }
+      return;
     }
   }
 </script>

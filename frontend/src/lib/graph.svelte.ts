@@ -1,5 +1,5 @@
 export type NodeType =
-  "agent" | "tool" | "project" | "gatebase" | "github" | "gitlab";
+  "agent" | "tool" | "project" | "gatebase" | "github" | "gitlab" | "githubapp";
 
 export interface GraphEdge {
   id: string;
@@ -25,6 +25,8 @@ export interface GraphNode {
   path?: string;
   repository?: string;
   secretKey?: string;
+  appId?: string;
+  privateKeyPath?: string;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -39,13 +41,25 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "gatebase", label: "GateBase" },
   { type: "github", label: "GitHub" },
   { type: "gitlab", label: "GitLab" },
+  { type: "githubapp", label: "GitHub App" },
 ];
 
 // Boxes that can host nested children one level deep.
-const CONTAINER_TYPES: readonly NodeType[] = ["project", "gatebase"];
+const CONTAINER_TYPES: readonly NodeType[] = ["project", "gatebase", "github"];
 
 export function isContainerType(type: NodeType): boolean {
   return CONTAINER_TYPES.includes(type);
+}
+
+// General containers accept every component except the GitHub App, which
+// nests only inside a GitHub controller; a GitHub hosts nothing else.
+export function canHostChild(
+  parentType: NodeType,
+  childType: NodeType,
+): boolean {
+  if (childType === "githubapp") return parentType === "github";
+  if (parentType === "github") return false;
+  return isContainerType(parentType);
 }
 
 function paletteLabel(type: NodeType): string {
@@ -65,6 +79,13 @@ export class GraphStore {
 
   addNode(type: NodeType, x: number, y: number, parentId?: string): GraphNode {
     const count = this.nodes.filter((node) => node.type === type).length + 1;
+    let parent: GraphNode | undefined;
+    if (parentId)
+      parent = this.nodes.find((candidate) => candidate.id === parentId);
+    // An incompatible parent is ignored rather than rejected so the palette
+    // drop falls through to a top-level box.
+    const effectiveParent =
+      parent && canHostChild(parent.type, type) ? parentId : undefined;
     const node: GraphNode = {
       id: crypto.randomUUID(),
       type,
@@ -73,7 +94,7 @@ export class GraphStore {
       y,
       w: DEFAULT_NODE_WIDTH,
       h: DEFAULT_NODE_HEIGHT,
-      parentId,
+      parentId: effectiveParent,
     };
     this.nodes.push(node);
     this.selectedId = node.id;
@@ -94,7 +115,7 @@ export class GraphStore {
     }
   }
 
-  attachToProject(
+  attachToContainer(
     id: string,
     parentId: string,
     absoluteX: number,
@@ -107,8 +128,10 @@ export class GraphStore {
       !parent ||
       parentId === id ||
       // Nesting is one level deep: neither the host nor the incoming box may
-      // already participate in a parent-child relationship.
+      // already participate in a parent-child relationship, and the child
+      // type must be allowed inside this container.
       parent.parentId !== undefined ||
+      !canHostChild(parent.type, node.type) ||
       this.hasChildren(id)
     )
       return;
@@ -185,7 +208,7 @@ export class GraphStore {
   // Topmost (last added) top-level container whose box contains the content
   // point; only top-level containers can host children because nesting is
   // one level deep.
-  projectAt(x: number, y: number): GraphNode | undefined {
+  containerAt(x: number, y: number): GraphNode | undefined {
     for (let index = this.nodes.length - 1; index >= 0; index--) {
       const node = this.nodes[index];
       if (
@@ -237,5 +260,15 @@ export class GraphStore {
   setSecretKey(id: string, secretKey: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node.secretKey = secretKey;
+  }
+
+  setAppId(id: string, appId: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.appId = appId;
+  }
+
+  setPrivateKeyPath(id: string, privateKeyPath: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.privateKeyPath = privateKeyPath;
   }
 }
