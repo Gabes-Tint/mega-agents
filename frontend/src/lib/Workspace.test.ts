@@ -75,6 +75,90 @@ async function dropComponent(label: string, clientX = 30, clientY = 20) {
 }
 
 describe("graph builder workspace", () => {
+  test("downloads the workflow YAML from the toolbar", async () => {
+    const fetchJson = () =>
+      Promise.resolve(
+        new Response("apiVersion: megaagents.dev/v1alpha1\n", {
+          headers: {
+            "content-type": "application/x-yaml",
+            "content-disposition":
+              'attachment; filename="issue-to-pull-request.yaml"',
+          },
+        }),
+      );
+    const fetchMock = vi.fn(fetchJson);
+    vi.stubGlobal("fetch", fetchMock);
+    const createObjectURL = vi.fn(() => "blob:yaml");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const clicks: HTMLAnchorElement[] = [];
+    const originalCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag) => {
+      const element = originalCreate(tag);
+      if (tag === "a") clicks.push(element as HTMLAnchorElement);
+      return element;
+    });
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Download YAML" }),
+    );
+
+    const call = fetchMock.mock.calls.at(-1) as unknown as
+      [string, RequestInit] | undefined;
+    const request = call?.[1];
+    expect(request?.method).toBe("POST");
+    const body = JSON.parse(String(request?.body)) as {
+      nodes: Array<{ name: string }>;
+      edges: unknown[];
+    };
+    expect(body.nodes.map((node) => node.name)).toEqual(["Agent 1"]);
+    expect(body.edges).toEqual([]);
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(clicks[0]?.download).toBe("issue-to-pull-request.yaml");
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  test("surfaces an export error from the backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response("unknown component type", { status: 400 }),
+      ),
+    );
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Download YAML" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("unknown component type")).toBeInTheDocument(),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("surfaces a backend outage while exporting", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new Error("offline"))),
+    );
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Download YAML" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("Cannot reach the backend")).toBeInTheDocument(),
+    );
+    vi.unstubAllGlobals();
+  });
+
   test("lists the draggable components in the left palette", () => {
     render(Workspace);
 
