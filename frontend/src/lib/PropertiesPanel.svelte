@@ -86,6 +86,15 @@
           oninput={(event) => graph.rename(node.id, event.currentTarget.value)}
         />
       </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={node.start ?? false}
+          onchange={(event) =>
+            graph.setStart(node.id, event.currentTarget.checked)}
+        />
+        Starting point
+      </label>
       {#if node.type === "project"}
         <label>
           Path

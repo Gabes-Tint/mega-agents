@@ -180,6 +180,9 @@
       onclick={() => graph.select(node.id)}
     >
       {node.name}
+      {#if node.start}
+        <span class="start-flag" aria-hidden="true">▶</span>
+      {/if}
       <span
         class="resize-handle"
         aria-hidden="true"
@@ -228,6 +231,11 @@
     text-align: left;
     cursor: pointer;
     box-shadow: 0 1px 2px rgb(23 52 44 / 0.12);
+  }
+
+  .start-flag {
+    color: #ff3e00;
+    margin-left: 0.35rem;
   }
 
   .resize-handle {

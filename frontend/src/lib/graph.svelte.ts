@@ -14,6 +14,7 @@ export interface GraphNode {
   w: number;
   h: number;
   parentId?: string;
+  start?: boolean;
   path?: string;
 }
 
@@ -90,10 +91,13 @@ export class GraphStore {
     )
       return;
     // Children live in their parent's coordinate space, so the content-space
-    // drop position converts to parent-relative coordinates here.
+    // drop position converts to parent-relative coordinates here. A flagged
+    // start point cannot cross containers without breaking the single-start
+    // rule, so it arrives unflagged.
     node.parentId = parentId;
     node.x = absoluteX - parent.x;
     node.y = absoluteY - parent.y;
+    node.start = false;
   }
 
   detachNode(id: string, absoluteX: number, absoluteY: number): void {
@@ -102,6 +106,22 @@ export class GraphStore {
     node.parentId = undefined;
     node.x = absoluteX;
     node.y = absoluteY;
+    node.start = false;
+  }
+
+  // Siblings are nodes sharing the same parent (top-level nodes share the
+  // implicit canvas root), so at most one sibling carries the start flag.
+  setStart(id: string, isStart: boolean): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    if (isStart) {
+      for (const candidate of this.nodes) {
+        if (candidate.id !== id && candidate.start) {
+          if (candidate.parentId === node.parentId) candidate.start = false;
+        }
+      }
+    }
+    node.start = isStart;
   }
 
   hasChildren(id: string): boolean {
