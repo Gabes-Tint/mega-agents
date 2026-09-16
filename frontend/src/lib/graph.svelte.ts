@@ -11,8 +11,15 @@ export interface GraphNode {
   name: string;
   x: number;
   y: number;
+  w: number;
+  h: number;
   path?: string;
 }
+
+export const DEFAULT_NODE_WIDTH = 160;
+export const DEFAULT_NODE_HEIGHT = 64;
+export const MIN_NODE_WIDTH = 120;
+export const MIN_NODE_HEIGHT = 48;
 
 export const PALETTE: readonly PaletteItem[] = [
   { type: "agent", label: "Agent" },
@@ -40,6 +47,8 @@ export class GraphStore {
       name: `${paletteLabel(type)} ${count}`,
       x,
       y,
+      w: DEFAULT_NODE_WIDTH,
+      h: DEFAULT_NODE_HEIGHT,
     };
     this.nodes.push(node);
     this.selectedId = node.id;
@@ -55,6 +64,14 @@ export class GraphStore {
     if (node) {
       node.x = x;
       node.y = y;
+    }
+  }
+
+  resizeNode(id: string, w: number, h: number): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) {
+      node.w = Math.max(MIN_NODE_WIDTH, w);
+      node.h = Math.max(MIN_NODE_HEIGHT, h);
     }
   }
 

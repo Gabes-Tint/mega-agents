@@ -248,6 +248,143 @@ describe("graph builder workspace", () => {
     expect(node).toHaveStyle({ left: "30px", top: "20px" });
   });
 
+  test("renders a resize handle on the dropped node", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+
+    expect(node.querySelector(".resize-handle")).toBeInTheDocument();
+  });
+
+  test("resizes a node by dragging its handle", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const handle = node.querySelector(".resize-handle");
+    if (!handle) throw new Error("resize handle missing");
+
+    await fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    await fireEvent.pointerMove(window, { clientX: 250, clientY: 140 });
+    await fireEvent.pointerUp(window);
+
+    expect(node).toHaveStyle({ width: "210px", height: "104px" });
+  });
+
+  test("resizing keeps the box dimensions above their minimums", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const handle = node.querySelector(".resize-handle");
+    if (!handle) throw new Error("resize handle missing");
+
+    await fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    await fireEvent.pointerMove(window, { clientX: 20, clientY: 20 });
+    await fireEvent.pointerUp(window);
+
+    expect(node).toHaveStyle({ width: "120px", height: "48px" });
+  });
+
+  test("resizing a node keeps its size when it is later moved", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const handle = node.querySelector(".resize-handle");
+    if (!handle) throw new Error("resize handle missing");
+
+    await fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    await fireEvent.pointerMove(window, { clientX: 250, clientY: 140 });
+    await fireEvent.pointerUp(window);
+
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(node, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 40, clientY: 30 });
+
+    expect(node).toHaveStyle({ width: "210px", height: "104px" });
+    expect(node).toHaveStyle({ left: "40px", top: "30px" });
+  });
+
+  test("selects the node when its resize handle is pressed", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await dropComponent("Tool");
+    await fireEvent.click(screen.getByText("Tool 1"));
+
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const handle = node.querySelector(".resize-handle");
+    if (!handle) throw new Error("resize handle missing");
+
+    await fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    await fireEvent.pointerUp(window);
+
+    expect(node).toBePressed();
+  });
+
+  test("ignores resize presses that are not the primary button", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const handle = node.querySelector(".resize-handle");
+    if (!handle) throw new Error("resize handle missing");
+
+    await fireEvent.pointerDown(handle, {
+      button: 2,
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    await fireEvent.pointerMove(window, { clientX: 260, clientY: 150 });
+    await fireEvent.pointerUp(window);
+
+    expect(node).toHaveStyle({ width: "160px", height: "64px" });
+  });
+
+  test("ends a resize gesture when the pointer is cancelled", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const handle = node.querySelector(".resize-handle");
+    if (!handle) throw new Error("resize handle missing");
+
+    await fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    await fireEvent.pointerMove(window, { clientX: 230, clientY: 120 });
+    await fireEvent.pointerCancel(window);
+    await fireEvent.pointerMove(window, { clientX: 300, clientY: 200 });
+
+    expect(node).toHaveStyle({ width: "190px", height: "84px" });
+  });
+
   test("updates the node label when the name property is edited", async () => {
     render(Workspace);
 
