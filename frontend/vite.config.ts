@@ -1,5 +1,5 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig } from "vitest/config";
+import { defaultExclude, defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [svelte()],
@@ -9,6 +9,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     testTimeout: 5000,
+    // Browser suites live in e2e/ and run via `bun run e2e` (Playwright).
+    exclude: [...defaultExclude, "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
@@ -29,7 +31,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:8080",
+      "/api": process.env.MEGA_AGENTS_API ?? "http://localhost:8080",
     },
   },
 });

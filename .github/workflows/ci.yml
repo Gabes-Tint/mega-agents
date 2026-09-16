@@ -57,6 +57,21 @@ jobs:
         run: make gate-self-test
       - name: Smoke test compiled application
         run: make smoke
+      # Browser suite for drag-and-drop, which jsdom cannot exercise. Cache
+      # keyed on the lockfile so a dependency bump re-downloads the browser.
+      - name: Restore Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('frontend/bun.lock') }}
+      - name: Install Playwright browsers
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: bunx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Browser end-to-end tests
+        run: bun run e2e
+        working-directory: frontend
 
   security:
     name: Security

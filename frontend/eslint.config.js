@@ -8,7 +8,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   ...svelte.configs["flat/recommended"],
   {
-    files: ["**/*.svelte"],
+    files: ["**/*.svelte", "**/*.svelte.ts", "**/*.svelte.js"],
     languageOptions: {
       parserOptions: {
         parser: tseslint.parser,
@@ -19,8 +19,16 @@ export default tseslint.config(
     languageOptions: {
       globals: {
         AbortSignal: "readonly",
+        crypto: "readonly",
         document: "readonly",
+        DragEvent: "readonly",
+        Event: "readonly",
+        EventTarget: "readonly",
         fetch: "readonly",
+        File: "readonly",
+        HTMLButtonElement: "readonly",
+        HTMLDivElement: "readonly",
+        HTMLInputElement: "readonly",
       },
     },
   },

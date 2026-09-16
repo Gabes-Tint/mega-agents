@@ -60,6 +60,11 @@ changing dependencies, test volume, runners, or cache configuration. Keep the
 local hook near its current duration so agents receive feedback before pushing,
 while leaving expensive and feed-dependent checks in remote or scheduled CI.
 
+The measurements above predate the browser smoke tests joining the Verify job
+(September 15, 2026). The three Playwright specs run in about 2 seconds locally
+with a cached browser; a cache miss adds the browser download. Re-measure the
+Verify duration once this change runs in CI.
+
 ## Build, quality, and tests
 
 | Status | Guardrail | Tools | Where | Current state |
@@ -75,7 +80,7 @@ while leaving expensive and feed-dependent checks in remote or scheduled CI.
 | ✅ | Svelte component tests | Vitest, Testing Library | Pre-commit + required CI | Success and failure states are tested |
 | 🟡 | API contract tests | Go and Svelte behavioral tests | Pre-commit + required CI | Not green because each side tests its own response assumptions; there is no shared schema that can detect contract drift automatically |
 | 🟡 | Compiled-application smoke test | Shell, curl | Required CI only | Not green because it probes the real binary and embedded page over HTTP but does not exercise them in a browser |
-| ⬜ | Browser smoke tests | Playwright | Planned required CI | Not green because the application has no critical browser workflow yet; adding Playwright now would add setup cost without meaningful coverage |
+| ✅ | Browser smoke tests | Playwright | Required CI only | Real-mouse drag-and-drop specs (palette drop, node move, scrolled-canvas placement) run in the required Verify job; jsdom cannot exercise the HTML5 drag pipeline, so the browser suite covers what component tests cannot |
 | ⬜ | Go fuzz tests | `go test -fuzz` | Planned scheduled CI | Not green because the current API has no complex parser or untrusted structured input that would provide a valuable fuzz target |
 | 🟡 | Coverage thresholds | Go coverage, Vitest V8 coverage | Pre-commit + required CI | Not green because the 80% floor covers backend application and tested frontend source, but there is no changed-code coverage policy |
 | ⬜ | Mutation testing | Gremlins, Stryker | Planned scheduled CI | Not green because the test suite is still small; mutation runtime and maintenance are not justified until more domain behavior exists |

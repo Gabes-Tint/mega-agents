@@ -1,5 +1,7 @@
 <script lang="ts">
-  let backendMessage = 'Contacting the Go backend…';
+  import Workspace from "./lib/Workspace.svelte";
+
+  let backendMessage = $state('Contacting the Go backend…');
 
   fetch('/api/status', { signal: AbortSignal.timeout(5000) })
     .then((response) => {
@@ -10,10 +12,11 @@
     .catch(() => (backendMessage = 'Could not reach the Go backend'));
 </script>
 
-<main>
+<header>
   <h1>Mega Agents</h1>
   <p>{backendMessage}</p>
-</main>
+</header>
+<Workspace />
 
 <style>
   :global(body) {
@@ -23,14 +26,30 @@
     color: #17342c;
   }
 
-  main {
-    min-height: 100vh;
-    display: grid;
-    place-content: center;
-    text-align: center;
+  :global(#app) {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #d5e0db;
+    background: #ffffff;
   }
 
   h1 {
+    margin: 0;
+    font-size: 1.1rem;
     color: #ff3e00;
+  }
+
+  header p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #5b7a71;
   }
 </style>

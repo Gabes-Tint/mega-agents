@@ -1,0 +1,17 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  entrypoint = "./bin/mega-agents"
+  cmd = "go build -trimpath -o bin/mega-agents ."
+  delay = 500
+  exclude_dir = ["frontend", "bin", "docs", "reports", "scripts", "tmp", "testdata", "internal/web/dist"]
+  include_ext = ["go"]
+  send_interrupt = true
+  stop_on_error = true
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true
