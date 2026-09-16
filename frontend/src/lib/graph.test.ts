@@ -486,6 +486,73 @@ describe("GraphStore", () => {
     expect(graph.edges).toHaveLength(0);
   });
 
+  test("adds GitHub and GitLab nodes with default names", () => {
+    const graph = new GraphStore();
+
+    const github = graph.addNode("github", 0, 0);
+    const gitlab = graph.addNode("gitlab", 400, 400);
+
+    expect(github.name).toBe("GitHub 1");
+    expect(gitlab.name).toBe("GitLab 1");
+  });
+
+  test("adds a GateBase node with a default name", () => {
+    const graph = new GraphStore();
+
+    const gate = graph.addNode("gatebase", 0, 0);
+
+    expect(gate.name).toBe("GateBase 1");
+    expect(gate.type).toBe("gatebase");
+  });
+
+  test("sets a repository link on a forge box", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("github", 0, 0);
+
+    graph.setRepository(node.id, "https://github.com/example/project");
+
+    expect(graph.nodes[0]?.repository).toBe(
+      "https://github.com/example/project",
+    );
+  });
+
+  test("setting a repository on an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("github", 0, 0);
+
+    graph.setRepository("not-a-node", "https://github.com/example/project");
+
+    expect(graph.nodes[0]?.repository).toBeUndefined();
+  });
+
+  test("sets a secret key reference on a forge box", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("gitlab", 0, 0);
+
+    graph.setSecretKey(node.id, "secret://gitlab-bot");
+
+    expect(graph.nodes[0]?.secretKey).toBe("secret://gitlab-bot");
+  });
+
+  test("setting a secret key on an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("gitlab", 0, 0);
+
+    graph.setSecretKey("not-a-node", "secret://gitlab-bot");
+
+    expect(graph.nodes[0]?.secretKey).toBeUndefined();
+  });
+
+  test("a GateBase hosts nested children like a project", () => {
+    const graph = new GraphStore();
+    const gate = graph.addNode("gatebase", 100, 80);
+
+    const child = graph.addNode("agent", 120, 100, gate.id);
+
+    expect(child.parentId).toBe(gate.id);
+    expect(graph.projectAt(110, 90)?.id).toBe(gate.id);
+  });
+
   test("moving a project carries its children along", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 30, 20);
@@ -557,11 +624,14 @@ describe("GraphStore", () => {
 });
 
 describe("PALETTE", () => {
-  test("offers the agent, tool, and project components", () => {
+  test("offers the agent, tool, project, gatebase, github, and gitlab components", () => {
     expect(PALETTE).toEqual([
       { type: "agent", label: "Agent" },
       { type: "tool", label: "Tool" },
       { type: "project", label: "Project" },
+      { type: "gatebase", label: "GateBase" },
+      { type: "github", label: "GitHub" },
+      { type: "gitlab", label: "GitLab" },
     ]);
   });
 });

@@ -1,4 +1,5 @@
-export type NodeType = "agent" | "tool" | "project";
+export type NodeType =
+  "agent" | "tool" | "project" | "gatebase" | "github" | "gitlab";
 
 export interface GraphEdge {
   id: string;
@@ -22,6 +23,8 @@ export interface GraphNode {
   parentId?: string;
   start?: boolean;
   path?: string;
+  repository?: string;
+  secretKey?: string;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -33,7 +36,17 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "agent", label: "Agent" },
   { type: "tool", label: "Tool" },
   { type: "project", label: "Project" },
+  { type: "gatebase", label: "GateBase" },
+  { type: "github", label: "GitHub" },
+  { type: "gitlab", label: "GitLab" },
 ];
+
+// Boxes that can host nested children one level deep.
+const CONTAINER_TYPES: readonly NodeType[] = ["project", "gatebase"];
+
+export function isContainerType(type: NodeType): boolean {
+  return CONTAINER_TYPES.includes(type);
+}
 
 function paletteLabel(type: NodeType): string {
   return PALETTE.find((item) => item.type === type)?.label ?? type;
@@ -169,15 +182,15 @@ export class GraphStore {
     return this.nodes.some((candidate) => candidate.parentId === id);
   }
 
-  // Topmost (last added) top-level project whose box contains the content
-  // point; only top-level projects can host children because nesting is one
-  // level deep.
+  // Topmost (last added) top-level container whose box contains the content
+  // point; only top-level containers can host children because nesting is
+  // one level deep.
   projectAt(x: number, y: number): GraphNode | undefined {
     for (let index = this.nodes.length - 1; index >= 0; index--) {
       const node = this.nodes[index];
       if (
         node &&
-        node.type === "project" &&
+        isContainerType(node.type) &&
         node.parentId === undefined &&
         x >= node.x &&
         x < node.x + node.w &&
@@ -214,5 +227,15 @@ export class GraphStore {
   setPath(id: string, path: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node.path = path;
+  }
+
+  setRepository(id: string, repository: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.repository = repository;
+  }
+
+  setSecretKey(id: string, secretKey: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.secretKey = secretKey;
   }
 }
