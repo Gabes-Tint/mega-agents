@@ -3,7 +3,7 @@ STATICCHECK := $(GO_TOOL_BIN)/staticcheck
 ACTIONLINT := $(GO_TOOL_BIN)/actionlint
 AIR := $(GO_TOOL_BIN)/air
 
-.PHONY: build install frontend check dev dev-frontend clean agent-eval
+.PHONY: build install frontend check dev dev-frontend e2e clean agent-eval
 
 .PHONY: setup verify gates
 .PHONY: pre-commit secrets-staged whitespace-staged verify-staged
@@ -116,6 +116,9 @@ dev-frontend:
 
 dev:
 	bash scripts/dev.sh
+
+e2e:
+	cd frontend && bun run e2e
 
 clean:
 	go clean
