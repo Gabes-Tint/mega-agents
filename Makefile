@@ -1,8 +1,9 @@
 GO_TOOL_BIN := $(shell go env GOPATH)/bin
 STATICCHECK := $(GO_TOOL_BIN)/staticcheck
 ACTIONLINT := $(GO_TOOL_BIN)/actionlint
+AIR := $(GO_TOOL_BIN)/air
 
-.PHONY: build install frontend check dev-frontend clean agent-eval
+.PHONY: build install frontend check dev dev-frontend clean agent-eval
 
 .PHONY: setup verify gates
 .PHONY: pre-commit secrets-staged whitespace-staged verify-staged
@@ -101,6 +102,7 @@ install:
 	cd frontend && bun install --frozen-lockfile
 	@test -x $(STATICCHECK) || go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
 	@test -x $(ACTIONLINT) || go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+	@test -x $(AIR) || go install github.com/air-verse/air@v1.67.4
 
 frontend: install
 	cd frontend && bun run build
@@ -111,6 +113,9 @@ check:
 
 dev-frontend:
 	cd frontend && bun run dev
+
+dev:
+	bash scripts/dev.sh
 
 clean:
 	go clean
