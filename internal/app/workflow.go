@@ -47,7 +47,6 @@ var knownComponentTypes = map[string]bool{
 	"agent":     true,
 	"tool":      true,
 	"project":   true,
-	"gatebase":  true,
 	"github":    true,
 	"gitlab":    true,
 	"githubapp": true,
@@ -97,10 +96,106 @@ func yamlString(value string) string {
 	return fmt.Sprintf("%q", value)
 }
 
+// gitBase is the code-level abstraction the GitHub and GitLab components
+// derive from. It is not a displayable component type; both forge controllers
+// emit their configuration through it to avoid duplicated serialization.
+type gitBase struct {
+	Repository string
+	SecretKey  string
+}
+
+func (base gitBase) withLines(indent string) []string {
+	var with []string
+	if base.Repository != "" {
+		with = append(with, fmt.Sprintf("%srepository: %s", indent, yamlString(base.Repository)))
+	}
+	if base.SecretKey != "" {
+		with = append(with, fmt.Sprintf("%ssecretKey: %s", indent, yamlString(base.SecretKey)))
+	}
+	return with
+}
+
+func gitBaseFor(node WorkflowNodeInput) gitBase {
+	return gitBase{Repository: node.Repository, SecretKey: node.SecretKey}
+}
+
+type workflowEmitter struct {
+	request          WorkflowRequest
+	identifierByNode map[string]string
+	childrenOf       map[string][]WorkflowNodeInput
+}
+
+func (emitter *workflowEmitter) emitNode(
+	builder *strings.Builder,
+	node WorkflowNodeInput,
+	identifier string,
+	indent string,
+) {
+	builder.WriteString(fmt.Sprintf("%s%s:\n", indent, identifier))
+	builder.WriteString(fmt.Sprintf("%s  uses: %s@v1\n", indent, node.Type))
+	var needs []string
+	for _, edge := range emitter.request.Edges {
+		if edge.To == node.ID {
+			needs = append(needs, emitter.identifierByNode[edge.From])
+		}
+	}
+	if len(needs) > 0 {
+		builder.WriteString(fmt.Sprintf("%s  needs:\n", indent))
+		for _, target := range needs {
+			builder.WriteString(fmt.Sprintf("%s    - %s\n", indent, target))
+		}
+	}
+	if node.Start {
+		builder.WriteString(fmt.Sprintf("%s  start: true\n", indent))
+	}
+	var with []string
+	if node.Type == "github" || node.Type == "gitlab" {
+		// GitHub and GitLab derive their configuration from gitBase; the
+		// with entries indent two spaces past the node's own keys.
+		with = append(with, gitBaseFor(node).withLines(indent+"    ")...)
+	}
+	if node.Path != "" {
+		with = append(with, fmt.Sprintf("%s    path: %s", indent, yamlString(node.Path)))
+	}
+	if node.AppID != "" {
+		with = append(with, fmt.Sprintf("%s    appId: %s", indent, yamlString(node.AppID)))
+	}
+	if node.PrivateKeyPath != "" {
+		with = append(with, fmt.Sprintf("%s    privateKeyPath: %s", indent, yamlString(node.PrivateKeyPath)))
+	}
+	if len(with) > 0 {
+		builder.WriteString(fmt.Sprintf("%s  with:\n", indent))
+		for _, line := range with {
+			builder.WriteString(line)
+			builder.WriteString("\n")
+		}
+	}
+	builder.WriteString(fmt.Sprintf("%s  layout:\n", indent))
+	builder.WriteString(fmt.Sprintf("%s    x: %g\n", indent, node.X))
+	builder.WriteString(fmt.Sprintf("%s    y: %g\n", indent, node.Y))
+	builder.WriteString(fmt.Sprintf("%s    w: %g\n", indent, node.W))
+	builder.WriteString(fmt.Sprintf("%s    h: %g\n", indent, node.H))
+	children := emitter.childrenOf[node.ID]
+	if len(children) > 0 {
+		// The children mapping is two spaces deeper than its parent node, so
+		// child objects indent one nesting level further in.
+		builder.WriteString(fmt.Sprintf("%s  children:\n", indent))
+		for _, child := range children {
+			emitter.emitNode(
+				builder,
+				child,
+				emitter.identifierByNode[child.ID],
+				indent+"    ",
+			)
+		}
+	}
+}
+
 // BuildWorkflowYAML serializes the graph deterministically: identifiers are
-// assigned in a first pass so needs, parent links, and edge endpoints resolve
-// regardless of declaration order, while nodes keep their input order.
-// Secrets are exported as credential references only.
+// assigned in a first pass so needs and containment resolve regardless of
+// declaration order, while nodes keep their input order. Contained boxes are
+// serialized as child objects inside their parent instead of using a parent
+// tag. Secrets are exported as credential references only.
 func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
 	if len(request.Nodes) == 0 {
 		return "", fmt.Errorf("no nodes to export")
@@ -111,18 +206,40 @@ func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
 		}
 	}
 	identifiers := newIdentifierSet()
-	nodeIDs := make(map[string]bool, len(request.Nodes))
-	identifierByNodeID := make(map[string]string, len(request.Nodes))
+	nodeByID := make(map[string]WorkflowNodeInput, len(request.Nodes))
+	identifierByNode := make(map[string]string, len(request.Nodes))
 	for _, node := range request.Nodes {
-		if nodeIDs[node.ID] {
+		if nodeByID[node.ID].Type != "" {
 			return "", fmt.Errorf("duplicate node id %q", node.ID)
 		}
-		nodeIDs[node.ID] = true
-		identifierByNodeID[node.ID] = identifiers.slugIdentifier(node.Name)
+		nodeByID[node.ID] = node
+		identifierByNode[node.ID] = identifiers.slugIdentifier(node.Name)
 	}
 	for _, edge := range request.Edges {
-		if !nodeIDs[edge.From] || !nodeIDs[edge.To] {
+		_, fromOK := identifierByNode[edge.From]
+		_, toOK := identifierByNode[edge.To]
+		if !fromOK || !toOK {
 			return "", fmt.Errorf("edge references an unknown node")
+		}
+	}
+	childrenOf := make(map[string][]WorkflowNodeInput, len(request.Nodes))
+	for _, node := range request.Nodes {
+		if node.ParentID == "" {
+			continue
+		}
+		parent, ok := nodeByID[node.ParentID]
+		if !ok {
+			return "", fmt.Errorf("node %q references an unknown parent", node.ID)
+		}
+		// A GitHub App lives inside its GitHub controller and nowhere else.
+		if node.Type == "githubapp" && parent.Type != "github" {
+			return "", fmt.Errorf("github app must be inside a github object")
+		}
+		childrenOf[node.ParentID] = append(childrenOf[node.ParentID], node)
+	}
+	for _, node := range request.Nodes {
+		if node.Type == "githubapp" && node.ParentID == "" {
+			return "", fmt.Errorf("github app must be inside a github object")
 		}
 	}
 	if request.Name == "" {
@@ -130,60 +247,10 @@ func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
 	}
 
 	metadataName := newIdentifierSet().slugIdentifier(request.Name)
-
-	var nodesBuilder strings.Builder
-	for _, node := range request.Nodes {
-		identifier := identifierByNodeID[node.ID]
-		nodesBuilder.WriteString(fmt.Sprintf("  %s:\n", identifier))
-		nodesBuilder.WriteString(fmt.Sprintf("    uses: %s@v1\n", node.Type))
-		var needs []string
-		for _, edge := range request.Edges {
-			if edge.To == node.ID {
-				needs = append(needs, identifierByNodeID[edge.From])
-			}
-		}
-		if len(needs) > 0 {
-			nodesBuilder.WriteString("    needs:\n")
-			for _, target := range needs {
-				nodesBuilder.WriteString(fmt.Sprintf("      - %s\n", target))
-			}
-		}
-		if node.ParentID != "" {
-			if parent, ok := identifierByNodeID[node.ParentID]; ok {
-				nodesBuilder.WriteString(fmt.Sprintf("    parent: %s\n", parent))
-			}
-		}
-		if node.Start {
-			nodesBuilder.WriteString("    start: true\n")
-		}
-		var with []string
-		if node.Path != "" {
-			with = append(with, fmt.Sprintf("      path: %s", yamlString(node.Path)))
-		}
-		if node.Repository != "" {
-			with = append(with, fmt.Sprintf("      repository: %s", yamlString(node.Repository)))
-		}
-		if node.SecretKey != "" {
-			with = append(with, fmt.Sprintf("      secretKey: %s", yamlString(node.SecretKey)))
-		}
-		if node.AppID != "" {
-			with = append(with, fmt.Sprintf("      appId: %s", yamlString(node.AppID)))
-		}
-		if node.PrivateKeyPath != "" {
-			with = append(with, fmt.Sprintf("      privateKeyPath: %s", yamlString(node.PrivateKeyPath)))
-		}
-		if len(with) > 0 {
-			nodesBuilder.WriteString("    with:\n")
-			for _, line := range with {
-				nodesBuilder.WriteString(line)
-				nodesBuilder.WriteString("\n")
-			}
-		}
-		nodesBuilder.WriteString("    layout:\n")
-		nodesBuilder.WriteString(fmt.Sprintf("      x: %g\n", node.X))
-		nodesBuilder.WriteString(fmt.Sprintf("      y: %g\n", node.Y))
-		nodesBuilder.WriteString(fmt.Sprintf("      w: %g\n", node.W))
-		nodesBuilder.WriteString(fmt.Sprintf("      h: %g\n", node.H))
+	emitter := &workflowEmitter{
+		request:          request,
+		identifierByNode: identifierByNode,
+		childrenOf:       childrenOf,
 	}
 
 	var builder strings.Builder
@@ -194,7 +261,12 @@ func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
 	builder.WriteString(fmt.Sprintf("  name: %s\n", metadataName))
 	builder.WriteString("\n")
 	builder.WriteString("nodes:\n")
-	builder.WriteString(nodesBuilder.String())
+	for _, node := range request.Nodes {
+		if node.ParentID != "" {
+			continue
+		}
+		emitter.emitNode(&builder, node, identifierByNode[node.ID], "  ")
+	}
 	return builder.String(), nil
 }
 

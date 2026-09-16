@@ -1,5 +1,5 @@
 export type NodeType =
-  "agent" | "tool" | "project" | "gatebase" | "github" | "gitlab" | "githubapp";
+  "agent" | "tool" | "project" | "github" | "gitlab" | "githubapp";
 
 export interface GraphEdge {
   id: string;
@@ -38,17 +38,26 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "agent", label: "Agent" },
   { type: "tool", label: "Tool" },
   { type: "project", label: "Project" },
-  { type: "gatebase", label: "GateBase" },
   { type: "github", label: "GitHub" },
   { type: "gitlab", label: "GitLab" },
   { type: "githubapp", label: "GitHub App" },
 ];
 
 // Boxes that can host nested children one level deep.
-const CONTAINER_TYPES: readonly NodeType[] = ["project", "gatebase", "github"];
+const CONTAINER_TYPES: readonly NodeType[] = ["project", "github"];
 
 export function isContainerType(type: NodeType): boolean {
   return CONTAINER_TYPES.includes(type);
+}
+
+// GitBase is the abstract base the GitHub and GitLab controllers derive
+// from; it is a code-level abstraction, not a displayable palette component.
+// The Go exporter derives both controllers' YAML configuration from it, and
+// the frontend shares the forge property fields through this list.
+export const GIT_BASE_TYPES: readonly NodeType[] = ["github", "gitlab"];
+
+export function isForgeType(type: NodeType): boolean {
+  return GIT_BASE_TYPES.includes(type);
 }
 
 // General containers accept every component except the GitHub App, which
@@ -60,6 +69,12 @@ export function canHostChild(
   if (childType === "githubapp") return parentType === "github";
   if (parentType === "github") return false;
   return isContainerType(parentType);
+}
+
+// A GitHub App is always a child object: it can never exist at the top
+// level of the canvas.
+export function canExistTopLevel(type: NodeType): boolean {
+  return type !== "githubapp";
 }
 
 function paletteLabel(type: NodeType): string {
