@@ -10,6 +10,10 @@
 
   let { graph }: { graph: GraphStore } = $props();
 
+  // Transient explanation for a palette drop that was rejected by the
+  // containment rules; cleared on the next drop so it cannot go stale.
+  let dropHint = $state("");
+
   // Grab offset of the node being dragged, kept outside the template because
   // it is transient drag bookkeeping rather than rendered state.
   let dragState: { id: string; dx: number; dy: number } | null = null;
@@ -144,6 +148,7 @@
     const contentX = event.clientX - rect.left + scrollLeft;
     const contentY = event.clientY - rect.top + scrollTop;
     const data = event.dataTransfer?.getData("text/plain") ?? "";
+    dropHint = "";
     if (isComponentType(data)) {
       const container = graph.containerAt(contentX, contentY);
       if (container && canHostChild(container.type, data)) {
@@ -158,7 +163,10 @@
       // A GitHub App cannot exist outside a GitHub box, so such a drop is
       // rejected outright; incompatible containers otherwise fall through to
       // a top-level box at the content position.
-      if (!canExistTopLevel(data)) return;
+      if (!canExistTopLevel(data)) {
+        dropHint = "A GitHub App must be dropped inside a GitHub box";
+        return;
+      }
       graph.addNode(data, contentX, contentY);
       return;
     }
@@ -309,6 +317,9 @@
   {#if graph.nodes.length === 0}
     <p class="hint">Drag components here to build your graph</p>
   {/if}
+  {#if dropHint}
+    <p class="drop-hint" role="status">{dropHint}</p>
+  {/if}
 </div>
 
 <svelte:window
@@ -347,6 +358,21 @@
     color: #7d968d;
     pointer-events: none;
     margin: 0;
+  }
+
+  .drop-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid #e0b4b4;
+    border-radius: 0.375rem;
+    background: #fdf6f6;
+    color: #a03030;
+    font-size: 0.85rem;
+    pointer-events: none;
   }
 
   .node {

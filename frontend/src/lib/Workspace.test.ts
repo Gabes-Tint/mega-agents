@@ -254,6 +254,22 @@ describe("graph builder workspace", () => {
     ).not.toBeInTheDocument();
   });
 
+  test("explains why a rejected GitHub App drop disappears", async () => {
+    render(Workspace);
+
+    await dropComponent("GitHub App", 30, 20);
+
+    expect(
+      screen.getByText("A GitHub App must be dropped inside a GitHub box"),
+    ).toBeInTheDocument();
+
+    // The hint clears on the next drop so it cannot go stale.
+    await dropComponent("Agent", 400, 400);
+    expect(
+      screen.queryByText("A GitHub App must be dropped inside a GitHub box"),
+    ).not.toBeInTheDocument();
+  });
+
   test("adds a node to the canvas when a palette component is dropped", async () => {
     render(Workspace);
 
