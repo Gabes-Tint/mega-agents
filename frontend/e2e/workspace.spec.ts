@@ -350,6 +350,63 @@ test.describe("graph builder workspace", () => {
       .toBe(true);
   });
 
+  test("captures repository and secret key properties for a GitHub box", async ({
+    page,
+  }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "GitHub", exact: true }),
+      canvas(page),
+    );
+    const github = page.getByRole("button", { name: "GitHub 1" });
+    await expect(github).toBeVisible();
+
+    await page
+      .getByLabel("Repository")
+      .fill("https://github.com/example/project");
+    await page.getByLabel("Secret key").fill("secret://github-bot");
+
+    // Re-selecting the box shows the persisted values again.
+    await github.click();
+    await expect(page.getByLabel("Repository")).toHaveValue(
+      "https://github.com/example/project",
+    );
+    await expect(page.getByLabel("Secret key")).toHaveValue(
+      "secret://github-bot",
+    );
+  });
+
+  test("nests a component inside a GateBase box", async ({ page }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "GateBase", exact: true }),
+      canvas(page),
+    );
+    const gate = page.getByRole("button", { name: "GateBase 1" });
+    await expect(gate).toBeVisible();
+
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Agent", exact: true }),
+      gate,
+    );
+    const child = page.getByRole("button", { name: "Agent 1" });
+    await expect(child).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const gateBox = await gate.boundingBox();
+        const childBox = await child.boundingBox();
+        return (
+          childBox.x >= gateBox.x &&
+          childBox.y >= gateBox.y &&
+          childBox.x < gateBox.x + gateBox.width &&
+          childBox.y < gateBox.y + gateBox.height
+        );
+      })
+      .toBe(true);
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {

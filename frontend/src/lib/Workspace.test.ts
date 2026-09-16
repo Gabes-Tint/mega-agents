@@ -90,6 +90,97 @@ describe("graph builder workspace", () => {
     expect(palette).toContainElement(
       screen.getByRole("button", { name: "Project" }),
     );
+    expect(palette).toContainElement(
+      screen.getByRole("button", { name: "GateBase" }),
+    );
+    expect(palette).toContainElement(
+      screen.getByRole("button", { name: "GitHub" }),
+    );
+    expect(palette).toContainElement(
+      screen.getByRole("button", { name: "GitLab" }),
+    );
+  });
+
+  test("shows repository and secret key fields only for forge boxes", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    expect(screen.queryByLabelText("Repository")).not.toBeInTheDocument();
+
+    await dropComponent("GitHub", 400, 400);
+
+    expect(screen.getByText("Type: github")).toBeInTheDocument();
+    expect(screen.getByLabelText("Repository")).toBeInTheDocument();
+    expect(screen.getByLabelText("Secret key")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Path")).not.toBeInTheDocument();
+  });
+
+  test("captures repository and secret key values for a GitHub box", async () => {
+    render(Workspace);
+
+    await dropComponent("GitHub");
+
+    await fireEvent.input(screen.getByLabelText("Repository"), {
+      target: { value: "https://github.com/example/project" },
+    });
+    await fireEvent.input(screen.getByLabelText("Secret key"), {
+      target: { value: "secret://github-bot" },
+    });
+
+    await dropComponent("Tool", 400, 400);
+    await fireEvent.click(screen.getByText("GitHub 1"));
+
+    expect(screen.getByLabelText("Repository")).toHaveValue(
+      "https://github.com/example/project",
+    );
+    expect(screen.getByLabelText("Secret key")).toHaveValue(
+      "secret://github-bot",
+    );
+  });
+
+  test("captures repository and secret key values for a GitLab box", async () => {
+    render(Workspace);
+
+    await dropComponent("GitLab");
+
+    await fireEvent.input(screen.getByLabelText("Repository"), {
+      target: { value: "https://gitlab.com/example/project" },
+    });
+    await fireEvent.input(screen.getByLabelText("Secret key"), {
+      target: { value: "secret://gitlab-bot" },
+    });
+
+    await dropComponent("Tool", 400, 400);
+    await fireEvent.click(screen.getByText("GitLab 1"));
+
+    expect(screen.getByLabelText("Repository")).toHaveValue(
+      "https://gitlab.com/example/project",
+    );
+    expect(screen.getByLabelText("Secret key")).toHaveValue(
+      "secret://gitlab-bot",
+    );
+  });
+
+  test("nests a component inside a GateBase box", async () => {
+    render(Workspace);
+
+    await dropComponent("GateBase");
+
+    // GateBase is a container: it offers the folder controls like a project.
+    expect(screen.getByLabelText("Path")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browse…" })).toBeInTheDocument();
+
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+
+    expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
+      left: "100px",
+      top: "50px",
+    });
   });
 
   test("adds a node to the canvas when a palette component is dropped", async () => {

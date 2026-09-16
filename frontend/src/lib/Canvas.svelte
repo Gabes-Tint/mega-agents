@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { GraphStore, type GraphNode, type NodeType } from "./graph.svelte.js";
+  import {
+    GraphStore,
+    PALETTE,
+    type GraphNode,
+    type NodeType,
+  } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -17,7 +22,7 @@
   } | null = null;
 
   function isComponentType(value: string): value is NodeType {
-    return value === "agent" || value === "tool" || value === "project";
+    return PALETTE.some((item) => item.type === value);
   }
 
   function nodeById(id: string): GraphNode | undefined {
@@ -245,10 +250,10 @@
         )}
         <line
           class="edge-line"
-          x1="{start.x}"
-          y1="{start.y}"
-          x2="{end.x}"
-          y2="{end.y}"
+          x1={start.x}
+          y1={start.y}
+          x2={end.x}
+          y2={end.y}
           marker-end="url(#edge-arrowhead)"
         ></line>
       {/if}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import { GraphStore } from "./graph.svelte.js";
+  import { GraphStore, isContainerType } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -99,20 +99,43 @@
         type="button"
         aria-pressed={graph.connecting}
         onclick={() =>
-          graph.connecting ? graph.cancelConnect() : graph.startConnect(node.id)}
+          graph.connecting
+            ? graph.cancelConnect()
+            : graph.startConnect(node.id)}
       >
         Connect
       </button>
-      {#if node.type === "project"}
+      {#if isContainerType(node.type)}
         <label>
           Path
           <input
             type="text"
             value={node.path ?? ""}
-            oninput={(event) => graph.setPath(node.id, event.currentTarget.value)}
+            oninput={(event) =>
+              graph.setPath(node.id, event.currentTarget.value)}
           />
         </label>
         <Dialog.Trigger class="trigger">Browse…</Dialog.Trigger>
+      {/if}
+      {#if node.type === "github" || node.type === "gitlab"}
+        <label>
+          Repository
+          <input
+            type="text"
+            value={node.repository ?? ""}
+            oninput={(event) =>
+              graph.setRepository(node.id, event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Secret key
+          <input
+            type="text"
+            value={node.secretKey ?? ""}
+            oninput={(event) =>
+              graph.setSecretKey(node.id, event.currentTarget.value)}
+          />
+        </label>
       {/if}
     {:else}
       <p>Select a node on the canvas to edit its properties.</p>
