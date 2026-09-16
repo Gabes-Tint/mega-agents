@@ -108,6 +108,37 @@ test.describe("graph builder workspace", () => {
       .toBeLessThanOrEqual(2);
   });
 
+  test("resizes a node by dragging its corner handle", async ({ page }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Agent" }),
+      canvas(page),
+    );
+    const node = page.getByRole("button", { name: "Agent 1" });
+    const before = await node.boundingBox();
+
+    const handle = node.locator(".resize-handle");
+    const handleBox = await handle.boundingBox();
+    await page.mouse.move(
+      handleBox.x + handleBox.width / 2,
+      handleBox.y + handleBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(before.x + 240, before.y + 160, { steps: 8 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => {
+        const after = await node.boundingBox();
+        return after.width > before.width + 50 && after.height > before.height;
+      })
+      .toBe(true);
+
+    const moved = await node.boundingBox();
+    expect(moved.x).toBeCloseTo(before.x, 0);
+    expect(moved.y).toBeCloseTo(before.y, 0);
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {
@@ -123,7 +154,9 @@ test.describe("graph builder workspace", () => {
     const dialog = page.getByRole("dialog", { name: "Directory browser" });
     // bits-ui registers its outside-click listeners asynchronously just after
     // mount, so settle before simulating an outside click.
-    await expect(dialog.getByRole("button", { name: "Up" })).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "Up", exact: true }),
+    ).toBeVisible();
     await page.waitForFunction(
       () => (globalThis.bitsDismissableLayers?.size ?? 0) > 0,
     );

@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { GraphStore, PALETTE, type NodeType } from "./graph.svelte.js";
+import {
+  DEFAULT_NODE_HEIGHT,
+  DEFAULT_NODE_WIDTH,
+  GraphStore,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+  PALETTE,
+  type NodeType,
+} from "./graph.svelte.js";
 
 describe("GraphStore", () => {
   test("adds a node with a default name, position, and selection", () => {
@@ -138,6 +146,46 @@ describe("GraphStore", () => {
     graph.rename("not-a-node", "Fetcher");
 
     expect(graph.nodes[0]?.name).toBe("Agent 1");
+    expect(graph.nodes[0]?.id).toBe(node.id);
+  });
+
+  test("adds a node with the default box size", () => {
+    const graph = new GraphStore();
+
+    const node = graph.addNode("agent", 5, 5);
+
+    expect(node.w).toBe(DEFAULT_NODE_WIDTH);
+    expect(node.h).toBe(DEFAULT_NODE_HEIGHT);
+  });
+
+  test("resizes a node to explicit dimensions", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("agent", 5, 5);
+
+    graph.resizeNode(node.id, 320, 200);
+
+    expect(graph.nodes[0]?.w).toBe(320);
+    expect(graph.nodes[0]?.h).toBe(200);
+  });
+
+  test("resizing clamps dimensions to the box minimums", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("agent", 5, 5);
+
+    graph.resizeNode(node.id, MIN_NODE_WIDTH - 60, MIN_NODE_HEIGHT - 40);
+
+    expect(graph.nodes[0]?.w).toBe(MIN_NODE_WIDTH);
+    expect(graph.nodes[0]?.h).toBe(MIN_NODE_HEIGHT);
+  });
+
+  test("resizing an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("agent", 5, 5);
+
+    graph.resizeNode("not-a-node", 320, 200);
+
+    expect(graph.nodes[0]?.w).toBe(DEFAULT_NODE_WIDTH);
+    expect(graph.nodes[0]?.h).toBe(DEFAULT_NODE_HEIGHT);
     expect(graph.nodes[0]?.id).toBe(node.id);
   });
 
