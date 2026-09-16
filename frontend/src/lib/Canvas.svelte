@@ -179,10 +179,13 @@
       ondragstart={(event) => startNodeDrag(event, node)}
       onclick={() => graph.select(node.id)}
     >
-      {node.name}
-      {#if node.start}
-        <span class="start-flag" aria-hidden="true">▶</span>
-      {/if}
+      <span class="node-title">
+        {node.name}
+        {#if node.start}
+          <span class="start-flag" aria-hidden="true">▶</span>
+        {/if}
+      </span>
+      <span class="node-separator" aria-hidden="true"></span>
       <span
         class="resize-handle"
         aria-hidden="true"
@@ -222,20 +225,39 @@
 
   .node {
     position: absolute;
-    padding: 0.4rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0;
     border: 1px solid #b8ccc4;
     border-radius: 0.5rem;
     background: #ffffff;
     color: #17342c;
     font: inherit;
     text-align: left;
+    overflow: hidden;
     cursor: pointer;
     box-shadow: 0 1px 2px rgb(23 52 44 / 0.12);
   }
 
+  .node-title {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.75rem;
+    font-weight: 600;
+    background: #f0f6f3;
+    white-space: nowrap;
+  }
+
+  .node-separator {
+    display: block;
+    height: 1px;
+    background: #b8ccc4;
+  }
+
   .start-flag {
     color: #ff3e00;
-    margin-left: 0.35rem;
   }
 
   .resize-handle {
