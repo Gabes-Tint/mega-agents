@@ -84,7 +84,7 @@ Verify duration once this change runs in CI.
 | ⬜ | Go fuzz tests | `go test -fuzz` | Planned scheduled CI | Not green because the current API has no complex parser or untrusted structured input that would provide a valuable fuzz target |
 | 🟡 | Coverage thresholds | Go coverage, Vitest V8 coverage | Pre-commit + required CI | Not green because the 80% floor covers backend application and tested frontend source, but there is no changed-code coverage policy |
 | ⬜ | Mutation testing | Gremlins, Stryker | Planned scheduled CI | Not green because the test suite is still small; mutation runtime and maintenance are not justified until more domain behavior exists |
-| ✅ | Artifact-size budgets | Custom shell gate | Pre-commit + required CI | Go binary, frontend JavaScript, and CSS have explicit limits |
+| ✅ | Artifact-size budgets | Custom shell gate | Pre-commit + required CI | Go binary (16 MiB), frontend JavaScript (110 KiB, re-baselined from 100 KiB when the SVG edge layer landed), and frontend CSS (50 KiB) have explicit limits |
 | ✅ | Test timeouts | Go, Vitest, GitHub Actions | Pre-commit + required CI | Go, frontend, and CI jobs have explicit limits |
 
 ## Security and dependencies

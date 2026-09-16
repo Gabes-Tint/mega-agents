@@ -374,6 +374,118 @@ describe("GraphStore", () => {
     expect(graph.nodes[1]?.start).toBe(false);
   });
 
+  test("connects two same-level nodes with an edge", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("agent", 0, 0);
+    const second = graph.addNode("tool", 400, 400);
+
+    expect(graph.connect(first.id, second.id)).toBe(true);
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0]?.from).toBe(first.id);
+    expect(graph.edges[0]?.to).toBe(second.id);
+  });
+
+  test("rejects connecting a node to itself", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("agent", 0, 0);
+
+    expect(graph.connect(node.id, node.id)).toBe(false);
+    expect(graph.edges).toHaveLength(0);
+  });
+
+  test("rejects connecting nodes on different levels", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const child = graph.addNode("agent", 10, 10, project.id);
+    const top = graph.addNode("tool", 400, 400);
+
+    expect(graph.connect(project.id, child.id)).toBe(false);
+    expect(graph.connect(top.id, child.id)).toBe(false);
+    expect(graph.edges).toHaveLength(0);
+  });
+
+  test("rejects duplicate edges between the same pair", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("agent", 0, 0);
+    const second = graph.addNode("tool", 400, 400);
+    graph.connect(first.id, second.id);
+
+    expect(graph.connect(first.id, second.id)).toBe(false);
+    expect(graph.edges).toHaveLength(1);
+  });
+
+  test("rejects the reverse of an existing edge", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("agent", 0, 0);
+    const second = graph.addNode("tool", 400, 400);
+    graph.connect(first.id, second.id);
+
+    expect(graph.connect(second.id, first.id)).toBe(false);
+    expect(graph.edges).toHaveLength(1);
+  });
+
+  test("an edge persists when one of its boxes is nested later", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("agent", 0, 0);
+    const second = graph.addNode("tool", 400, 400);
+    graph.connect(first.id, second.id);
+    const project = graph.addNode("project", 800, 800);
+
+    graph.attachToProject(second.id, project.id, 820, 820);
+
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0]?.from).toBe(first.id);
+    expect(graph.edges[0]?.to).toBe(second.id);
+  });
+
+  test("allows many outgoing edges from one box", () => {
+    const graph = new GraphStore();
+    const source = graph.addNode("agent", 0, 0);
+    const first = graph.addNode("tool", 400, 0);
+    const second = graph.addNode("tool", 400, 300);
+
+    graph.connect(source.id, first.id);
+    graph.connect(source.id, second.id);
+
+    expect(graph.edges).toHaveLength(2);
+    expect(graph.edges.every((edge) => edge.from === source.id)).toBe(true);
+  });
+
+  test("allows many incoming edges into one box", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("agent", 0, 0);
+    const second = graph.addNode("agent", 0, 300);
+    const target = graph.addNode("tool", 400, 0);
+
+    graph.connect(first.id, target.id);
+    graph.connect(second.id, target.id);
+
+    expect(graph.edges).toHaveLength(2);
+    expect(graph.edges.every((edge) => edge.to === target.id)).toBe(true);
+  });
+
+  test("rejects connecting nodes in different projects", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("project", 0, 0);
+    graph.addNode("agent", 10, 10, first.id);
+    const second = graph.addNode("project", 400, 400);
+    graph.addNode("tool", 410, 410, second.id);
+
+    expect(
+      graph.connect(graph.nodes[1]?.id ?? "", graph.nodes[3]?.id ?? ""),
+    ).toBe(false);
+    expect(graph.edges).toHaveLength(0);
+  });
+
+  test("connecting with unknown ids is a no-op", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("agent", 0, 0);
+
+    expect(graph.connect(node.id, "not-a-node")).toBe(false);
+    expect(graph.connect("not-a-node", node.id)).toBe(false);
+    expect(graph.edges).toHaveLength(0);
+  });
+
   test("moving a project carries its children along", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 30, 20);

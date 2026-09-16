@@ -95,6 +95,14 @@
         />
         Starting point
       </label>
+      <button
+        type="button"
+        aria-pressed={graph.connecting}
+        onclick={() =>
+          graph.connecting ? graph.cancelConnect() : graph.startConnect(node.id)}
+      >
+        Connect
+      </button>
       {#if node.type === "project"}
         <label>
           Path
@@ -198,6 +206,11 @@
     font: inherit;
     cursor: pointer;
     margin-bottom: 0.75rem;
+  }
+
+  button[aria-pressed="true"] {
+    border-color: #ff3e00;
+    box-shadow: 0 0 0 2px rgb(255 62 0 / 0.35);
   }
 
   /* Bits renders Dialog.Trigger, Dialog.Title, Dialog.Close, Dialog.Overlay,

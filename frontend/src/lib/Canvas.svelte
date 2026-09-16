@@ -29,6 +29,46 @@
     return { x: (parent?.x ?? 0) + node.x, y: (parent?.y ?? 0) + node.y };
   }
 
+  function edgeBounds(): { width: number; height: number } {
+    let width = 800;
+    let height = 600;
+    for (const node of graph.nodes) {
+      const position = absolutePosition(node);
+      width = Math.max(width, position.x + node.w + 100);
+      height = Math.max(height, position.y + node.h + 100);
+    }
+    return { width, height };
+  }
+
+  const extent = $derived.by(() => edgeBounds());
+
+  // Point where the straight line to (targetX, targetY) crosses this box's
+  // border, so arrowheads stay visible instead of hiding under the box.
+  function borderPoint(
+    node: GraphNode,
+    x: number,
+    y: number,
+    targetX: number,
+    targetY: number,
+  ): { x: number; y: number } {
+    const dx = targetX - x;
+    const dy = targetY - y;
+    const t = Math.min(
+      dx === 0 ? Number.POSITIVE_INFINITY : node.w / 2 / Math.abs(dx),
+      dy === 0 ? Number.POSITIVE_INFINITY : node.h / 2 / Math.abs(dy),
+    );
+    return { x: x + dx * t, y: y + dy * t };
+  }
+
+  function selectOrConnect(node: GraphNode): void {
+    if (graph.connecting && graph.connectFromId) {
+      graph.connect(graph.connectFromId, node.id);
+      graph.cancelConnect();
+      return;
+    }
+    graph.select(node.id);
+  }
+
   function allowDrop(event: DragEvent) {
     event.preventDefault();
   }
@@ -165,6 +205,55 @@
   ondragover={allowDrop}
   ondrop={drop}
 >
+  <svg
+    class="edges"
+    aria-hidden="true"
+    style:width="{extent.width}px"
+    style:height="{extent.height}px"
+  >
+    <defs>
+      <marker
+        id="edge-arrowhead"
+        markerWidth="8"
+        markerHeight="8"
+        refX="7"
+        refY="4"
+        orient="auto"
+      >
+        <path d="M0 0 L8 4 L0 8 Z" fill="#5b7a71" />
+      </marker>
+    </defs>
+    {#each graph.edges as edge (edge.id)}
+      {@const from = nodeById(edge.from)}
+      {@const to = nodeById(edge.to)}
+      {#if from && to}
+        {@const fromPosition = absolutePosition(from)}
+        {@const toPosition = absolutePosition(to)}
+        {@const start = borderPoint(
+          from,
+          fromPosition.x + from.w / 2,
+          fromPosition.y + from.h / 2,
+          toPosition.x + to.w / 2,
+          toPosition.y + to.h / 2,
+        )}
+        {@const end = borderPoint(
+          to,
+          toPosition.x + to.w / 2,
+          toPosition.y + to.h / 2,
+          fromPosition.x + from.w / 2,
+          fromPosition.y + from.h / 2,
+        )}
+        <line
+          class="edge-line"
+          x1="{start.x}"
+          y1="{start.y}"
+          x2="{end.x}"
+          y2="{end.y}"
+          marker-end="url(#edge-arrowhead)"
+        ></line>
+      {/if}
+    {/each}
+  </svg>
   {#each graph.nodes as node (node.id)}
     <button
       type="button"
@@ -177,7 +266,7 @@
       style:width="{node.w}px"
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}
-      onclick={() => graph.select(node.id)}
+      onclick={() => selectOrConnect(node)}
     >
       <span class="node-title">
         {node.name}
@@ -211,6 +300,19 @@
     background:
       radial-gradient(#d9e5e0 1px, transparent 1px) 0 0 / 1.5rem 1.5rem,
       #fbfdfc;
+  }
+
+  .edges {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .edge-line {
+    stroke: #5b7a71;
+    stroke-width: 2;
   }
 
   .hint {
