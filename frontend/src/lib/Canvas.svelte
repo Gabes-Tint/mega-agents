@@ -20,6 +20,15 @@
     return value === "agent" || value === "tool" || value === "project";
   }
 
+  function nodeById(id: string): GraphNode | undefined {
+    return graph.nodes.find((candidate) => candidate.id === id);
+  }
+
+  function absolutePosition(node: GraphNode): { x: number; y: number } {
+    const parent = node.parentId ? nodeById(node.parentId) : undefined;
+    return { x: (parent?.x ?? 0) + node.x, y: (parent?.y ?? 0) + node.y };
+  }
+
   function allowDrop(event: DragEvent) {
     event.preventDefault();
   }
@@ -85,26 +94,66 @@
     // space, so scrolled canvases need the scroll offset added back.
     const scrollLeft = target.scrollLeft;
     const scrollTop = target.scrollTop;
+    const contentX = event.clientX - rect.left + scrollLeft;
+    const contentY = event.clientY - rect.top + scrollTop;
     const data = event.dataTransfer?.getData("text/plain") ?? "";
     if (isComponentType(data)) {
-      graph.addNode(
-        data,
-        event.clientX - rect.left + scrollLeft,
-        event.clientY - rect.top + scrollTop,
-      );
+      const project = graph.projectAt(contentX, contentY);
+      if (project) {
+        graph.addNode(
+          data,
+          contentX - project.x,
+          contentY - project.y,
+          project.id,
+        );
+        return;
+      }
+      graph.addNode(data, contentX, contentY);
       return;
     }
     if (data.startsWith("node:")) {
       const id = data.slice("node:".length);
+      const node = nodeById(id);
       const grab = dragState;
       dragState = null;
-      if (grab && grab.id === id) {
-        graph.moveNode(
+      if (!node || !grab || grab.id !== id) return;
+      const project = graph.projectAt(contentX, contentY);
+      if (
+        node.parentId === undefined &&
+        project &&
+        project.id !== id &&
+        !graph.hasChildren(id)
+      ) {
+        graph.attachToProject(
           id,
-          event.clientX - rect.left + scrollLeft - grab.dx,
-          event.clientY - rect.top + scrollTop - grab.dy,
+          project.id,
+          contentX - grab.dx,
+          contentY - grab.dy,
         );
+        return;
       }
+      if (node.parentId) {
+        const parent = nodeById(node.parentId);
+        if (parent && project && project.id === parent.id) {
+          graph.moveNode(
+            id,
+            contentX - grab.dx - parent.x,
+            contentY - grab.dy - parent.y,
+          );
+        } else if (project) {
+          // Re-parenting to another top-level project stays one level deep.
+          graph.attachToProject(
+            id,
+            project.id,
+            contentX - grab.dx,
+            contentY - grab.dy,
+          );
+        } else {
+          graph.detachNode(id, contentX - grab.dx, contentY - grab.dy);
+        }
+        return;
+      }
+      graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
     }
   }
 </script>
@@ -123,8 +172,8 @@
       class:selected={node.id === graph.selectedId}
       aria-pressed={node.id === graph.selectedId}
       draggable="true"
-      style:left="{node.x}px"
-      style:top="{node.y}px"
+      style:left="{absolutePosition(node).x}px"
+      style:top="{absolutePosition(node).y}px"
       style:width="{node.w}px"
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}

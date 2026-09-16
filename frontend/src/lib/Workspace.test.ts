@@ -61,13 +61,17 @@ function dispatchDrop(
   dispatchDragEvent("drop", target, init);
 }
 
-async function dropComponent(label: string) {
+async function dropComponent(label: string, clientX = 30, clientY = 20) {
   const dataTransfer = makeDataTransfer();
   await fireEvent.dragStart(screen.getByRole("button", { name: label }), {
     dataTransfer,
   });
   await fireEvent.dragOver(canvas(), {});
-  await dispatchDrop(canvas(), { dataTransfer, clientX: 30, clientY: 20 });
+  await dispatchDrop(canvas(), {
+    dataTransfer,
+    clientX,
+    clientY,
+  });
 }
 
 describe("graph builder workspace", () => {
@@ -383,6 +387,136 @@ describe("graph builder workspace", () => {
     await fireEvent.pointerMove(window, { clientX: 300, clientY: 200 });
 
     expect(node).toHaveStyle({ width: "190px", height: "84px" });
+  });
+
+  test("places a dropped component inside a project when it lands on one", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    // Content point (100, 50) falls inside Project 1's box (30..190, 20..84).
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+
+    expect(canvas()).toContainElement(screen.getByText("Agent 1"));
+    // The child renders at its parent-relative position inside the project box.
+    expect(screen.getByText("Agent 1")).toHaveStyle({
+      left: "100px",
+      top: "50px",
+    });
+    const properties = screen.getByRole("complementary", {
+      name: "Node properties",
+    });
+    expect(properties).toContainElement(screen.getByText("Type: agent"));
+  });
+
+  test("moves a project's children when the project is dragged", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    const project = screen.getByRole("button", { name: "Project 1" });
+
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+    const child = screen.getByRole("button", { name: "Agent 1" });
+
+    await dispatchDragStart(project, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 70, clientY: 60 });
+
+    expect(project).toHaveStyle({ left: "70px", top: "60px" });
+    expect(child).toHaveStyle({ left: "140px", top: "90px" });
+  });
+
+  test("does not nest a project that already has children inside another project", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    const first = screen.getByRole("button", { name: "Project 1" });
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+
+    await dropComponent("Project", 400, 400);
+    const second = screen.getByRole("button", { name: "Project 2" });
+
+    await dispatchDragStart(first, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 420, clientY: 420 });
+
+    // The project moves to where it was dropped but is not nested: nesting a
+    // box that already holds children would put them two levels deep.
+    expect(first).toHaveStyle({ left: "420px", top: "420px" });
+    expect(second).toHaveStyle({ left: "400px", top: "400px" });
+  });
+
+  test("re-parents a child dropped onto another project", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+    const child = screen.getByRole("button", { name: "Agent 1" });
+
+    await dropComponent("Project", 400, 400);
+    const second = screen.getByRole("button", { name: "Project 2" });
+
+    await dispatchDragStart(child, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 430, clientY: 420 });
+
+    // Project 2 spans (400..560, 400..464); the child lands inside it at
+    // parent-relative (30, 20) and renders at the absolute drop position.
+    expect(child).toHaveStyle({ left: "430px", top: "420px" });
+    expect(second).toHaveStyle({ left: "400px", top: "400px" });
+  });
+
+  test("detaches a child dropped onto the empty canvas", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+    const child = screen.getByRole("button", { name: "Agent 1" });
+
+    await dispatchDragStart(child, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 400, clientY: 300 });
+
+    expect(child).toHaveStyle({ left: "400px", top: "300px" });
+  });
+
+  test("moves a child inside its own project when dragged", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+    await fireEvent.dragOver(canvas(), {});
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+    const child = screen.getByRole("button", { name: "Agent 1" });
+
+    await dispatchDragStart(child, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 90, clientY: 60 });
+
+    expect(child).toHaveStyle({ left: "90px", top: "60px" });
   });
 
   test("updates the node label when the name property is edited", async () => {
