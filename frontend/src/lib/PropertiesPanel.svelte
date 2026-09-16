@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import { GraphStore, isContainerType } from "./graph.svelte.js";
+  import { GraphStore } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -105,7 +105,7 @@
       >
         Connect
       </button>
-      {#if isContainerType(node.type)}
+      {#if node.type === "project" || node.type === "gatebase"}
         <label>
           Path
           <input
@@ -134,6 +134,26 @@
             value={node.secretKey ?? ""}
             oninput={(event) =>
               graph.setSecretKey(node.id, event.currentTarget.value)}
+          />
+        </label>
+      {/if}
+      {#if node.type === "githubapp"}
+        <label>
+          App ID
+          <input
+            type="text"
+            value={node.appId ?? ""}
+            oninput={(event) =>
+              graph.setAppId(node.id, event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Private key
+          <input
+            type="text"
+            value={node.privateKeyPath ?? ""}
+            oninput={(event) =>
+              graph.setPrivateKeyPath(node.id, event.currentTarget.value)}
           />
         </label>
       {/if}

@@ -872,6 +872,55 @@ describe("graph builder workspace", () => {
     expect(node.querySelector(".node-separator")).toBeInTheDocument();
   });
 
+  test("places a rejected palette drop at the exact content position", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+
+    // A GitHub App is rejected by a project box: it must land at the drop
+    // point as a top-level box, not at parent-relative coordinates.
+    await dropComponent("GitHub App", 100, 50);
+
+    expect(screen.getByRole("button", { name: "GitHub App 1" })).toHaveStyle({
+      left: "100px",
+      top: "50px",
+    });
+  });
+
+  test("keeps an incompatible child drop inside its own parent", async () => {
+    render(Workspace);
+
+    await dropComponent("GitHub");
+    await dropComponent("GitHub App");
+    const app = screen.getByRole("button", { name: "GitHub App 1" });
+
+    await dropComponent("Project", 400, 300);
+
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(app, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 430, clientY: 320 });
+
+    // Project 1 spans (400..560, 300..364); the GitHub App must not nest
+    // into it — it stays a child of GitHub 1 and renders at the pointer.
+    expect(app).toHaveStyle({ left: "430px", top: "320px" });
+  });
+
+  test("moves a top-level box dropped over an incompatible container", async () => {
+    render(Workspace);
+
+    await dropComponent("GitHub");
+    await dropComponent("Agent", 400, 300);
+    const agent = screen.getByRole("button", { name: "Agent 1" });
+
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(agent, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+
+    // GitHub 1 at (30, 20) cannot host an agent: the box moves to the drop
+    // point as a top-level box instead of freezing.
+    expect(agent).toHaveStyle({ left: "100px", top: "50px" });
+  });
+
   test("keeps the start badge inside the header", async () => {
     render(Workspace);
 

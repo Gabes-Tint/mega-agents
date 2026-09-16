@@ -407,6 +407,49 @@ test.describe("graph builder workspace", () => {
       .toBe(true);
   });
 
+  test("nests a GitHub App inside a GitHub box and captures its properties", async ({
+    page,
+  }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "GitHub", exact: true }),
+      canvas(page),
+    );
+    const github = page.getByRole("button", { name: "GitHub 1" });
+    await expect(github).toBeVisible();
+
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "GitHub App", exact: true }),
+      github,
+    );
+    const app = page.getByRole("button", { name: "GitHub App 1" });
+    await expect(app).toBeVisible();
+
+    // The app must render inside the GitHub box, not beside it.
+    await expect
+      .poll(async () => {
+        const githubBox = await github.boundingBox();
+        const appBox = await app.boundingBox();
+        return (
+          appBox.x >= githubBox.x &&
+          appBox.y >= githubBox.y &&
+          appBox.x < githubBox.x + githubBox.width &&
+          appBox.y < githubBox.y + githubBox.height
+        );
+      })
+      .toBe(true);
+
+    await page.getByLabel("App ID").fill("123456");
+    await page
+      .getByLabel("Private key")
+      .fill("/home/user/.keys/github-app.pem");
+    await expect(page.getByLabel("App ID")).toHaveValue("123456");
+    await expect(page.getByLabel("Private key")).toHaveValue(
+      "/home/user/.keys/github-app.pem",
+    );
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {

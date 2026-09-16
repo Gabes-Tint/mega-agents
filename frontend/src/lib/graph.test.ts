@@ -6,6 +6,7 @@ import {
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
   PALETTE,
+  canHostChild,
   type NodeType,
 } from "./graph.svelte.js";
 
@@ -205,7 +206,7 @@ describe("GraphStore", () => {
     const project = graph.addNode("project", 100, 80);
     const agent = graph.addNode("agent", 130, 130);
 
-    graph.attachToProject(agent.id, project.id, 140, 100);
+    graph.attachToContainer(agent.id, project.id, 140, 100);
 
     expect(graph.nodes.at(-1)?.parentId).toBe(project.id);
     expect(graph.nodes.at(-1)?.x).toBe(40);
@@ -217,8 +218,13 @@ describe("GraphStore", () => {
     const project = graph.addNode("project", 100, 80);
     graph.addNode("agent", 130, 130);
 
-    graph.attachToProject(graph.nodes.at(-1)?.id ?? "", "not-a-node", 140, 100);
-    graph.attachToProject("not-a-node", project.id, 140, 100);
+    graph.attachToContainer(
+      graph.nodes.at(-1)?.id ?? "",
+      "not-a-node",
+      140,
+      100,
+    );
+    graph.attachToContainer("not-a-node", project.id, 140, 100);
 
     expect(graph.nodes.at(-1)?.parentId).toBeUndefined();
     expect(graph.nodes.at(-1)?.x).toBe(130);
@@ -230,7 +236,7 @@ describe("GraphStore", () => {
     const nested = graph.addNode("project", 110, 90, project.id);
     graph.addNode("agent", 130, 130);
 
-    graph.attachToProject(graph.nodes.at(-1)?.id ?? "", nested.id, 140, 100);
+    graph.attachToContainer(graph.nodes.at(-1)?.id ?? "", nested.id, 140, 100);
 
     expect(graph.nodes.at(-1)?.parentId).toBeUndefined();
     expect(graph.nodes.at(-1)?.x).toBe(130);
@@ -242,7 +248,7 @@ describe("GraphStore", () => {
     graph.addNode("agent", 120, 100, first.id);
     graph.addNode("project", 300, 300);
 
-    graph.attachToProject(first.id, graph.nodes.at(-1)?.id ?? "", 320, 320);
+    graph.attachToContainer(first.id, graph.nodes.at(-1)?.id ?? "", 320, 320);
 
     expect(graph.nodes[0]?.parentId).toBeUndefined();
     expect(graph.nodes[0]?.x).toBe(100);
@@ -253,7 +259,7 @@ describe("GraphStore", () => {
     const graph = new GraphStore();
     graph.addNode("project", 100, 80);
 
-    graph.attachToProject(
+    graph.attachToContainer(
       graph.nodes[0]?.id ?? "",
       graph.nodes[0]?.id ?? "",
       120,
@@ -358,7 +364,7 @@ describe("GraphStore", () => {
     graph.addNode("agent", 0, 0);
     graph.setStart(graph.nodes[1]?.id ?? "", true);
 
-    graph.attachToProject(graph.nodes[1]?.id ?? "", project.id, 120, 100);
+    graph.attachToContainer(graph.nodes[1]?.id ?? "", project.id, 120, 100);
 
     expect(graph.nodes[1]?.start).toBe(false);
   });
@@ -431,7 +437,7 @@ describe("GraphStore", () => {
     graph.connect(first.id, second.id);
     const project = graph.addNode("project", 800, 800);
 
-    graph.attachToProject(second.id, project.id, 820, 820);
+    graph.attachToContainer(second.id, project.id, 820, 820);
 
     expect(graph.edges).toHaveLength(1);
     expect(graph.edges[0]?.from).toBe(first.id);
@@ -550,7 +556,102 @@ describe("GraphStore", () => {
     const child = graph.addNode("agent", 120, 100, gate.id);
 
     expect(child.parentId).toBe(gate.id);
-    expect(graph.projectAt(110, 90)?.id).toBe(gate.id);
+    expect(graph.containerAt(110, 90)?.id).toBe(gate.id);
+  });
+
+  test("adds a GitHub App node with a default name", () => {
+    const graph = new GraphStore();
+
+    const app = graph.addNode("githubapp", 0, 0);
+
+    expect(app.name).toBe("GitHub App 1");
+    expect(app.type).toBe("githubapp");
+  });
+
+  test("adding a GitHub App with a non-GitHub parent ignores the parent", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 100, 80);
+
+    const app = graph.addNode("githubapp", 120, 100, project.id);
+
+    expect(app.parentId).toBeUndefined();
+  });
+
+  test("adding an incompatible child with a GitHub parent ignores the parent", () => {
+    const graph = new GraphStore();
+    const github = graph.addNode("github", 100, 80);
+
+    const agent = graph.addNode("agent", 120, 100, github.id);
+
+    expect(agent.parentId).toBeUndefined();
+  });
+
+  test("attaching a GitHub App to a non-GitHub container is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("project", 100, 80);
+    graph.addNode("githubapp", 0, 0);
+
+    graph.attachToContainer(
+      graph.nodes[1]?.id ?? "",
+      graph.nodes[0]?.id ?? "",
+      120,
+      100,
+    );
+
+    expect(graph.nodes[1]?.parentId).toBeUndefined();
+  });
+
+  test("attaching an agent to a GitHub container is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("github", 100, 80);
+    graph.addNode("agent", 0, 0);
+
+    graph.attachToContainer(
+      graph.nodes[1]?.id ?? "",
+      graph.nodes[0]?.id ?? "",
+      120,
+      100,
+    );
+
+    expect(graph.nodes[1]?.parentId).toBeUndefined();
+  });
+
+  test("sets an app id on a GitHub App box", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("githubapp", 0, 0);
+
+    graph.setAppId(node.id, "123456");
+
+    expect(graph.nodes[0]?.appId).toBe("123456");
+  });
+
+  test("setting an app id on an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("githubapp", 0, 0);
+
+    graph.setAppId("not-a-node", "123456");
+
+    expect(graph.nodes[0]?.appId).toBeUndefined();
+  });
+
+  test("sets a private key path on a GitHub App box", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("githubapp", 0, 0);
+
+    graph.setPrivateKeyPath(node.id, "/home/user/.keys/github-app.pem");
+
+    expect(graph.nodes[0]?.privateKeyPath).toBe(
+      "/home/user/.keys/github-app.pem",
+    );
+  });
+
+  test("setting a private key path on an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("githubapp", 0, 0);
+
+    graph.setPrivateKeyPath("not-a-node", "/home/user/.keys/github-app.pem");
+
+    expect(graph.nodes[0]?.privateKeyPath).toBeUndefined();
   });
 
   test("moving a project carries its children along", () => {
@@ -597,19 +698,19 @@ describe("GraphStore", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 100, 80);
 
-    expect(graph.projectAt(100, 80)?.id).toBe(project.id);
-    expect(graph.projectAt(259, 143)?.id).toBe(project.id);
-    expect(graph.projectAt(261, 145)).toBeUndefined();
+    expect(graph.containerAt(100, 80)?.id).toBe(project.id);
+    expect(graph.containerAt(259, 143)?.id).toBe(project.id);
+    expect(graph.containerAt(261, 145)).toBeUndefined();
   });
 
-  test("projectAt ignores non-projects and already-nested projects", () => {
+  test("containerAt ignores non-containers and already-nested containers", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 100, 80);
     graph.addNode("agent", 120, 100, project.id);
     const nested = graph.addNode("project", 150, 90, project.id);
 
-    expect(graph.projectAt(110, 90)?.id).toBe(project.id);
-    expect(graph.projectAt(160, 100)?.id).toBe(project.id);
+    expect(graph.containerAt(110, 90)?.id).toBe(project.id);
+    expect(graph.containerAt(160, 100)?.id).toBe(project.id);
     expect(nested.parentId).toBe(project.id);
   });
 
@@ -624,7 +725,7 @@ describe("GraphStore", () => {
 });
 
 describe("PALETTE", () => {
-  test("offers the agent, tool, project, gatebase, github, and gitlab components", () => {
+  test("offers the agent, tool, project, gatebase, github, gitlab, and github app components", () => {
     expect(PALETTE).toEqual([
       { type: "agent", label: "Agent" },
       { type: "tool", label: "Tool" },
@@ -632,6 +733,27 @@ describe("PALETTE", () => {
       { type: "gatebase", label: "GateBase" },
       { type: "github", label: "GitHub" },
       { type: "gitlab", label: "GitLab" },
+      { type: "githubapp", label: "GitHub App" },
     ]);
+  });
+});
+
+describe("canHostChild", () => {
+  test("containers host every component except the GitHub App", () => {
+    expect(canHostChild("project", "agent")).toBe(true);
+    expect(canHostChild("gatebase", "github")).toBe(true);
+    expect(canHostChild("project", "githubapp")).toBe(false);
+    expect(canHostChild("gatebase", "githubapp")).toBe(false);
+  });
+
+  test("a GitHub hosts only GitHub Apps", () => {
+    expect(canHostChild("github", "githubapp")).toBe(true);
+    expect(canHostChild("github", "agent")).toBe(false);
+    expect(canHostChild("github", "project")).toBe(false);
+  });
+
+  test("non-containers host nothing", () => {
+    expect(canHostChild("agent", "agent")).toBe(false);
+    expect(canHostChild("githubapp", "agent")).toBe(false);
   });
 });
