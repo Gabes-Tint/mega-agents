@@ -710,4 +710,64 @@ describe("graph builder workspace", () => {
       ).not.toBeInTheDocument(),
     );
   });
+
+  test("marks the selected node as the start point from properties", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    expect(node).toHaveTextContent("▶");
+    expect(screen.getByLabelText("Starting point")).toBeChecked();
+  });
+
+  test("marking another sibling start clears the previous marker", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    await dropComponent("Agent");
+    const first = screen.getByRole("button", { name: "Agent 1" });
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+
+    await dropComponent("Agent", 100, 50);
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+
+    expect(screen.getByRole("button", { name: "Agent 2" })).toHaveTextContent(
+      "▶",
+    );
+    expect(first).not.toHaveTextContent("▶");
+  });
+
+  test("start markers in separate projects coexist", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    await dropComponent("Agent");
+    const first = screen.getByRole("button", { name: "Agent 1" });
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Agent", 430, 430);
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+
+    expect(first).toHaveTextContent("▶");
+    expect(screen.getByRole("button", { name: "Agent 2" })).toHaveTextContent(
+      "▶",
+    );
+  });
+
+  test("shows the checked state when a start node is selected", async () => {
+    render(Workspace);
+
+    await dropComponent("Agent");
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+    await dropComponent("Tool", 400, 400);
+    expect(screen.getByLabelText("Starting point")).not.toBeChecked();
+
+    await fireEvent.click(screen.getByText("Agent 1"));
+
+    expect(screen.getByLabelText("Starting point")).toBeChecked();
+  });
 });

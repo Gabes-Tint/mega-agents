@@ -199,6 +199,61 @@ test.describe("graph builder workspace", () => {
       .toBe(true);
   });
 
+  test("marks one start point per project", async ({ page }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Agent" }),
+      page.getByRole("button", { name: "Project 1" }),
+    );
+    const first = page.getByRole("button", { name: "Agent 1" });
+    await expect(first).toBeVisible();
+
+    await page.getByLabel("Starting point").check();
+    await expect(first).toContainText("▶");
+
+    const project = page.getByRole("button", { name: "Project 1" });
+    const projectBox = await project.boundingBox();
+    // Aim inside the project's box: Agent 1's center sits on the project's
+    // corner, which is outside the containment test.
+    const paletteAgent = page.getByRole("button", {
+      name: "Agent",
+      exact: true,
+    });
+    const paletteBox = await paletteAgent.boundingBox();
+    await page.mouse.move(
+      paletteBox.x + paletteBox.width / 2,
+      paletteBox.y + paletteBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(projectBox.x + 60, projectBox.y + 40, { steps: 10 });
+    await page.mouse.up();
+    const second = page.getByRole("button", { name: "Agent 2" });
+    await expect(second).toBeVisible();
+
+    // The invariant assertion below is what proves containment: only a
+    // sibling of Agent 1 (same project group) can take over its start flag.
+    await expect
+      .poll(async () => {
+        const box = await second.boundingBox();
+        return (
+          box.x >= projectBox.x + 20 &&
+          box.y >= projectBox.y + 20 &&
+          box.x < projectBox.x + projectBox.width &&
+          box.y < projectBox.y + projectBox.height
+        );
+      })
+      .toBe(true);
+
+    await page.getByLabel("Starting point").check();
+    await expect(second).toContainText("▶");
+    await expect(first).not.toContainText("▶");
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {

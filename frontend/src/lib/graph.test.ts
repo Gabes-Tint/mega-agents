@@ -285,6 +285,95 @@ describe("GraphStore", () => {
     expect(graph.nodes.at(-1)?.x).toBe(130);
   });
 
+  test("marks a node as the start point", () => {
+    const graph = new GraphStore();
+    graph.addNode("agent", 0, 0);
+
+    graph.setStart(graph.nodes[0]?.id ?? "", true);
+
+    expect(graph.nodes[0]?.start).toBe(true);
+  });
+
+  test("marking a sibling as start clears the previous start", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    graph.addNode("agent", 10, 10, project.id);
+    graph.addNode("tool", 20, 20, project.id);
+
+    graph.setStart(graph.nodes[1]?.id ?? "", true);
+    graph.setStart(graph.nodes[2]?.id ?? "", true);
+
+    expect(graph.nodes[1]?.start).toBe(false);
+    expect(graph.nodes[2]?.start).toBe(true);
+  });
+
+  test("each project keeps its own start point", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("project", 0, 0);
+    graph.addNode("agent", 10, 10, first.id);
+    const second = graph.addNode("project", 400, 400);
+    graph.addNode("tool", 410, 410, second.id);
+
+    graph.setStart(graph.nodes[1]?.id ?? "", true);
+    graph.setStart(graph.nodes[3]?.id ?? "", true);
+
+    expect(graph.nodes[1]?.start).toBe(true);
+    expect(graph.nodes[3]?.start).toBe(true);
+  });
+
+  test("top-level nodes share a single start point", () => {
+    const graph = new GraphStore();
+    graph.addNode("agent", 0, 0);
+    graph.addNode("tool", 400, 400);
+
+    graph.setStart(graph.nodes[0]?.id ?? "", true);
+    graph.setStart(graph.nodes[1]?.id ?? "", true);
+
+    expect(graph.nodes[0]?.start).toBe(false);
+    expect(graph.nodes[1]?.start).toBe(true);
+  });
+
+  test("unmarks a start point", () => {
+    const graph = new GraphStore();
+    graph.addNode("agent", 0, 0);
+    graph.setStart(graph.nodes[0]?.id ?? "", true);
+
+    graph.setStart(graph.nodes[0]?.id ?? "", false);
+
+    expect(graph.nodes[0]?.start).toBe(false);
+  });
+
+  test("setting a start point on an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("agent", 0, 0);
+
+    graph.setStart("not-a-node", true);
+
+    expect(graph.nodes[0]?.start).toBeUndefined();
+  });
+
+  test("attaching a flagged node clears its start flag", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 100, 80);
+    graph.addNode("agent", 0, 0);
+    graph.setStart(graph.nodes[1]?.id ?? "", true);
+
+    graph.attachToProject(graph.nodes[1]?.id ?? "", project.id, 120, 100);
+
+    expect(graph.nodes[1]?.start).toBe(false);
+  });
+
+  test("detaching a flagged node clears its start flag", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 100, 80);
+    graph.addNode("agent", 10, 10, project.id);
+    graph.setStart(graph.nodes[1]?.id ?? "", true);
+
+    graph.detachNode(graph.nodes[1]?.id ?? "", 300, 300);
+
+    expect(graph.nodes[1]?.start).toBe(false);
+  });
+
   test("moving a project carries its children along", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 30, 20);
