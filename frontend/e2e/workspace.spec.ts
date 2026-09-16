@@ -139,6 +139,66 @@ test.describe("graph builder workspace", () => {
     expect(moved.y).toBeCloseTo(before.y, 0);
   });
 
+  test("nests a dropped component inside a project box", async ({ page }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+    const project = page.getByRole("button", { name: "Project 1" });
+    await expect(project).toBeVisible();
+
+    const projectBox = await project.boundingBox();
+    await mouseDrag(page, page.getByRole("button", { name: "Agent" }), project);
+    const child = page.getByRole("button", { name: "Agent 1" });
+    await expect(child).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const childBox = await child.boundingBox();
+        return (
+          childBox.x >= projectBox.x &&
+          childBox.y >= projectBox.y &&
+          childBox.x < projectBox.x + projectBox.width &&
+          childBox.y < projectBox.y + projectBox.height
+        );
+      })
+      .toBe(true);
+  });
+
+  test("moves a project's children when the project is dragged", async ({
+    page,
+  }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+    const project = page.getByRole("button", { name: "Project 1" });
+    await mouseDrag(page, page.getByRole("button", { name: "Agent" }), project);
+    const child = page.getByRole("button", { name: "Agent 1" });
+    await expect(child).toBeVisible();
+    const before = await child.boundingBox();
+
+    // Drag the project by its header area (center of its top strip) so the
+    // grab point misses the child.
+    const projectBox = await project.boundingBox();
+    await page.mouse.move(projectBox.x + 20, projectBox.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(projectBox.x + 60, projectBox.y + 40, { steps: 8 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => {
+        const after = await child.boundingBox();
+        return (
+          Math.abs(after.x - (before.x + 40)) <= 2 &&
+          Math.abs(after.y - (before.y + 28)) <= 2
+        );
+      })
+      .toBe(true);
+  });
+
   test("closes the directory browser when clicking outside", async ({
     page,
   }) => {
