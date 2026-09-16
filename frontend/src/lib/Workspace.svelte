@@ -51,7 +51,7 @@
       <p class="yaml-error">{yamlError}</p>
     {/if}
   </div>
-  <Palette />
+  <Palette {graph} />
   <Canvas {graph} />
   <PropertiesPanel {graph} />
 </div>

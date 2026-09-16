@@ -7,8 +7,12 @@ import {
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
   PALETTE,
+  canExistTopLevel,
   canHostChild,
+  isContainerType,
   isForgeType,
+  rejectedDropHint,
+  shortNodeId,
   type NodeType,
 } from "./graph.svelte.js";
 
@@ -30,18 +34,18 @@ describe("GraphStore", () => {
   test("numbers nodes of the same type sequentially", () => {
     const graph = new GraphStore();
 
-    const first = graph.addNode("tool", 0, 0);
-    const second = graph.addNode("tool", 10, 10);
+    const first = graph.addNode("project", 0, 0);
+    const second = graph.addNode("project", 10, 10);
 
-    expect(first.name).toBe("Tool 1");
-    expect(second.name).toBe("Tool 2");
+    expect(first.name).toBe("Project 1");
+    expect(second.name).toBe("Project 2");
   });
 
   test("selection follows the requested node and can be cleared", () => {
     const graph = new GraphStore();
 
     const first = graph.addNode("agent", 0, 0);
-    const second = graph.addNode("tool", 10, 10);
+    const second = graph.addNode("project", 10, 10);
 
     graph.select(first.id);
     expect(graph.selected?.id).toBe(first.id);
@@ -232,16 +236,18 @@ describe("GraphStore", () => {
     expect(graph.nodes.at(-1)?.x).toBe(130);
   });
 
-  test("attaching to a project that is itself nested is a no-op", () => {
+  test("attaches to a project that is itself nested", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 100, 80);
     const nested = graph.addNode("project", 110, 90, project.id);
     graph.addNode("agent", 130, 130);
 
-    graph.attachToContainer(graph.nodes.at(-1)?.id ?? "", nested.id, 140, 100);
+    graph.attachToContainer(graph.nodes.at(-1)?.id ?? "", nested.id, 220, 180);
 
-    expect(graph.nodes.at(-1)?.parentId).toBeUndefined();
-    expect(graph.nodes.at(-1)?.x).toBe(130);
+    expect(graph.nodes.at(-1)?.parentId).toBe(nested.id);
+    // The drop position converts to the nested project's own coordinate space.
+    expect(graph.nodes.at(-1)?.x).toBe(10);
+    expect(graph.nodes.at(-1)?.y).toBe(10);
   });
 
   test("attaching a node that already has children is a no-op", () => {
@@ -306,7 +312,7 @@ describe("GraphStore", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 0, 0);
     graph.addNode("agent", 10, 10, project.id);
-    graph.addNode("tool", 20, 20, project.id);
+    graph.addNode("project", 20, 20, project.id);
 
     graph.setStart(graph.nodes[1]?.id ?? "", true);
     graph.setStart(graph.nodes[2]?.id ?? "", true);
@@ -320,7 +326,7 @@ describe("GraphStore", () => {
     const first = graph.addNode("project", 0, 0);
     graph.addNode("agent", 10, 10, first.id);
     const second = graph.addNode("project", 400, 400);
-    graph.addNode("tool", 410, 410, second.id);
+    graph.addNode("project", 410, 410, second.id);
 
     graph.setStart(graph.nodes[1]?.id ?? "", true);
     graph.setStart(graph.nodes[3]?.id ?? "", true);
@@ -332,7 +338,7 @@ describe("GraphStore", () => {
   test("top-level nodes share a single start point", () => {
     const graph = new GraphStore();
     graph.addNode("agent", 0, 0);
-    graph.addNode("tool", 400, 400);
+    graph.addNode("project", 400, 400);
 
     graph.setStart(graph.nodes[0]?.id ?? "", true);
     graph.setStart(graph.nodes[1]?.id ?? "", true);
@@ -385,7 +391,7 @@ describe("GraphStore", () => {
   test("connects two same-level nodes with an edge", () => {
     const graph = new GraphStore();
     const first = graph.addNode("agent", 0, 0);
-    const second = graph.addNode("tool", 400, 400);
+    const second = graph.addNode("project", 400, 400);
 
     expect(graph.connect(first.id, second.id)).toBe(true);
     expect(graph.edges).toHaveLength(1);
@@ -405,7 +411,7 @@ describe("GraphStore", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 0, 0);
     const child = graph.addNode("agent", 10, 10, project.id);
-    const top = graph.addNode("tool", 400, 400);
+    const top = graph.addNode("project", 400, 400);
 
     expect(graph.connect(project.id, child.id)).toBe(false);
     expect(graph.connect(top.id, child.id)).toBe(false);
@@ -415,7 +421,7 @@ describe("GraphStore", () => {
   test("rejects duplicate edges between the same pair", () => {
     const graph = new GraphStore();
     const first = graph.addNode("agent", 0, 0);
-    const second = graph.addNode("tool", 400, 400);
+    const second = graph.addNode("project", 400, 400);
     graph.connect(first.id, second.id);
 
     expect(graph.connect(first.id, second.id)).toBe(false);
@@ -425,7 +431,7 @@ describe("GraphStore", () => {
   test("rejects the reverse of an existing edge", () => {
     const graph = new GraphStore();
     const first = graph.addNode("agent", 0, 0);
-    const second = graph.addNode("tool", 400, 400);
+    const second = graph.addNode("project", 400, 400);
     graph.connect(first.id, second.id);
 
     expect(graph.connect(second.id, first.id)).toBe(false);
@@ -435,7 +441,7 @@ describe("GraphStore", () => {
   test("an edge persists when one of its boxes is nested later", () => {
     const graph = new GraphStore();
     const first = graph.addNode("agent", 0, 0);
-    const second = graph.addNode("tool", 400, 400);
+    const second = graph.addNode("project", 400, 400);
     graph.connect(first.id, second.id);
     const project = graph.addNode("project", 800, 800);
 
@@ -449,8 +455,8 @@ describe("GraphStore", () => {
   test("allows many outgoing edges from one box", () => {
     const graph = new GraphStore();
     const source = graph.addNode("agent", 0, 0);
-    const first = graph.addNode("tool", 400, 0);
-    const second = graph.addNode("tool", 400, 300);
+    const first = graph.addNode("project", 400, 0);
+    const second = graph.addNode("project", 400, 300);
 
     graph.connect(source.id, first.id);
     graph.connect(source.id, second.id);
@@ -463,7 +469,7 @@ describe("GraphStore", () => {
     const graph = new GraphStore();
     const first = graph.addNode("agent", 0, 0);
     const second = graph.addNode("agent", 0, 300);
-    const target = graph.addNode("tool", 400, 0);
+    const target = graph.addNode("project", 400, 0);
 
     graph.connect(first.id, target.id);
     graph.connect(second.id, target.id);
@@ -477,7 +483,7 @@ describe("GraphStore", () => {
     const first = graph.addNode("project", 0, 0);
     graph.addNode("agent", 10, 10, first.id);
     const second = graph.addNode("project", 400, 400);
-    graph.addNode("tool", 410, 410, second.id);
+    graph.addNode("project", 410, 410, second.id);
 
     expect(
       graph.connect(graph.nodes[1]?.id ?? "", graph.nodes[3]?.id ?? ""),
@@ -550,6 +556,41 @@ describe("GraphStore", () => {
 
     expect(child.parentId).toBe(github.id);
     expect(graph.containerAt(110, 90)?.id).toBe(github.id);
+  });
+
+  test("finds a nested GitHub box by its absolute position", () => {
+    const graph = new GraphStore();
+    graph.addNode("project", 100, 80);
+    const github = graph.addNode("github", 20, 10, graph.nodes[0]?.id ?? "");
+
+    // GitHub 1 sits at absolute (120, 90) inside the project.
+    expect(graph.containerAt(130, 100)?.id).toBe(github.id);
+    expect(graph.containerAt(105, 85)?.id).toBe(graph.nodes[0]?.id);
+  });
+
+  test("attaches a GitHub App to a GitHub box nested inside a project", () => {
+    const graph = new GraphStore();
+    graph.addNode("project", 100, 80);
+    const github = graph.addNode("github", 20, 10, graph.nodes[0]?.id ?? "");
+    graph.addNode("githubapp", 0, 0);
+
+    graph.attachToContainer(graph.nodes.at(-1)?.id ?? "", github.id, 140, 100);
+
+    expect(graph.nodes.at(-1)?.parentId).toBe(github.id);
+    expect(graph.nodes.at(-1)?.x).toBe(20);
+    expect(graph.nodes.at(-1)?.y).toBe(10);
+  });
+
+  test("a GitHub App nests regardless of how many parents the GitHub has", () => {
+    const graph = new GraphStore();
+    const outer = graph.addNode("project", 0, 0);
+    const middle = graph.addNode("project", 10, 10, outer.id);
+    const github = graph.addNode("github", 5, 5, middle.id);
+    graph.addNode("githubapp", 0, 0);
+
+    graph.attachToContainer(graph.nodes.at(-1)?.id ?? "", github.id, 30, 30);
+
+    expect(graph.nodes.at(-1)?.parentId).toBe(github.id);
   });
 
   test("adds a GitHub App node with a default name", () => {
@@ -665,7 +706,7 @@ describe("GraphStore", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 30, 20);
     graph.addNode("agent", 70, 30, project.id);
-    graph.addNode("tool", 300, 300);
+    graph.addNode("project", 300, 300);
 
     graph.moveNode(graph.nodes[1]?.id ?? "", 40, 10);
 
@@ -696,15 +737,23 @@ describe("GraphStore", () => {
     expect(graph.containerAt(261, 145)).toBeUndefined();
   });
 
-  test("containerAt ignores non-containers and already-nested containers", () => {
+  test("containerAt ignores non-containers", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 100, 80);
     graph.addNode("agent", 120, 100, project.id);
-    const nested = graph.addNode("project", 150, 90, project.id);
 
     expect(graph.containerAt(110, 90)?.id).toBe(project.id);
-    expect(graph.containerAt(160, 100)?.id).toBe(project.id);
-    expect(nested.parentId).toBe(project.id);
+    expect(project.parentId).toBeUndefined();
+  });
+
+  test("containerAt finds the innermost container at any depth", () => {
+    const graph = new GraphStore();
+    const outer = graph.addNode("project", 100, 80);
+    const inner = graph.addNode("project", 20, 20, outer.id);
+
+    // The inner project sits at absolute (120, 100).
+    expect(graph.containerAt(125, 105)?.id).toBe(inner.id);
+    expect(graph.containerAt(105, 85)?.id).toBe(outer.id);
   });
 
   test("labels unknown component types with the raw type", () => {
@@ -717,11 +766,36 @@ describe("GraphStore", () => {
   });
 });
 
+describe("shortNodeId", () => {
+  test("derives a stable three-character id from a node id", () => {
+    const id = "0b9e6c1e-5d4a-4f8b-9c3e-2a1b7d6f5e4c";
+
+    expect(shortNodeId(id)).toMatch(/^[0-9a-z]{3}$/);
+    expect(shortNodeId(id)).toBe(shortNodeId(id));
+  });
+
+  test("derives distinct short ids for different node ids", () => {
+    const codes = new Set(
+      Array.from({ length: 200 }, () => shortNodeId(crypto.randomUUID())),
+    );
+
+    expect(codes.size).toBeGreaterThan(150);
+  });
+
+  test("derives distinct short ids for the live store nodes", () => {
+    const graph = new GraphStore();
+    for (const type of PALETTE) graph.addNode(type.type, 0, 0);
+
+    const codes = graph.nodes.map((node) => shortNodeId(node.id));
+
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+});
+
 describe("PALETTE", () => {
-  test("offers the agent, tool, project, github, gitlab, and github app components", () => {
+  test("offers the agent, project, github, gitlab, and github app components", () => {
     expect(PALETTE).toEqual([
       { type: "agent", label: "Agent" },
-      { type: "tool", label: "Tool" },
       { type: "project", label: "Project" },
       { type: "github", label: "GitHub" },
       { type: "gitlab", label: "GitLab" },
@@ -742,20 +816,61 @@ describe("GitBase abstraction", () => {
 });
 
 describe("canHostChild", () => {
-  test("projects host every component except the GitHub App", () => {
-    expect(canHostChild("project", "agent")).toBe(true);
-    expect(canHostChild("project", "github")).toBe(true);
-    expect(canHostChild("project", "githubapp")).toBe(false);
+  // The containment matrix agreed with the product owner: rows are dropped
+  // blocks, columns are the targets that accept them (root = empty canvas).
+  const matrix = [
+    ["agent", { root: false, project: true, github: false, agent: true }],
+    ["project", { root: true, project: true, github: false, agent: false }],
+    ["github", { root: false, project: true, github: false, agent: false }],
+    ["gitlab", { root: false, project: true, github: false, agent: false }],
+    ["githubapp", { root: false, project: false, github: true, agent: false }],
+  ] as const;
+
+  for (const [childType, targets] of matrix) {
+    test(`${childType} drops follow the containment matrix`, () => {
+      expect(canHostChild("root", childType)).toBe(targets.root);
+      expect(canHostChild("project", childType)).toBe(targets.project);
+      expect(canHostChild("github", childType)).toBe(targets.github);
+      expect(canHostChild("agent", childType)).toBe(targets.agent);
+      expect(canHostChild("gitlab", childType)).toBe(false);
+      expect(canHostChild("githubapp", childType)).toBe(false);
+    });
+  }
+});
+
+describe("root-level and hint rules", () => {
+  test("only a project may exist at the top level of the canvas", () => {
+    expect(canExistTopLevel("project")).toBe(true);
+    expect(canExistTopLevel("agent")).toBe(false);
+    expect(canExistTopLevel("github")).toBe(false);
+    expect(canExistTopLevel("gitlab")).toBe(false);
+    expect(canExistTopLevel("githubapp")).toBe(false);
   });
 
-  test("a GitHub hosts only GitHub Apps", () => {
-    expect(canHostChild("github", "githubapp")).toBe(true);
-    expect(canHostChild("github", "agent")).toBe(false);
-    expect(canHostChild("github", "project")).toBe(false);
+  test("an agent hosts other agents as a container", () => {
+    expect(isContainerType("agent")).toBe(true);
+    expect(isContainerType("gitlab")).toBe(false);
+    expect(isContainerType("githubapp")).toBe(false);
   });
 
-  test("non-containers host nothing", () => {
-    expect(canHostChild("agent", "agent")).toBe(false);
-    expect(canHostChild("githubapp", "agent")).toBe(false);
+  test("explains a root-level rejection with the allowed targets", () => {
+    expect(rejectedDropHint("githubapp")).toBe(
+      "A GitHub App can only be dropped inside a GitHub box.",
+    );
+    expect(rejectedDropHint("agent")).toBe(
+      "An Agent can only be dropped inside a project box or another agent.",
+    );
+    expect(rejectedDropHint("github")).toBe(
+      "A GitHub can only be dropped inside a project box.",
+    );
+  });
+
+  test("explains an incompatible container rejection", () => {
+    expect(rejectedDropHint("agent", "github")).toBe(
+      "An Agent cannot be placed inside a GitHub box.",
+    );
+    expect(rejectedDropHint("githubapp", "project")).toBe(
+      "A GitHub App cannot be placed inside a project box.",
+    );
   });
 });

@@ -35,7 +35,7 @@ function canvas() {
 // applies DOM updates in a microtask after dispatchEvent returns, so the
 // helper yields a task tick before returning.
 async function dispatchDragEvent(
-  type: "dragstart" | "drop",
+  type: "dragstart" | "drop" | "dragover" | "dragleave",
   target: Element,
   init: { dataTransfer?: FakeDataTransfer; clientX?: number; clientY?: number },
 ) {
@@ -59,6 +59,13 @@ function dispatchDrop(
   init: { dataTransfer?: FakeDataTransfer; clientX?: number; clientY?: number },
 ) {
   dispatchDragEvent("drop", target, init);
+}
+
+function dispatchDragOver(
+  target: Element,
+  init: { dataTransfer?: FakeDataTransfer; clientX?: number; clientY?: number },
+) {
+  dispatchDragEvent("dragover", target, init);
 }
 
 async function dropComponent(label: string, clientX = 30, clientY = 20) {
@@ -100,6 +107,7 @@ describe("graph builder workspace", () => {
     });
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     await fireEvent.click(
       screen.getByRole("button", { name: "Download YAML" }),
@@ -113,7 +121,10 @@ describe("graph builder workspace", () => {
       nodes: Array<{ name: string }>;
       edges: unknown[];
     };
-    expect(body.nodes.map((node) => node.name)).toEqual(["Agent 1"]);
+    expect(body.nodes.map((node) => node.name)).toEqual([
+      "Project 1",
+      "Agent 1",
+    ]);
     expect(body.edges).toEqual([]);
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
     expect(clicks[0]?.download).toBe("issue-to-pull-request.yaml");
@@ -130,6 +141,7 @@ describe("graph builder workspace", () => {
     );
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     await fireEvent.click(
       screen.getByRole("button", { name: "Download YAML" }),
@@ -148,6 +160,7 @@ describe("graph builder workspace", () => {
     );
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     await fireEvent.click(
       screen.getByRole("button", { name: "Download YAML" }),
@@ -169,9 +182,6 @@ describe("graph builder workspace", () => {
       screen.getByRole("button", { name: "Agent" }),
     );
     expect(palette).toContainElement(
-      screen.getByRole("button", { name: "Tool" }),
-    );
-    expect(palette).toContainElement(
       screen.getByRole("button", { name: "Project" }),
     );
     expect(palette).toContainElement(
@@ -185,10 +195,12 @@ describe("graph builder workspace", () => {
   test("shows repository and secret key fields only for forge boxes", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     expect(screen.queryByLabelText("Repository")).not.toBeInTheDocument();
 
-    await dropComponent("GitHub", 400, 400);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("GitHub", 410, 410);
 
     expect(screen.getByText("Type: github")).toBeInTheDocument();
     expect(screen.getByLabelText("Repository")).toBeInTheDocument();
@@ -199,7 +211,8 @@ describe("graph builder workspace", () => {
   test("captures repository and secret key values for a GitHub box", async () => {
     render(Workspace);
 
-    await dropComponent("GitHub");
+    await dropComponent("Project", 400, 400);
+    await dropComponent("GitHub", 410, 410);
 
     await fireEvent.input(screen.getByLabelText("Repository"), {
       target: { value: "https://github.com/example/project" },
@@ -208,7 +221,8 @@ describe("graph builder workspace", () => {
       target: { value: "secret://github-bot" },
     });
 
-    await dropComponent("Tool", 400, 400);
+    await dropComponent("Project", 700, 700);
+    await fireEvent.click(screen.getByText("Project 2"));
     await fireEvent.click(screen.getByText("GitHub 1"));
 
     expect(screen.getByLabelText("Repository")).toHaveValue(
@@ -222,7 +236,8 @@ describe("graph builder workspace", () => {
   test("captures repository and secret key values for a GitLab box", async () => {
     render(Workspace);
 
-    await dropComponent("GitLab");
+    await dropComponent("Project", 400, 400);
+    await dropComponent("GitLab", 410, 410);
 
     await fireEvent.input(screen.getByLabelText("Repository"), {
       target: { value: "https://gitlab.com/example/project" },
@@ -231,7 +246,8 @@ describe("graph builder workspace", () => {
       target: { value: "secret://gitlab-bot" },
     });
 
-    await dropComponent("Tool", 400, 400);
+    await dropComponent("Project", 700, 700);
+    await fireEvent.click(screen.getByText("Project 2"));
     await fireEvent.click(screen.getByText("GitLab 1"));
 
     expect(screen.getByLabelText("Repository")).toHaveValue(
@@ -260,19 +276,22 @@ describe("graph builder workspace", () => {
     await dropComponent("GitHub App", 30, 20);
 
     expect(
-      screen.getByText("A GitHub App must be dropped inside a GitHub box"),
+      screen.getByText("A GitHub App can only be dropped inside a GitHub box."),
     ).toBeInTheDocument();
 
     // The hint clears on the next drop so it cannot go stale.
-    await dropComponent("Agent", 400, 400);
+    await dropComponent("Project", 400, 400);
     expect(
-      screen.queryByText("A GitHub App must be dropped inside a GitHub box"),
+      screen.queryByText(
+        "A GitHub App can only be dropped inside a GitHub box.",
+      ),
     ).not.toBeInTheDocument();
   });
 
   test("adds a node to the canvas when a palette component is dropped", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
 
     expect(canvas()).toContainElement(screen.getByText("Agent 1"));
@@ -284,6 +303,7 @@ describe("graph builder workspace", () => {
     Object.defineProperty(scrolled, "scrollLeft", { get: () => 50 });
     Object.defineProperty(scrolled, "scrollTop", { get: () => 40 });
 
+    await dropComponent("Project");
     await dropComponent("Agent");
 
     expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
@@ -295,6 +315,7 @@ describe("graph builder workspace", () => {
   test("selects the dropped node so its properties appear on the right", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
 
     const properties = screen.getByRole("complementary", {
@@ -334,7 +355,7 @@ describe("graph builder workspace", () => {
     render(Workspace);
 
     expect(() =>
-      fireEvent.dragStart(screen.getByRole("button", { name: "Tool" }), {}),
+      fireEvent.dragStart(screen.getByRole("button", { name: "Project" }), {}),
     ).not.toThrow();
   });
 
@@ -351,6 +372,7 @@ describe("graph builder workspace", () => {
   test("moves an existing node when it is dragged to a new position", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
 
@@ -368,6 +390,7 @@ describe("graph builder workspace", () => {
     Object.defineProperty(scrolled, "scrollLeft", { get: () => 50 });
     Object.defineProperty(scrolled, "scrollTop", { get: () => 40 });
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
 
@@ -381,6 +404,7 @@ describe("graph builder workspace", () => {
   test("keeps a node in place when drag data does not match the drop", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
 
@@ -401,6 +425,7 @@ describe("graph builder workspace", () => {
   test("tolerates dragging a node without drag data", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
 
@@ -418,6 +443,7 @@ describe("graph builder workspace", () => {
   test("keeps a node in place when a drop references it without a drag", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
 
@@ -433,6 +459,7 @@ describe("graph builder workspace", () => {
   test("renders a resize handle on the dropped node", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
 
@@ -442,6 +469,7 @@ describe("graph builder workspace", () => {
   test("resizes a node by dragging its handle", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
     const handle = node.querySelector(".resize-handle");
@@ -462,6 +490,7 @@ describe("graph builder workspace", () => {
   test("resizing keeps the box dimensions above their minimums", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
     const handle = node.querySelector(".resize-handle");
@@ -482,6 +511,7 @@ describe("graph builder workspace", () => {
   test("resizing a node keeps its size when it is later moved", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
     const handle = node.querySelector(".resize-handle");
@@ -507,9 +537,10 @@ describe("graph builder workspace", () => {
   test("selects the node when its resize handle is pressed", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
-    await dropComponent("Tool");
-    await fireEvent.click(screen.getByText("Tool 1"));
+    await dropComponent("Project", 400, 400);
+    await fireEvent.click(screen.getByText("Project 2"));
 
     const node = screen.getByRole("button", { name: "Agent 1" });
     const handle = node.querySelector(".resize-handle");
@@ -529,6 +560,7 @@ describe("graph builder workspace", () => {
   test("ignores resize presses that are not the primary button", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
     const handle = node.querySelector(".resize-handle");
@@ -549,6 +581,7 @@ describe("graph builder workspace", () => {
   test("ends a resize gesture when the pointer is cancelled", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
     const handle = node.querySelector(".resize-handle");
@@ -700,6 +733,7 @@ describe("graph builder workspace", () => {
   test("updates the node label when the name property is edited", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
 
     await fireEvent.input(screen.getByLabelText("Name"), {
@@ -713,13 +747,14 @@ describe("graph builder workspace", () => {
   test("selects a different node by clicking it on the canvas", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
-    await dropComponent("Tool");
+    await dropComponent("Project", 400, 400);
     await fireEvent.click(screen.getByText("Agent 1"));
 
     expect(screen.getByLabelText("Name")).toHaveValue("Agent 1");
     expect(screen.getByRole("button", { name: "Agent 1" })).toBePressed();
-    expect(screen.getByRole("button", { name: "Tool 1" })).not.toBePressed();
+    expect(screen.getByRole("button", { name: "Project 2" })).not.toBePressed();
   });
 
   test("creates a project node from the palette", async () => {
@@ -733,10 +768,11 @@ describe("graph builder workspace", () => {
   test("shows folder controls only for project nodes", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     expect(screen.queryByLabelText("Path")).not.toBeInTheDocument();
 
-    await dropComponent("Project");
+    await dropComponent("Project", 400, 400);
 
     expect(screen.getByText("Type: project")).toBeInTheDocument();
     expect(screen.getByLabelText("Path")).toBeInTheDocument();
@@ -892,6 +928,7 @@ describe("graph builder workspace", () => {
   test("marks the selected node as the start point from properties", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
 
     await fireEvent.click(screen.getByLabelText("Starting point"));
@@ -905,11 +942,13 @@ describe("graph builder workspace", () => {
     render(Workspace);
 
     await dropComponent("Project");
-    await dropComponent("Agent");
+    await dropComponent("Agent", 100, 50);
     const first = screen.getByRole("button", { name: "Agent 1" });
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
-    await dropComponent("Agent", 100, 50);
+    // Agent 1's box spans (100..260, 50..114); (30, 30) stays inside the
+    // project but outside Agent 1, so Agent 2 becomes its sibling.
+    await dropComponent("Agent", 30, 30);
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
     expect(screen.getByRole("button", { name: "Agent 2" })).toHaveTextContent(
@@ -922,7 +961,7 @@ describe("graph builder workspace", () => {
     render(Workspace);
 
     await dropComponent("Project");
-    await dropComponent("Agent");
+    await dropComponent("Agent", 100, 50);
     const first = screen.getByRole("button", { name: "Agent 1" });
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
@@ -939,9 +978,10 @@ describe("graph builder workspace", () => {
   test("shows the checked state when a start node is selected", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     await fireEvent.click(screen.getByLabelText("Starting point"));
-    await dropComponent("Tool", 400, 400);
+    await dropComponent("Project", 400, 400);
     expect(screen.getByLabelText("Starting point")).not.toBeChecked();
 
     await fireEvent.click(screen.getByText("Agent 1"));
@@ -952,6 +992,7 @@ describe("graph builder workspace", () => {
   test("renders the node name in a header with a separator below it", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     const node = screen.getByRole("button", { name: "Agent 1" });
     const title = node.querySelector(".node-title");
@@ -959,59 +1000,163 @@ describe("graph builder workspace", () => {
     expect(node.querySelector(".node-separator")).toBeInTheDocument();
   });
 
-  test("places a rejected palette drop at the exact content position", async () => {
+  test("rejects an agent dropped on a box that cannot host it", async () => {
     render(Workspace);
 
-    await dropComponent("GitHub");
+    await dropComponent("Project");
+    // GitHub 1 nests inside Project 1 (spans 30..190, 20..84) and renders at
+    // (100, 50), spanning (100..260, 50..114).
+    await dropComponent("GitHub", 100, 50);
 
-    // GitHub hosts only GitHub Apps: an agent landing on its box falls
-    // through to a top-level box at the drop point (100..190, 50..114 covers
-    // GitHub 1's box at (30, 20)).
-    await dropComponent("Agent", 100, 50);
+    // The agent's drop point sits inside the GitHub box: per the matrix the
+    // GitHub cannot host it and the empty canvas will not take it either.
+    await dropComponent("Agent", 140, 70);
 
-    expect(screen.getByRole("button", { name: "Agent 1" })).toHaveStyle({
-      left: "100px",
-      top: "50px",
+    expect(
+      screen.queryByRole("button", { name: "Agent 1" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("An Agent cannot be placed inside a GitHub box."),
+    ).toBeInTheDocument();
+  });
+
+  test("places a project dropped over an incompatible container at the top level", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    // GitHub 1 nests in Project 1 and renders at (100, 50), spanning
+    // (100..260, 50..114).
+    await dropComponent("GitHub", 100, 50);
+
+    // The GitHub box cannot host a project, but the empty canvas accepts
+    // one: the project lands at the exact content position.
+    await dropComponent("Project", 140, 70);
+
+    expect(screen.getByRole("button", { name: "Project 2" })).toHaveStyle({
+      left: "140px",
+      top: "70px",
     });
   });
 
   test("keeps an incompatible child drop inside its own parent", async () => {
     render(Workspace);
 
-    await dropComponent("GitHub");
-    await dropComponent("GitHub App");
+    await dropComponent("Project", 400, 400);
+    await dropComponent("GitHub", 410, 410);
+    await dropComponent("GitHub App", 420, 420);
     const app = screen.getByRole("button", { name: "GitHub App 1" });
 
-    await dropComponent("Project", 400, 300);
+    await dropComponent("Project", 700, 300);
 
     const dataTransfer = makeDataTransfer();
     await dispatchDragStart(app, { dataTransfer, clientX: 0, clientY: 0 });
-    await dispatchDrop(canvas(), { dataTransfer, clientX: 430, clientY: 320 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 720, clientY: 320 });
 
-    // Project 1 spans (400..560, 300..364); the GitHub App must not nest
+    // Project 2 spans (700..860, 300..364); the GitHub App must not nest
     // into it — it stays a child of GitHub 1 and renders at the pointer.
-    expect(app).toHaveStyle({ left: "430px", top: "320px" });
+    expect(app).toHaveStyle({ left: "720px", top: "320px" });
   });
 
-  test("moves a top-level box dropped over an incompatible container", async () => {
+  test("highlights the target container while a palette drag is in flight", async () => {
     render(Workspace);
 
-    await dropComponent("GitHub");
-    await dropComponent("Agent", 400, 300);
+    await dropComponent("Project");
+    // GitHub 1 nests inside Project 1 and renders at (100, 50), spanning
+    // (100..260, 50..114).
+    await dropComponent("GitHub", 100, 50);
+
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+
+    // A point inside Project 1 but outside GitHub 1 previews as valid.
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 140,
+      clientY: 30,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Project 1" })).toHaveClass(
+        /drop-ok/,
+      ),
+    );
+
+    // The GitHub box cannot host an agent and agents are forbidden at the
+    // root, so the preview flips to the invalid state.
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 140,
+      clientY: 70,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "GitHub 1" })).toHaveClass(
+        /drop-no/,
+      ),
+    );
+
+    // Leaving the canvas clears the preview.
+    await dispatchDragEvent("dragleave", canvas(), {});
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "GitHub 1" })).not.toHaveClass(
+        /drop-no/,
+      ),
+    );
+  });
+
+  test("nests a GitHub App inside a GitHub box that sits in a project", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    // GitHub 1 lands inside Project 1 (spans 30..190, 20..84) and renders at
+    // its absolute position (100, 50) spanning (100..260, 50..114).
+    await dropComponent("GitHub", 100, 50);
+
+    await dropComponent("GitHub App", 140, 70);
+
+    // The drop resolves to the nested GitHub box, not the enclosing project.
+    expect(screen.getByRole("button", { name: "GitHub App 1" })).toHaveStyle({
+      left: "140px",
+      top: "70px",
+    });
+  });
+
+  test("shows a tiny three-character id at the right of the block header", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const id = node.querySelector(".node-id");
+
+    expect(id).toBeInTheDocument();
+    expect(id).toHaveTextContent(/^[0-9a-z]{3}$/);
+  });
+
+  test("keeps a root-forbidden box in its parent when dropped over an incompatible container", async () => {
+    render(Workspace);
+
+    await dropComponent("Project", 400, 400);
+    // GitHub 1 nests in Project 1 and renders at (410, 410), spanning
+    // (410..570, 410..474).
+    await dropComponent("GitHub", 410, 410);
+    // (400, 405) is inside Project 1 but just outside the GitHub box.
+    await dropComponent("Agent", 400, 405);
     const agent = screen.getByRole("button", { name: "Agent 1" });
 
     const dataTransfer = makeDataTransfer();
     await dispatchDragStart(agent, { dataTransfer, clientX: 0, clientY: 0 });
-    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 50 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 450, clientY: 420 });
 
-    // GitHub 1 at (30, 20) cannot host an agent: the box moves to the drop
-    // point as a top-level box instead of freezing.
-    expect(agent).toHaveStyle({ left: "100px", top: "50px" });
+    // The GitHub box cannot host an agent and the matrix forbids agents at
+    // the root, so the agent stays a child of Project 1 at the drop point.
+    expect(agent).toHaveStyle({ left: "450px", top: "420px" });
   });
 
   test("keeps the start badge inside the header", async () => {
     render(Workspace);
 
+    await dropComponent("Project");
     await dropComponent("Agent");
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
@@ -1024,15 +1169,15 @@ describe("graph builder workspace", () => {
   test("connects two top-level boxes with an arrow from properties", async () => {
     render(Workspace);
 
-    await dropComponent("Agent");
-    await dropComponent("Tool", 400, 400);
-    await fireEvent.click(screen.getByText("Agent 1"));
+    await dropComponent("Project");
+    await dropComponent("Project", 400, 400);
+    await fireEvent.click(screen.getByText("Project 1"));
 
     const connect = screen.getByRole("button", { name: "Connect" });
     await fireEvent.click(connect);
     expect(connect).toBePressed();
 
-    await fireEvent.click(screen.getByText("Tool 1"));
+    await fireEvent.click(screen.getByText("Project 2"));
 
     expect(canvas().querySelectorAll(".edge-line")).toHaveLength(1);
     expect(connect).not.toBePressed();
@@ -1055,14 +1200,14 @@ describe("graph builder workspace", () => {
   test("ignores a second connection attempt for the same pair", async () => {
     render(Workspace);
 
-    await dropComponent("Agent");
-    await dropComponent("Tool", 400, 400);
-    await fireEvent.click(screen.getByText("Agent 1"));
+    await dropComponent("Project");
+    await dropComponent("Project", 400, 400);
+    await fireEvent.click(screen.getByText("Project 1"));
 
     await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Tool 1"));
+    await fireEvent.click(screen.getByText("Project 2"));
     await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Tool 1"));
+    await fireEvent.click(screen.getByText("Project 2"));
 
     expect(canvas().querySelectorAll(".edge-line")).toHaveLength(1);
   });
@@ -1070,14 +1215,14 @@ describe("graph builder workspace", () => {
   test("ends the arrow at the target box border so the head stays visible", async () => {
     render(Workspace);
 
-    await dropComponent("Agent");
-    await dropComponent("Tool", 400, 400);
-    await fireEvent.click(screen.getByText("Agent 1"));
+    await dropComponent("Project");
+    await dropComponent("Project", 400, 400);
+    await fireEvent.click(screen.getByText("Project 1"));
 
     await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Tool 1"));
+    await fireEvent.click(screen.getByText("Project 2"));
 
-    // Tool 1 centers at (480, 432); the trimmed line must stop on its top
+    // Project 2 centers at (480, 432); the trimmed line must stop on its top
     // edge (y = 400) rather than at the hidden center point.
     const line = canvas().querySelector(".edge-line");
     expect(line).not.toBeNull();
@@ -1090,15 +1235,15 @@ describe("graph builder workspace", () => {
   test("canceling connect mode deselects without drawing an edge", async () => {
     render(Workspace);
 
-    await dropComponent("Agent");
-    await dropComponent("Tool", 400, 400);
+    await dropComponent("Project");
+    await dropComponent("Project", 400, 400);
 
     const connect = screen.getByRole("button", { name: "Connect" });
     await fireEvent.click(connect);
     await fireEvent.click(connect);
 
     expect(connect).not.toBePressed();
-    await fireEvent.click(screen.getByText("Tool 1"));
+    await fireEvent.click(screen.getByText("Project 2"));
     expect(canvas().querySelectorAll(".edge-line")).toHaveLength(0);
   });
 });

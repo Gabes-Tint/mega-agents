@@ -1,14 +1,25 @@
 <script lang="ts">
-  import { PALETTE, type PaletteItem } from "./graph.svelte.js";
+  import {
+    PALETTE,
+    type GraphStore,
+    type PaletteItem,
+  } from "./graph.svelte.js";
+
+  let { graph }: { graph: GraphStore } = $props();
 
   function startDrag(event: DragEvent, item: PaletteItem) {
     if (!event.dataTransfer) return;
     event.dataTransfer.setData("text/plain", item.type);
     event.dataTransfer.effectAllowed = "copy";
+    graph.draggingType = item.type;
+  }
+
+  function endDrag() {
+    graph.draggingType = null;
   }
 </script>
 
-<aside aria-label="Component palette">
+<aside aria-label="Component palette" ondragend={endDrag}>
   <h2>Components</h2>
   <ul>
     {#each PALETTE as item (item.type)}

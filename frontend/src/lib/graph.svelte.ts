@@ -1,5 +1,8 @@
-export type NodeType =
-  "agent" | "tool" | "project" | "github" | "gitlab" | "githubapp";
+export type NodeType = "agent" | "project" | "github" | "gitlab" | "githubapp";
+
+// The canvas root as a pseudo target so the containment matrix covers
+// top-level drops in the same table as nested drops.
+export type DropTarget = NodeType | "root";
 
 export interface GraphEdge {
   id: string;
@@ -36,18 +39,94 @@ export const MIN_NODE_HEIGHT = 48;
 
 export const PALETTE: readonly PaletteItem[] = [
   { type: "agent", label: "Agent" },
-  { type: "tool", label: "Tool" },
   { type: "project", label: "Project" },
   { type: "github", label: "GitHub" },
   { type: "gitlab", label: "GitLab" },
   { type: "githubapp", label: "GitHub App" },
 ];
 
-// Boxes that can host nested children one level deep.
-const CONTAINER_TYPES: readonly NodeType[] = ["project", "github"];
+// Single source of truth for where a block may go, agreed with the product
+// owner. Keys are the block being dropped; the arrays are every target that
+// accepts it, including the canvas root as a pseudo target. Anything absent
+// from a target's list is rejected.
+export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
+  agent: ["project", "agent"],
+  project: ["root", "project"],
+  github: ["project"],
+  gitlab: ["project"],
+  githubapp: ["github"],
+};
+
+// Boxes that can host children: every target that appears as a parent in
+// the containment matrix.
+export const CONTAINER_TYPES: readonly NodeType[] = (
+  ["agent", "project", "github", "gitlab", "githubapp"] as NodeType[]
+).filter((type) =>
+  Object.values(CONTAINMENT_MATRIX).some((targets) => targets.includes(type)),
+);
 
 export function isContainerType(type: NodeType): boolean {
   return CONTAINER_TYPES.includes(type);
+}
+
+export function canHostChild(
+  parentType: DropTarget,
+  childType: NodeType,
+): boolean {
+  return CONTAINMENT_MATRIX[childType].includes(parentType);
+}
+
+// Whether the block may exist at the top level of the canvas, straight from
+// the matrix's root column.
+export function canExistTopLevel(type: NodeType): boolean {
+  return canHostChild("root", type);
+}
+
+function article(label: string): string {
+  return /^[aeiou]/i.test(label) ? "an" : "a";
+}
+
+// Explanation for a rejected palette drop: either the container is not
+// allowed to host the block, or the empty canvas does not accept it.
+export function rejectedDropHint(
+  type: NodeType,
+  containerType?: NodeType,
+): string {
+  const label = labelFor(type);
+  const articleLabel = `${article(label)} ${label}`;
+  const sentence = containerType
+    ? `${articleLabel} cannot be placed inside ${article(labelFor(containerType))} ${TARGET_LABELS[containerType]} box.`
+    : `${articleLabel} can only be dropped inside ${allowedTargetsLabel(type)}.`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
+// How a target type is spelled inside explanations for rejected drops:
+// lowercase for common nouns, brand casing for the forge products.
+const TARGET_LABELS: Record<NodeType, string> = {
+  agent: "agent",
+  project: "project",
+  github: "GitHub",
+  gitlab: "GitLab",
+  githubapp: "GitHub App",
+};
+
+// Human-readable list of the targets a block may be dropped into, used to
+// explain rejected drops.
+export function allowedTargetsLabel(type: NodeType): string {
+  const labels = CONTAINMENT_MATRIX[type]
+    .filter((target): target is NodeType => target !== "root")
+    .map((target) => {
+      if (target === type) return `another ${TARGET_LABELS[type]}`;
+      return `a ${TARGET_LABELS[target]} box`;
+    });
+  if (labels.length === 0) return "nothing";
+  if (labels.length === 1) return labels[0] ?? "nothing";
+  const last = labels.at(-1) ?? "nothing";
+  return `${labels.slice(0, -1).join(", ")} or ${last}`;
+}
+
+export function labelFor(type: NodeType): string {
+  return PALETTE.find((item) => item.type === type)?.label ?? type;
 }
 
 // GitBase is the abstract base the GitHub and GitLab controllers derive
@@ -60,25 +139,19 @@ export function isForgeType(type: NodeType): boolean {
   return GIT_BASE_TYPES.includes(type);
 }
 
-// General containers accept every component except the GitHub App, which
-// nests only inside a GitHub controller; a GitHub hosts nothing else.
-export function canHostChild(
-  parentType: NodeType,
-  childType: NodeType,
-): boolean {
-  if (childType === "githubapp") return parentType === "github";
-  if (parentType === "github") return false;
-  return isContainerType(parentType);
-}
-
-// A GitHub App is always a child object: it can never exist at the top
-// level of the canvas.
-export function canExistTopLevel(type: NodeType): boolean {
-  return type !== "githubapp";
+// Tiny three-character identifier shown in the block header, derived
+// deterministically from the node id so it stays stable across sessions.
+export function shortNodeId(id: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < id.length; index++) {
+    hash ^= id.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36).padStart(3, "0").slice(-3);
 }
 
 function paletteLabel(type: NodeType): string {
-  return PALETTE.find((item) => item.type === type)?.label ?? type;
+  return labelFor(type);
 }
 
 export class GraphStore {
@@ -87,9 +160,31 @@ export class GraphStore {
   selectedId = $state<string | null>(null);
   connecting = $state(false);
   connectFromId = $state<string | null>(null);
+  // Component type currently dragged from the palette; dataTransfer.getData
+  // is protected while a drag is in flight, so the type travels through the
+  // store to power live dragover validation on the canvas.
+  draggingType = $state<NodeType | null>(null);
 
   get selected(): GraphNode | undefined {
     return this.nodes.find((node) => node.id === this.selectedId);
+  }
+
+  // Content-space position of a box, accumulated over its full parent chain
+  // so arbitrarily deep nesting resolves correctly.
+  absolutePosition(node: GraphNode): { x: number; y: number } {
+    let x = node.x;
+    let y = node.y;
+    let current = node;
+    while (current.parentId) {
+      const parent = this.nodes.find(
+        (candidate) => candidate.id === current.parentId,
+      );
+      if (!parent) break;
+      x += parent.x;
+      y += parent.y;
+      current = parent;
+    }
+    return { x, y };
   }
 
   addNode(type: NodeType, x: number, y: number, parentId?: string): GraphNode {
@@ -142,10 +237,8 @@ export class GraphStore {
       !node ||
       !parent ||
       parentId === id ||
-      // Nesting is one level deep: neither the host nor the incoming box may
-      // already participate in a parent-child relationship, and the child
-      // type must be allowed inside this container.
-      parent.parentId !== undefined ||
+      // Containers may sit at any depth, so only the child-type rule and the
+      // has-children guard apply: a box that itself holds children stays put.
       !canHostChild(parent.type, node.type) ||
       this.hasChildren(id)
     )
@@ -154,9 +247,10 @@ export class GraphStore {
     // drop position converts to parent-relative coordinates here. A flagged
     // start point cannot cross containers without breaking the single-start
     // rule, so it arrives unflagged.
+    const parentOrigin = this.absolutePosition(parent);
     node.parentId = parentId;
-    node.x = absoluteX - parent.x;
-    node.y = absoluteY - parent.y;
+    node.x = absoluteX - parentOrigin.x;
+    node.y = absoluteY - parentOrigin.y;
     node.start = false;
   }
 
@@ -220,24 +314,45 @@ export class GraphStore {
     return this.nodes.some((candidate) => candidate.parentId === id);
   }
 
-  // Topmost (last added) top-level container whose box contains the content
-  // point; only top-level containers can host children because nesting is
-  // one level deep.
-  containerAt(x: number, y: number): GraphNode | undefined {
-    for (let index = this.nodes.length - 1; index >= 0; index--) {
-      const node = this.nodes[index];
+  // Innermost (deepest, topmost last-added) container whose absolute box
+  // contains the content point. Containers may sit at any depth, so a nested
+  // GitHub inside a project resolves for drops on its own area. A dragged
+  // node never resolves to its own box, or moving within a box would freeze.
+  containerAt(x: number, y: number, ignoreId?: string): GraphNode | undefined {
+    let best: GraphNode | undefined;
+    let bestDepth = -1;
+    for (const node of this.nodes) {
+      if (!isContainerType(node.type)) continue;
+      if (node.id === ignoreId) continue;
+      const origin = this.absolutePosition(node);
       if (
-        node &&
-        isContainerType(node.type) &&
-        node.parentId === undefined &&
-        x >= node.x &&
-        x < node.x + node.w &&
-        y >= node.y &&
-        y < node.y + node.h
-      )
-        return node;
+        x >= origin.x &&
+        x < origin.x + node.w &&
+        y >= origin.y &&
+        y < origin.y + node.h
+      ) {
+        const depth = this.nodeDepth(node);
+        if (depth >= bestDepth) {
+          best = node;
+          bestDepth = depth;
+        }
+      }
     }
-    return undefined;
+    return best;
+  }
+
+  private nodeDepth(node: GraphNode): number {
+    let depth = 0;
+    let current = node;
+    while (current.parentId) {
+      const parent = this.nodes.find(
+        (candidate) => candidate.id === current.parentId,
+      );
+      if (!parent) break;
+      depth++;
+      current = parent;
+    }
+    return depth;
   }
 
   resizeNode(id: string, w: number, h: number): void {

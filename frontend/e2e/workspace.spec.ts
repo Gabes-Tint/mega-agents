@@ -34,11 +34,22 @@ test.describe("graph builder workspace", () => {
     await page.goto("/");
   });
 
+  // The containment matrix allows only projects at the canvas root, so most
+  // tests seed a project and drop the working block inside it.
+  async function seedProject(page: Page) {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+  }
+
   test("drops a palette component onto the canvas", async ({ page }) => {
+    await seedProject(page);
     await mouseDrag(
       page,
       page.getByRole("button", { name: "Agent" }),
-      canvas(page),
+      page.getByRole("button", { name: "Project 1" }),
     );
 
     await expect(page.getByRole("button", { name: "Agent 1" })).toBeVisible();
@@ -47,10 +58,11 @@ test.describe("graph builder workspace", () => {
   test("moves an existing node when dragged across the canvas", async ({
     page,
   }) => {
+    await seedProject(page);
     await mouseDrag(
       page,
       page.getByRole("button", { name: "Agent" }),
-      canvas(page),
+      page.getByRole("button", { name: "Project 1" }),
     );
     const node = page.getByRole("button", { name: "Agent 1" });
     const before = await node.boundingBox();
@@ -88,11 +100,20 @@ test.describe("graph builder workspace", () => {
       canvas.scrollLeft = 200;
     });
 
-    await mouseDrag(
-      page,
-      page.getByRole("button", { name: "Agent" }),
-      canvas(page),
+    await seedProject(page);
+    // Drop the agent at the project's top-left corner so the nested block
+    // keeps the project's own content position.
+    const project = page.getByRole("button", { name: "Project 1" });
+    const projectBox = await project.boundingBox();
+    const paletteAgent = page.getByRole("button", { name: "Agent" });
+    const paletteBox = await paletteAgent.boundingBox();
+    await page.mouse.move(
+      paletteBox.x + paletteBox.width / 2,
+      paletteBox.y + paletteBox.height / 2,
     );
+    await page.mouse.down();
+    await page.mouse.move(projectBox.x + 2, projectBox.y + 2, { steps: 10 });
+    await page.mouse.up();
     const node = page.getByRole("button", { name: "Agent 1" });
 
     await expect
@@ -109,10 +130,11 @@ test.describe("graph builder workspace", () => {
   });
 
   test("resizes a node by dragging its corner handle", async ({ page }) => {
+    await seedProject(page);
     await mouseDrag(
       page,
       page.getByRole("button", { name: "Agent" }),
-      canvas(page),
+      page.getByRole("button", { name: "Project 1" }),
     );
     const node = page.getByRole("button", { name: "Agent 1" });
     const before = await node.boundingBox();
@@ -257,16 +279,17 @@ test.describe("graph builder workspace", () => {
   test("styles each node with a title header and separator", async ({
     page,
   }) => {
+    await seedProject(page);
     await mouseDrag(
       page,
       page.getByRole("button", { name: "Agent", exact: true }),
-      canvas(page),
+      page.getByRole("button", { name: "Project 1" }),
     );
     const node = page.getByRole("button", { name: "Agent 1" });
     await expect(node).toBeVisible();
 
     const title = node.locator(".node-title");
-    await expect(title).toHaveText("Agent 1");
+    await expect(title).toContainText("Agent 1");
     const separator = node.locator(".node-separator");
     await expect(separator).toBeVisible();
 
@@ -290,32 +313,35 @@ test.describe("graph builder workspace", () => {
   test("draws an arrow between two same-level boxes", async ({ page }) => {
     await mouseDrag(
       page,
-      page.getByRole("button", { name: "Agent", exact: true }),
+      page.getByRole("button", { name: "Project" }),
       canvas(page),
     );
-    // Drop the tool box away from Agent 1 so they do not overlap.
+    // Drop the second project away from Project 1 so they do not overlap.
     const area = await canvas(page).boundingBox();
-    const paletteTool = page.getByRole("button", { name: "Tool", exact: true });
-    const toolBox = await paletteTool.boundingBox();
+    const paletteProject = page.getByRole("button", {
+      name: "Project",
+      exact: true,
+    });
+    const paletteBox = await paletteProject.boundingBox();
     await page.mouse.move(
-      toolBox.x + toolBox.width / 2,
-      toolBox.y + toolBox.height / 2,
+      paletteBox.x + paletteBox.width / 2,
+      paletteBox.y + paletteBox.height / 2,
     );
     await page.mouse.down();
     await page.mouse.move(area.x + 300, area.y + 100, { steps: 10 });
     await page.mouse.up();
-    await expect(page.getByRole("button", { name: "Tool 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Project 2" })).toBeVisible();
 
-    // Agent 1 is auto-selected by its drop, so it is the arrow source.
-    await page.getByRole("button", { name: "Agent 1" }).click();
+    // Project 1 is auto-selected by its drop, so it is the arrow source.
+    await page.getByRole("button", { name: "Project 1" }).click();
     await page.getByRole("button", { name: "Connect" }).click();
-    await page.getByRole("button", { name: "Tool 1" }).click();
+    await page.getByRole("button", { name: "Project 2" }).click();
 
     await expect(page.locator(".edge-line")).toHaveCount(1);
 
     // Moving a connected box keeps the arrow attached: both endpoints move
     // with the boxes.
-    const node = page.getByRole("button", { name: "Tool 1" });
+    const node = page.getByRole("button", { name: "Project 2" });
     const before = await node.boundingBox();
     await page.mouse.move(before.x + before.width / 2, before.y + 30);
     await page.mouse.down();
@@ -324,9 +350,9 @@ test.describe("graph builder workspace", () => {
 
     const line = page.locator(".edge-line");
     await expect(line).toHaveCount(1);
-    // The arrow tip is trimmed to the tool box's border on the side facing
-    // the agent. The line's x2 is canvas-content space, so convert it with
-    // the canvas box and its scroll offset before comparing.
+    // The arrow tip is trimmed to the project box's border on the side
+    // facing the source. The line's x2 is canvas-content space, so convert
+    // it with the canvas box and its scroll offset before comparing.
     await expect
       .poll(async () => {
         const x2 = parseFloat(
@@ -334,17 +360,21 @@ test.describe("graph builder workspace", () => {
         );
         const canvasBox = await canvas(page).boundingBox();
         const scrollLeft = await canvas(page).evaluate((el) => el.scrollLeft);
-        const toolBox = await node.boundingBox();
-        const agentBox = await page
-          .getByRole("button", { name: "Agent 1" })
+        const targetBox = await node.boundingBox();
+        const sourceBox = await page
+          .getByRole("button", { name: "Project 1" })
           .boundingBox();
         const dx =
-          agentBox.x + agentBox.width / 2 - (toolBox.x + toolBox.width / 2);
+          sourceBox.x +
+          sourceBox.width / 2 -
+          (targetBox.x + targetBox.width / 2);
         const dy =
-          agentBox.y + agentBox.height / 2 - (toolBox.y + toolBox.height / 2);
-        const tx = dx === 0 ? Infinity : toolBox.width / 2 / Math.abs(dx);
-        const ty = dy === 0 ? Infinity : toolBox.height / 2 / Math.abs(dy);
-        const tip = toolBox.x + toolBox.width / 2 + dx * Math.min(tx, ty);
+          sourceBox.y +
+          sourceBox.height / 2 -
+          (targetBox.y + targetBox.height / 2);
+        const tx = dx === 0 ? Infinity : targetBox.width / 2 / Math.abs(dx);
+        const ty = dy === 0 ? Infinity : targetBox.height / 2 / Math.abs(dy);
+        const tip = targetBox.x + targetBox.width / 2 + dx * Math.min(tx, ty);
         return Math.abs(canvasBox.x + x2 - scrollLeft - tip) < 3;
       })
       .toBe(true);
@@ -353,10 +383,11 @@ test.describe("graph builder workspace", () => {
   test("captures repository and secret key properties for a GitHub box", async ({
     page,
   }) => {
+    await seedProject(page);
     await mouseDrag(
       page,
       page.getByRole("button", { name: "GitHub", exact: true }),
-      canvas(page),
+      page.getByRole("button", { name: "Project 1" }),
     );
     const github = page.getByRole("button", { name: "GitHub 1" });
     await expect(github).toBeVisible();
@@ -379,10 +410,11 @@ test.describe("graph builder workspace", () => {
   test("nests a GitHub App inside a GitHub box and captures its properties", async ({
     page,
   }) => {
+    await seedProject(page);
     await mouseDrag(
       page,
       page.getByRole("button", { name: "GitHub", exact: true }),
-      canvas(page),
+      page.getByRole("button", { name: "Project 1" }),
     );
     const github = page.getByRole("button", { name: "GitHub 1" });
     await expect(github).toBeVisible();
@@ -417,6 +449,49 @@ test.describe("graph builder workspace", () => {
     await expect(page.getByLabel("Private key")).toHaveValue(
       "/home/user/.keys/github-app.pem",
     );
+  });
+
+  test("nests a GitHub App inside a GitHub box that sits in a project", async ({
+    page,
+  }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+    const project = page.getByRole("button", { name: "Project 1" });
+    await expect(project).toBeVisible();
+
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "GitHub", exact: true }),
+      project,
+    );
+    const github = page.getByRole("button", { name: "GitHub 1" });
+    await expect(github).toBeVisible();
+    const githubBox = await github.boundingBox();
+
+    // The reported failure: dropping on the GitHub box's center resolved to
+    // the enclosing project and rejected the app outright.
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "GitHub App", exact: true }),
+      github,
+    );
+    const app = page.getByRole("button", { name: "GitHub App 1" });
+    await expect(app).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const appBox = await app.boundingBox();
+        return (
+          appBox.x >= githubBox.x &&
+          appBox.y >= githubBox.y &&
+          appBox.x < githubBox.x + githubBox.width &&
+          appBox.y < githubBox.y + githubBox.height
+        );
+      })
+      .toBe(true);
   });
 
   test("closes the directory browser when clicking outside", async ({

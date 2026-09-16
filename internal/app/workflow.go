@@ -45,11 +45,26 @@ type WorkflowRequest struct {
 
 var knownComponentTypes = map[string]bool{
 	"agent":     true,
-	"tool":      true,
 	"project":   true,
 	"github":    true,
 	"gitlab":    true,
 	"githubapp": true,
+}
+
+// containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
+// component type, the targets (including the canvas root) that accept it.
+// Any placement outside these lists is rejected so the exported YAML always
+// matches what the builder validates while dragging.
+var containmentMatrix = map[string]map[string]bool{
+	"agent":     {"project": true, "agent": true},
+	"project":   {"root": true, "project": true},
+	"github":    {"project": true},
+	"gitlab":    {"project": true},
+	"githubapp": {"github": true},
+}
+
+func containmentAllows(target string, childType string) bool {
+	return containmentMatrix[childType][target]
 }
 
 // identifierSet tracks every identifier handed out so collision suffixes can
@@ -224,22 +239,23 @@ func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
 	}
 	childrenOf := make(map[string][]WorkflowNodeInput, len(request.Nodes))
 	for _, node := range request.Nodes {
+		var target string
 		if node.ParentID == "" {
-			continue
+			target = "root"
+		} else {
+			parent, ok := nodeByID[node.ParentID]
+			if !ok {
+				return "", fmt.Errorf("node %q references an unknown parent", node.ID)
+			}
+			target = parent.Type
+			childrenOf[node.ParentID] = append(childrenOf[node.ParentID], node)
 		}
-		parent, ok := nodeByID[node.ParentID]
-		if !ok {
-			return "", fmt.Errorf("node %q references an unknown parent", node.ID)
-		}
-		// A GitHub App lives inside its GitHub controller and nowhere else.
-		if node.Type == "githubapp" && parent.Type != "github" {
-			return "", fmt.Errorf("github app must be inside a github object")
-		}
-		childrenOf[node.ParentID] = append(childrenOf[node.ParentID], node)
-	}
-	for _, node := range request.Nodes {
-		if node.Type == "githubapp" && node.ParentID == "" {
-			return "", fmt.Errorf("github app must be inside a github object")
+		if !containmentAllows(target, node.Type) {
+			return "", fmt.Errorf(
+				"%s cannot be placed inside %s",
+				node.Type,
+				target,
+			)
 		}
 	}
 	if request.Name == "" {

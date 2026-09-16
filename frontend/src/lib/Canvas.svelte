@@ -4,6 +4,8 @@
     canHostChild,
     GraphStore,
     PALETTE,
+    rejectedDropHint,
+    shortNodeId,
     type GraphNode,
     type NodeType,
   } from "./graph.svelte.js";
@@ -17,6 +19,14 @@
   // Grab offset of the node being dragged, kept outside the template because
   // it is transient drag bookkeeping rather than rendered state.
   let dragState: { id: string; dx: number; dy: number } | null = null;
+
+  // Live drop preview for the dragover handler: the container currently
+  // under the pointer and whether it accepts the dragged block. The palette
+  // component being dragged travels through graph.draggingType because
+  // dataTransfer.getData is protected while a drag is in flight.
+  let previewTargetId = $state<string | null>(null);
+  let previewValid = $state(false);
+  let previewing = $state(false);
 
   // Starting pointer position and box size of an active resize gesture.
   let resizeState: {
@@ -35,16 +45,11 @@
     return graph.nodes.find((candidate) => candidate.id === id);
   }
 
-  function absolutePosition(node: GraphNode): { x: number; y: number } {
-    const parent = node.parentId ? nodeById(node.parentId) : undefined;
-    return { x: (parent?.x ?? 0) + node.x, y: (parent?.y ?? 0) + node.y };
-  }
-
   function edgeBounds(): { width: number; height: number } {
     let width = 800;
     let height = 600;
     for (const node of graph.nodes) {
-      const position = absolutePosition(node);
+      const position = graph.absolutePosition(node);
       width = Math.max(width, position.x + node.w + 100);
       height = Math.max(height, position.y + node.h + 100);
     }
@@ -80,8 +85,56 @@
     graph.select(node.id);
   }
 
-  function allowDrop(event: DragEvent) {
+  function draggedType(): NodeType | undefined {
+    return (
+      graph.draggingType ??
+      (dragState ? nodeById(dragState.id)?.type : undefined)
+    );
+  }
+
+  // Live validation while a drag is in flight: resolve the container under
+  // the pointer and preview whether the containment matrix accepts the
+  // dragged block there. Runs on every dragover so feedback is immediate.
+  function previewDrop(
+    event: DragEvent & { currentTarget: EventTarget & HTMLDivElement },
+  ) {
     event.preventDefault();
+    const type = draggedType();
+    if (!type) return;
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const contentX = event.clientX - rect.left + target.scrollLeft;
+    const contentY = event.clientY - rect.top + target.scrollTop;
+    const container = graph.containerAt(contentX, contentY, dragState?.id);
+    // Mirrors the drop logic: a valid container accepts the block, otherwise
+    // a root-permitted block may still land at the top level.
+    const valid = container
+      ? canHostChild(container.type, type) || canExistTopLevel(type)
+      : canExistTopLevel(type);
+    previewing = true;
+    previewTargetId = container?.id ?? null;
+    previewValid = valid;
+    if (event.dataTransfer) {
+      // A dragged box always permits the drop: the drop handler decides
+      // between moving, re-parenting, or staying put. Palette drags are
+      // blocked on invalid targets so the drop never fires there.
+      event.dataTransfer.dropEffect = dragState
+        ? "move"
+        : valid
+          ? "copy"
+          : "none";
+    }
+  }
+
+  function clearPreview(
+    event?: DragEvent & { currentTarget: EventTarget & HTMLDivElement },
+  ) {
+    if (event && event.relatedTarget) {
+      const target = event.currentTarget;
+      if (target.contains(event.relatedTarget as globalThis.Node)) return;
+    }
+    previewing = false;
+    previewTargetId = null;
   }
 
   function startNodeDrag(
@@ -149,25 +202,28 @@
     const contentY = event.clientY - rect.top + scrollTop;
     const data = event.dataTransfer?.getData("text/plain") ?? "";
     dropHint = "";
+    clearPreview();
+    graph.draggingType = null;
     if (isComponentType(data)) {
       const container = graph.containerAt(contentX, contentY);
       if (container && canHostChild(container.type, data)) {
+        const origin = graph.absolutePosition(container);
         graph.addNode(
           data,
-          contentX - container.x,
-          contentY - container.y,
+          contentX - origin.x,
+          contentY - origin.y,
           container.id,
         );
         return;
       }
-      // A GitHub App cannot exist outside a GitHub box, so such a drop is
-      // rejected outright; incompatible containers otherwise fall through to
-      // a top-level box at the content position.
-      if (!canExistTopLevel(data)) {
-        dropHint = "A GitHub App must be dropped inside a GitHub box";
+      // The containment matrix decides: a block whose only legal placement
+      // is inside a container falls back to the top level when the canvas
+      // root accepts it, and is rejected with an explanation otherwise.
+      if (canExistTopLevel(data)) {
+        graph.addNode(data, contentX, contentY);
         return;
       }
-      graph.addNode(data, contentX, contentY);
+      dropHint = rejectedDropHint(data, container?.type);
       return;
     }
     if (data.startsWith("node:")) {
@@ -176,7 +232,8 @@
       const grab = dragState;
       dragState = null;
       if (!node || !grab || grab.id !== id) return;
-      const container = graph.containerAt(contentX, contentY);
+      // The dragged box never resolves as its own drop container.
+      const container = graph.containerAt(contentX, contentY, id);
       if (node.parentId === undefined) {
         if (
           container &&
@@ -200,14 +257,18 @@
         graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
         return;
       }
+      // Children live in their parent's coordinate space, and the parent may
+      // itself be nested, so the pointer converts through the parent's
+      // absolute origin.
+      const parentOrigin = graph.absolutePosition(parent);
       if (container && container.id === parent.id) {
         graph.moveNode(
           id,
-          contentX - grab.dx - parent.x,
-          contentY - grab.dy - parent.y,
+          contentX - grab.dx - parentOrigin.x,
+          contentY - grab.dy - parentOrigin.y,
         );
       } else if (container && canHostChild(container.type, node.type)) {
-        // Re-parenting to another compatible container stays one level deep.
+        // Re-parenting to a compatible container keeps the block nested.
         graph.attachToContainer(
           id,
           container.id,
@@ -219,11 +280,19 @@
         // repositioned under the pointer.
         graph.moveNode(
           id,
-          contentX - grab.dx - parent.x,
-          contentY - grab.dy - parent.y,
+          contentX - grab.dx - parentOrigin.x,
+          contentY - grab.dy - parentOrigin.y,
         );
-      } else {
+      } else if (canExistTopLevel(node.type)) {
         graph.detachNode(id, contentX - grab.dx, contentY - grab.dy);
+      } else {
+        // The matrix forbids this block at the root, so it stays inside its
+        // own parent, repositioned under the pointer.
+        graph.moveNode(
+          id,
+          contentX - grab.dx - parentOrigin.x,
+          contentY - grab.dy - parentOrigin.y,
+        );
       }
       return;
     }
@@ -232,9 +301,11 @@
 
 <div
   class="canvas"
+  class:preview-invalid={previewing && !previewValid}
   role="region"
   aria-label="Graph canvas"
-  ondragover={allowDrop}
+  ondragover={previewDrop}
+  ondragleave={clearPreview}
   ondrop={drop}
 >
   <svg
@@ -259,8 +330,8 @@
       {@const from = nodeById(edge.from)}
       {@const to = nodeById(edge.to)}
       {#if from && to}
-        {@const fromPosition = absolutePosition(from)}
-        {@const toPosition = absolutePosition(to)}
+        {@const fromPosition = graph.absolutePosition(from)}
+        {@const toPosition = graph.absolutePosition(to)}
         {@const start = borderPoint(
           from,
           fromPosition.x + from.w / 2,
@@ -291,10 +362,12 @@
       type="button"
       class="node"
       class:selected={node.id === graph.selectedId}
+      class:drop-ok={previewing && previewTargetId === node.id && previewValid}
+      class:drop-no={previewing && previewTargetId === node.id && !previewValid}
       aria-pressed={node.id === graph.selectedId}
       draggable="true"
-      style:left="{absolutePosition(node).x}px"
-      style:top="{absolutePosition(node).y}px"
+      style:left="{graph.absolutePosition(node).x}px"
+      style:top="{graph.absolutePosition(node).y}px"
       style:width="{node.w}px"
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}
@@ -305,6 +378,7 @@
         {#if node.start}
           <span class="start-flag" aria-hidden="true">▶</span>
         {/if}
+        <span class="node-id" aria-hidden="true">{shortNodeId(node.id)}</span>
       </span>
       <span class="node-separator" aria-hidden="true"></span>
       <span
@@ -412,6 +486,15 @@
     color: #ff3e00;
   }
 
+  .node-id {
+    margin-left: auto;
+    align-self: center;
+    font-size: 0.55rem;
+    font-weight: 400;
+    color: #9fb5ac;
+    letter-spacing: 0.02em;
+  }
+
   .resize-handle {
     position: absolute;
     right: 0;
@@ -434,5 +517,19 @@
   .node.selected {
     border-color: #ff3e00;
     box-shadow: 0 0 0 2px rgb(255 62 0 / 0.35);
+  }
+
+  .canvas.preview-invalid {
+    cursor: not-allowed;
+  }
+
+  .node.drop-ok {
+    border-color: #3f8f5f;
+    box-shadow: 0 0 0 2px rgb(63 143 95 / 0.35);
+  }
+
+  .node.drop-no {
+    border-color: #a03030;
+    box-shadow: 0 0 0 2px rgb(160 48 48 / 0.35);
   }
 </style>
