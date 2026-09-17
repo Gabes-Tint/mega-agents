@@ -1702,3 +1702,67 @@ describe("schema checks inside an agent", () => {
     expect(graph.edges).toEqual([]);
   });
 });
+
+describe("resizing from an edge", () => {
+  function projectWithAgent() {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 100, 100);
+    graph.resizeNode(project.id, 400, 300);
+    const agent = graph.addNode("agent", 60, 80, project.id);
+    const start = { x: 100, y: 100, w: 400, h: 300 };
+    return { graph, project, agent, start };
+  }
+
+  test("the right and bottom edges change only the size", () => {
+    const { graph, project, start } = projectWithAgent();
+
+    graph.resizeFrom(project.id, start, { right: true }, 40, 99);
+    expect(project).toMatchObject({ x: 100, y: 100, w: 440, h: 300 });
+
+    graph.resizeFrom(project.id, start, { bottom: true }, 99, -20);
+    expect(project).toMatchObject({ w: 400, h: 280 });
+  });
+
+  test("the left and top edges move the block and keep its blocks in place", () => {
+    const { graph, project, agent, start } = projectWithAgent();
+
+    graph.resizeFrom(project.id, start, { left: true, top: true }, -30, 20);
+
+    expect(project).toMatchObject({ x: 70, y: 120, w: 430, h: 280 });
+    // The agent stays at (160, 180) on the canvas.
+    expect([agent.x, agent.y]).toEqual([90, 60]);
+  });
+
+  test("a block keeps its minimum size from any edge", () => {
+    const graph = new GraphStore();
+    const agent = graph.addNode("agent", 100, 100);
+    const start = { x: 100, y: 100, w: 160, h: 64 };
+
+    graph.resizeFrom(agent.id, start, { left: true, top: true }, 500, 500);
+
+    expect(agent).toMatchObject({
+      x: 100 + 160 - MIN_NODE_WIDTH,
+      y: 100 + 64 - MIN_NODE_HEIGHT,
+      w: MIN_NODE_WIDTH,
+      h: MIN_NODE_HEIGHT,
+    });
+  });
+
+  test("a container never shrinks past the blocks inside it", () => {
+    const { graph, project, agent, start } = projectWithAgent();
+
+    graph.resizeFrom(
+      project.id,
+      start,
+      { right: true, bottom: true },
+      -300,
+      -250,
+    );
+    // The agent spans (60..220, 80..144) inside the project.
+    expect(project).toMatchObject({ w: 220, h: 144 });
+
+    graph.resizeFrom(project.id, start, { left: true, top: true }, 200, 200);
+    expect(project).toMatchObject({ x: 160, y: 180, w: 340, h: 220 });
+    expect([agent.x, agent.y]).toEqual([0, 0]);
+  });
+});

@@ -93,6 +93,14 @@ export interface Landing {
   refusedBy?: string;
 }
 
+// The edges a resize drags.
+export interface ResizeEdges {
+  left?: boolean;
+  right?: boolean;
+  top?: boolean;
+  bottom?: boolean;
+}
+
 // The canvas root as a pseudo target so the containment matrix covers
 // top-level drops in the same table as nested drops.
 export type DropTarget = NodeType | "root";
@@ -741,6 +749,70 @@ export class GraphStore {
       node.w = Math.max(MIN_NODE_WIDTH, w);
       node.h = Math.max(MIN_NODE_HEIGHT, h);
     }
+  }
+
+  // Resizes a block from the edges being dragged, by the pointer's travel
+  // since the gesture started at the start box. Moving the left or top edge
+  // moves the block, and the blocks inside it keep their place on the
+  // canvas. A block keeps its minimum size and still holds its blocks.
+  resizeFrom(
+    id: string,
+    start: { x: number; y: number; w: number; h: number },
+    edges: ResizeEdges,
+    dx: number,
+    dy: number,
+  ): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    const children = this.nodes.filter((child) => child.parentId === id);
+    const span = (
+      from: number,
+      size: number,
+      delta: number,
+      low: boolean | undefined,
+      high: boolean | undefined,
+      min: number,
+      offset: number,
+      extents: [number, number][],
+    ): [number, number] => {
+      let first = from + (low ? delta : 0);
+      let last = from + size + (high ? delta : 0);
+      if (low) first = Math.min(first, last - min);
+      if (high) last = Math.max(last, first + min);
+      for (const [begin, end] of extents) {
+        if (low) first = Math.min(first, offset + begin);
+        if (high) last = Math.max(last, offset + end);
+      }
+      return [first, last];
+    };
+    const [left, right] = span(
+      start.x,
+      start.w,
+      dx,
+      edges.left,
+      edges.right,
+      MIN_NODE_WIDTH,
+      node.x,
+      children.map((child) => [child.x, child.x + child.w]),
+    );
+    const [top, bottom] = span(
+      start.y,
+      start.h,
+      dy,
+      edges.top,
+      edges.bottom,
+      MIN_NODE_HEIGHT,
+      node.y,
+      children.map((child) => [child.y, child.y + child.h]),
+    );
+    for (const child of children) {
+      child.x -= left - node.x;
+      child.y -= top - node.y;
+    }
+    node.x = left;
+    node.y = top;
+    node.w = right - left;
+    node.h = bottom - top;
   }
 
   rename(id: string, name: string): void {

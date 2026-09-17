@@ -3,6 +3,7 @@
     BLOCK_HUES,
     defaultSize,
     GraphStore,
+    type ResizeEdges,
     labelFor,
     PALETTE,
     rejectedDropHint,
@@ -44,14 +45,36 @@
   let movingId = $state<string | null>(null);
   let resizing = $state(false);
 
-  // Starting pointer position and box size of an active resize gesture.
+  // Starting pointer position, box and dragged edges of an active resize.
   let resizeState: {
     id: string;
     startX: number;
     startY: number;
-    w: number;
-    h: number;
+    box: { x: number; y: number; w: number; h: number };
+    edges: ResizeEdges;
   } | null = null;
+
+  // Every edge and corner a block resizes from; the bottom right corner is
+  // the visible grip.
+  const RESIZE_EDGES = [
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "top left",
+    "top right",
+    "bottom left",
+  ] as const;
+
+  function edgesOf(edge: string): ResizeEdges {
+    const sides = edge.split(" ");
+    return {
+      top: sides.includes("top"),
+      right: sides.includes("right"),
+      bottom: sides.includes("bottom"),
+      left: sides.includes("left"),
+    };
+  }
 
   function isComponentType(value: string): value is NodeType {
     return PALETTE.some((item) => item.type === value);
@@ -195,6 +218,7 @@
   function startResize(
     event: PointerEvent & { currentTarget: EventTarget & HTMLElement },
     node: GraphNode,
+    edge: string,
   ) {
     if (event.button !== 0) return;
     // Cancelling the pointerdown default prevents the browser from turning
@@ -208,8 +232,8 @@
       id: node.id,
       startX: event.clientX,
       startY: event.clientY,
-      w: node.w,
-      h: node.h,
+      box: { x: node.x, y: node.y, w: node.w, h: node.h },
+      edges: edgesOf(edge),
     };
   }
 
@@ -218,10 +242,12 @@
   ) {
     const active = resizeState;
     if (!active) return;
-    graph.resizeNode(
+    graph.resizeFrom(
       active.id,
-      active.w + (event.clientX - active.startX),
-      active.h + (event.clientY - active.startY),
+      active.box,
+      active.edges,
+      event.clientX - active.startX,
+      event.clientY - active.startY,
     );
   }
 
@@ -254,6 +280,7 @@
   }
 
   function endResize() {
+    if (resizeState) graph.fitInParent(resizeState.id);
     resizeState = null;
     resizing = false;
   }
@@ -447,10 +474,19 @@
         </span>
       </span>
       <span class="node-separator" aria-hidden="true"></span>
+      {#each RESIZE_EDGES as edge (edge)}
+        <span
+          class="resize-edge"
+          data-edge={edge}
+          aria-hidden="true"
+          onpointerdown={(event) => startResize(event, node, edge)}
+        ></span>
+      {/each}
       <span
         class="resize-handle"
+        data-edge="bottom right"
         aria-hidden="true"
-        onpointerdown={(event) => startResize(event, node)}
+        onpointerdown={(event) => startResize(event, node, "bottom right")}
       ></span>
     </button>
   {/each}
@@ -655,8 +691,67 @@
     box-shadow: 0 0 0 3px var(--warn-soft);
   }
 
+  /* Invisible strips along each edge and squares at each corner, under the
+     pointer's resize cursors. */
+  .resize-edge {
+    position: absolute;
+    z-index: 1;
+    touch-action: none;
+  }
+
+  .resize-edge[data-edge="top"],
+  .resize-edge[data-edge="bottom"] {
+    left: 8px;
+    right: 8px;
+    height: 6px;
+    cursor: ns-resize;
+  }
+
+  .resize-edge[data-edge="left"],
+  .resize-edge[data-edge="right"] {
+    top: 8px;
+    bottom: 8px;
+    width: 6px;
+    cursor: ew-resize;
+  }
+
+  .resize-edge[data-edge="top"],
+  .resize-edge[data-edge^="top "] {
+    top: 0;
+  }
+
+  .resize-edge[data-edge="bottom"],
+  .resize-edge[data-edge^="bottom "] {
+    bottom: 0;
+  }
+
+  .resize-edge[data-edge="left"],
+  .resize-edge[data-edge$=" left"] {
+    left: 0;
+  }
+
+  .resize-edge[data-edge="right"],
+  .resize-edge[data-edge$=" right"] {
+    right: 0;
+  }
+
+  .resize-edge[data-edge*=" "] {
+    width: 10px;
+    height: 10px;
+  }
+
+  .resize-edge[data-edge="top left"] {
+    cursor: nwse-resize;
+  }
+
+  .resize-edge[data-edge="top right"],
+  .resize-edge[data-edge="bottom left"] {
+    cursor: nesw-resize;
+  }
+
   .resize-handle {
     position: absolute;
+    z-index: 1;
     right: 0;
     bottom: 0;
     width: 14px;

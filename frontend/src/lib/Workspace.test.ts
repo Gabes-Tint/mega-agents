@@ -807,6 +807,77 @@ describe("graph builder workspace", () => {
     expect(node).toHaveStyle({ width: "210px", height: "104px" });
   });
 
+  test("resizes a block from any edge or corner", async () => {
+    render(Workspace);
+    await dropComponent("Project", 200, 100);
+    const node = screen.getByRole("button", { name: "Project 1" });
+    const edges = [...node.querySelectorAll("[data-edge]")].map((handle) =>
+      handle.getAttribute("data-edge"),
+    );
+    expect(edges.sort()).toEqual(
+      [
+        "bottom",
+        "bottom left",
+        "bottom right",
+        "left",
+        "right",
+        "top",
+        "top left",
+        "top right",
+      ].sort(),
+    );
+
+    const drag = async (edge: string, dx: number, dy: number) => {
+      const handle = node.querySelector(`[data-edge="${edge}"]`);
+      if (!handle) throw new Error(`no ${edge} handle`);
+      await fireEvent.pointerDown(handle, {
+        button: 0,
+        pointerId: 1,
+        clientX: 500,
+        clientY: 500,
+      });
+      await fireEvent.pointerMove(window, {
+        clientX: 500 + dx,
+        clientY: 500 + dy,
+      });
+      await fireEvent.pointerUp(window);
+    };
+
+    await drag("left", -30, 40);
+    expect(node).toHaveStyle({
+      left: "170px",
+      top: "100px",
+      width: "190px",
+      height: "64px",
+    });
+    await drag("top right", 10, -20);
+    expect(node).toHaveStyle({
+      left: "170px",
+      top: "80px",
+      width: "200px",
+      height: "84px",
+    });
+  });
+
+  test("grows the container of a block resized past its edge", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Agent", 40, 30);
+    const handle = screen
+      .getByRole("button", { name: "Agent 1" })
+      .querySelector('[data-edge="right"]');
+    if (!handle) throw new Error("no right handle");
+
+    await fireEvent.pointerDown(handle, { button: 0, clientX: 0, clientY: 0 });
+    await fireEvent.pointerMove(window, { clientX: 100, clientY: 0 });
+    await fireEvent.pointerUp(window);
+
+    // The agent at (10, 10) is now 260 wide; the project grows to 282.
+    expect(screen.getByRole("button", { name: "Project 1" })).toHaveStyle({
+      width: "282px",
+    });
+  });
+
   test("resizing keeps the box dimensions above their minimums", async () => {
     render(Workspace);
 
