@@ -408,8 +408,8 @@ func TestRunRejectsActionFlowsThatCannotRun(t *testing.T) {
 			want:  "Rebase needs a workspace; connect a Create worktree action before it",
 		},
 		"unknown action": {
-			actions: `{"id": "a1", "type": "action", "action": "push", "name": "Push", "parentId": "g1", "start": true}`,
-			want:    `unknown Git action "push"`,
+			actions: `{"id": "a1", "type": "action", "action": "deploy", "name": "Deploy", "parentId": "g1", "start": true}`,
+			want:    `unknown Git action "deploy"`,
 		},
 		"cycle": {
 			actions: `{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},

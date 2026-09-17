@@ -2,46 +2,31 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/agents"
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
-	"github.com/Gabes-Tint/mega-agents/internal/gitops"
 	"github.com/Gabes-Tint/mega-agents/internal/schema"
 )
 
 const (
-	resultPort            = "result"
-	defaultAgentRetries   = 2
-	maxAgentRetries       = 5
-	defaultAgentTimeout   = 30.0
-	maxAgentTimeout       = 240.0
-	maxReplyDetailLength  = 8000
-	placeholderExpression = `\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}`
+	resultPort           = "result"
+	defaultAgentRetries  = 2
+	maxAgentRetries      = 5
+	defaultAgentTimeout  = 30.0
+	maxAgentTimeout      = 240.0
+	maxReplyDetailLength = 8000
 )
-
-var placeholder = regexp.MustCompile(placeholderExpression)
-
-var workspaceFields = map[string]func(gitops.Workspace) string{
-	"path":         func(w gitops.Workspace) string { return w.Path },
-	"branch":       func(w gitops.Workspace) string { return w.Branch },
-	"base":         func(w gitops.Workspace) string { return w.Base },
-	"baseRevision": func(w gitops.Workspace) string { return w.BaseRevision },
-	"repository":   func(w gitops.Workspace) string { return w.Repository },
-	"remote":       func(w gitops.Workspace) string { return w.Remote },
-}
 
 // agentTask plans an Agent block: one conversation with a coding-agent CLI.
 // It works in the workspace it receives, or in its project's folder, and
 // its prompt may name that workspace and the results of the agents
 // connected to it. With an output schema, the reply is held to it.
-func (planner runPlanner) agentTask(node WorkflowNodeInput, included map[string]bool) (engine.Task, error) {
+func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error) {
 	fail := func(format string, args ...any) (engine.Task, error) {
 		return engine.Task{}, fmt.Errorf("%s: %s", node.Name, fmt.Sprintf(format, args...))
 	}
@@ -72,94 +57,31 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput, included map[string]
 			return fail("output schema: %v", err)
 		}
 	}
-	var needs []engine.Need
-	receivesWorkspace := false
-	resultFrom := map[string]string{}
-	for _, edge := range planner.request.Edges {
-		if edge.To != node.ID || !included[edge.From] {
-			continue
-		}
-		source := planner.nodeByID[edge.From]
-		port, err := planner.sourcePort(edge)
-		if err != nil {
-			return engine.Task{}, err
-		}
-		need := engine.Need{TaskID: edge.From, Port: port}
-		switch port {
-		case "":
-		case workspacePort:
-			if receivesWorkspace {
-				return fail("receives more than one workspace; connect only one")
-			}
-			receivesWorkspace = true
-		default:
-			resultFrom[newIdentifierSet().slugIdentifier(source.Name)] = source.ID
-		}
-		needs = append(needs, need)
+	needs, err := planner.incomingNeeds(node)
+	if err != nil {
+		return engine.Task{}, err
 	}
-	for _, match := range placeholder.FindAllStringSubmatch(node.Prompt, -1) {
-		name := match[1]
-		field, isWorkspace := strings.CutPrefix(name, "workspace.")
-		agentName, isResult := strings.CutPrefix(name, "results.")
-		switch {
-		case isWorkspace && workspaceFields[field] != nil:
-			if !receivesWorkspace {
-				return fail("{{%s}} needs a workspace; connect a %s action to this agent", name, gitActionLabels["worktree"])
-			}
-		case isResult:
-			if resultFrom[agentName] == "" {
-				return fail("{{%s}} names no agent connected to this one", name)
-			}
-		case name == "result":
-			if len(resultFrom) != 1 {
-				return fail("{{result}} needs exactly one agent connected to this one; name one with {{results.<agent>}}")
-			}
-		default:
-			return fail("unknown placeholder {{%s}}", name)
-		}
+	sources := planner.sourcesOf(needs)
+	if err := checkTemplate(node.Prompt, sources); err != nil {
+		return fail("%v", err)
 	}
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "agent", Needs: needs,
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			details := map[string]any{"backend": node.Backend, "model": node.Model, "effort": node.Effort}
-			var workspace *gitops.Workspace
-			results := map[string]any{}
-			for _, input := range inputs {
-				switch value := input.Value.(type) {
-				case gitops.Workspace:
-					workspace = &value
-				default:
-					results[input.TaskID] = value
-				}
-			}
-			dir := ""
-			if workspace != nil {
-				dir = workspace.Path
-			} else {
+			workspace, hasWorkspace := workspaceIn(inputs)
+			dir := workspace.Path
+			if !hasWorkspace {
 				project := planner.projectOf(node)
 				if project.Path == "" {
 					return engine.Result{Details: details}, fmt.Errorf("set the path on the project that contains %s", node.Name)
 				}
+				var err error
 				if dir, err = projectDir(project); err != nil {
 					return engine.Result{Details: details}, err
 				}
 			}
-			prompt := placeholder.ReplaceAllStringFunc(node.Prompt, func(token string) string {
-				name := placeholder.FindStringSubmatch(token)[1]
-				if field, ok := strings.CutPrefix(name, "workspace."); ok {
-					return workspaceFields[field](*workspace)
-				}
-				source := ""
-				if agentName, ok := strings.CutPrefix(name, "results."); ok {
-					source = resultFrom[agentName]
-				} else {
-					for _, id := range resultFrom {
-						source = id
-					}
-				}
-				encoded, _ := json.Marshal(results[source])
-				return string(encoded)
-			})
+			prompt := renderTemplate(node.Prompt, inputs, sources)
 			ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout*float64(time.Minute)))
 			defer cancel()
 			fmt.Fprintf(log, "Working in %s\nPrompt:\n%s\n", dir, prompt)
@@ -188,7 +110,11 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput, included map[string]
 				result = conversation.Value
 			}
 			details["result"] = result
-			return engine.Result{Outputs: map[string]any{resultPort: result}, Details: details}, nil
+			outputs := map[string]any{resultPort: result}
+			if hasWorkspace {
+				outputs[workspacePort] = workspace
+			}
+			return engine.Result{Outputs: outputs, Details: details}, nil
 		},
 	}, nil
 }

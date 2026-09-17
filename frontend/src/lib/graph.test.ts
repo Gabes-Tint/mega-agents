@@ -893,12 +893,39 @@ describe("Git actions inside a GitHub block", () => {
     return { graph, githubId: github.id };
   }
 
-  test("offers fetch, create worktree, and rebase", () => {
+  test("offers fetch, worktree, rebase, and the delivery actions", () => {
     expect(GIT_ACTIONS).toEqual([
       { action: "fetch", label: "Fetch" },
       { action: "worktree", label: "Create worktree" },
       { action: "rebase", label: "Rebase" },
+      { action: "issue", label: "Read issue" },
+      { action: "commit", label: "Commit" },
+      { action: "push", label: "Push" },
+      { action: "pullrequest", label: "Open pull request" },
     ]);
+  });
+
+  test("a block beside a GitHub block may feed one of its actions", () => {
+    const { graph, githubId } = githubInProject();
+    const github = graph.nodes.find((node) => node.id === githubId)!;
+    const commit = graph.addAction(githubId, "commit")!;
+    const agent = graph.addNode("agent", 300, 20, github.parentId);
+    const other = graph.addNode("project", 900, 0);
+    const stranger = graph.addNode("agent", 10, 10, other.id);
+
+    expect(graph.connect(agent.id, commit.id)).toBe(true);
+    expect(graph.connect(stranger.id, commit.id)).toBe(false);
+  });
+
+  test("sets the issue an action reads", () => {
+    const { graph, githubId } = githubInProject();
+    const issue = graph.addAction(githubId, "issue")!;
+
+    graph.setActionIssue(issue.id, "7");
+    expect(issue.issue).toBe(7);
+    graph.setActionIssue(issue.id, "");
+    expect(issue.issue).toBeUndefined();
+    graph.setActionIssue("missing", "1");
   });
 
   test("the first action nests inside the GitHub block as its starting point", () => {

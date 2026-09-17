@@ -165,7 +165,7 @@ test.describe("Agent blocks", () => {
     await expect(
       page.getByRole("region", { name: "Run result" }),
     ).toContainText(
-      "Implementer: {{workspace.path}} needs a workspace; connect a Create worktree action to this agent",
+      "Implementer: {{workspace.path}} needs a workspace; connect a Create worktree action to this block",
     );
   });
 });

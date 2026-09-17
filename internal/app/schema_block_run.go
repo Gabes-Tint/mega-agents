@@ -21,7 +21,7 @@ const (
 // the valid output. An invalid one leaves on the invalid output, carrying
 // the value and its field errors, when an arrow takes that branch;
 // otherwise the block fails, so an unhandled invalid value stops the run.
-func (planner runPlanner) schemaTask(node WorkflowNodeInput, included map[string]bool) (engine.Task, error) {
+func (planner runPlanner) schemaTask(node WorkflowNodeInput) (engine.Task, error) {
 	fail := func(format string, args ...any) (engine.Task, error) {
 		return engine.Task{}, fmt.Errorf("%s: %s", node.Name, fmt.Sprintf(format, args...))
 	}
@@ -32,7 +32,7 @@ func (planner runPlanner) schemaTask(node WorkflowNodeInput, included map[string
 	if err != nil {
 		return fail("%v", err)
 	}
-	needs, err := planner.valueNeeds(node, included, "validates")
+	needs, err := planner.valueNeeds(node, "validates")
 	if err != nil {
 		return engine.Task{}, err
 	}

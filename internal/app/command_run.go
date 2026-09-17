@@ -28,7 +28,7 @@ const (
 // folder. Exit status 0 leaves on the passed output; any other leaves on
 // failed, carrying the exit code and the output's tail, when an arrow takes
 // that branch, and otherwise fails the block. It is the workflow's gate.
-func (planner runPlanner) commandTask(node WorkflowNodeInput, included map[string]bool) (engine.Task, error) {
+func (planner runPlanner) commandTask(node WorkflowNodeInput) (engine.Task, error) {
 	fail := func(format string, args ...any) (engine.Task, error) {
 		return engine.Task{}, fmt.Errorf("%s: %s", node.Name, fmt.Sprintf(format, args...))
 	}
@@ -42,16 +42,9 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput, included map[strin
 	if timeout <= 0 || timeout > maxAgentTimeout {
 		return fail("the timeout must be more than 0 and at most %g minutes", maxAgentTimeout)
 	}
-	var needs []engine.Need
-	for _, edge := range planner.request.Edges {
-		if edge.To != node.ID || !included[edge.From] {
-			continue
-		}
-		port, err := planner.sourcePort(edge)
-		if err != nil {
-			return engine.Task{}, err
-		}
-		needs = append(needs, engine.Need{TaskID: edge.From, Port: port})
+	needs, err := planner.incomingNeeds(node)
+	if err != nil {
+		return engine.Task{}, err
 	}
 	handlesFailure := false
 	for _, edge := range planner.request.Edges {
@@ -69,15 +62,13 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput, included map[strin
 		ID: node.ID, Name: node.Name, Kind: "command", Needs: needs,
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			environment := gitops.CleanEnvironment(os.Environ())
-			var dir string
-			for _, input := range inputs {
-				if workspace, ok := input.Value.(gitops.Workspace); ok {
-					dir = workspace.Path
-					environment = append(environment,
-						"MEGA_AGENTS_WORKSPACE_PATH="+workspace.Path, "MEGA_AGENTS_WORKSPACE_BRANCH="+workspace.Branch,
-						"MEGA_AGENTS_WORKSPACE_BASE="+workspace.Base, "MEGA_AGENTS_WORKSPACE_REPOSITORY="+workspace.Repository,
-					)
-				}
+			workspace, hasWorkspace := workspaceIn(inputs)
+			dir := workspace.Path
+			if hasWorkspace {
+				environment = append(environment,
+					"MEGA_AGENTS_WORKSPACE_PATH="+workspace.Path, "MEGA_AGENTS_WORKSPACE_BRANCH="+workspace.Branch,
+					"MEGA_AGENTS_WORKSPACE_BASE="+workspace.Base, "MEGA_AGENTS_WORKSPACE_REPOSITORY="+workspace.Repository,
+				)
 			}
 			if dir == "" {
 				project := planner.projectOf(node)
@@ -100,13 +91,19 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput, included map[strin
 				return engine.Result{Details: details}, err
 			}
 			value := map[string]any{"exitCode": exitCode, "output": output}
+			outputs := map[string]any{}
+			if hasWorkspace {
+				outputs[workspacePort] = workspace
+			}
 			if exitCode == 0 {
-				return engine.Result{Outputs: map[string]any{passedPort: value}, Details: details}, nil
+				outputs[passedPort] = value
+				return engine.Result{Outputs: outputs, Details: details}, nil
 			}
 			if !handlesFailure {
 				return engine.Result{Details: details}, fmt.Errorf("%s exited %d: %s", node.Name, exitCode, lastLines(output, 20))
 			}
-			return engine.Result{Outputs: map[string]any{failedPort: value}, Details: details}, nil
+			outputs[failedPort] = value
+			return engine.Result{Outputs: outputs, Details: details}, nil
 		},
 	}, nil
 }

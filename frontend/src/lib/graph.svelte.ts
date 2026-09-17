@@ -9,9 +9,11 @@ export type NodeType =
   | "router"
   | "command";
 
-export type GitAction = "fetch" | "worktree" | "rebase";
+export type GitAction =
+  "fetch" | "worktree" | "rebase" | "issue" | "commit" | "push" | "pullrequest";
 
-export type ActionField = "branch" | "base" | "worktreePath" | "onto";
+export type ActionField =
+  "branch" | "base" | "worktreePath" | "onto" | "message" | "title" | "body";
 
 // Git actions a GitHub block runs as its own internal sequence. They are
 // added from the block's properties rather than dragged from the palette.
@@ -19,6 +21,10 @@ export const GIT_ACTIONS: readonly { action: GitAction; label: string }[] = [
   { action: "fetch", label: "Fetch" },
   { action: "worktree", label: "Create worktree" },
   { action: "rebase", label: "Rebase" },
+  { action: "issue", label: "Read issue" },
+  { action: "commit", label: "Commit" },
+  { action: "push", label: "Push" },
+  { action: "pullrequest", label: "Open pull request" },
 ];
 
 export type AgentField =
@@ -111,6 +117,10 @@ export interface GraphNode {
   schema?: string;
   cases?: RouteCase[];
   command?: string;
+  message?: string;
+  title?: string;
+  body?: string;
+  issue?: number;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -442,7 +452,15 @@ export class GraphStore {
     const sameLevel = (from.parentId ?? null) === (to.parentId ?? null);
     const besideProvider =
       provider !== undefined && provider.parentId === to.parentId;
-    if (!sameLevel && !besideProvider) return false;
+    // A block beside a GitHub block may also feed one of its actions, such
+    // as an agent whose changes a Commit action records.
+    const target =
+      to.type === "action"
+        ? this.nodes.find((candidate) => candidate.id === to.parentId)
+        : undefined;
+    const intoProvider =
+      target !== undefined && target.parentId === from.parentId;
+    if (!sameLevel && !besideProvider && !intoProvider) return false;
     if (
       this.edges.some(
         (edge) =>
@@ -691,6 +709,11 @@ export class GraphStore {
   setAgentNumber(id: string, field: AgentNumber, value: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node[field] = value === "" ? undefined : Number(value);
+  }
+
+  setActionIssue(id: string, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.issue = value === "" ? undefined : Number(value);
   }
 
   setActionField(id: string, field: ActionField, value: string): void {

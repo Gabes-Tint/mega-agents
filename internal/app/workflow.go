@@ -61,6 +61,12 @@ type WorkflowNodeInput struct {
 	Cases []router.Case `json:"cases,omitempty"`
 	// Command blocks.
 	Command string `json:"command,omitempty"`
+	// Delivery actions: a commit message, a pull request's title and body,
+	// and the issue to read.
+	Message string `json:"message,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Body    string `json:"body,omitempty"`
+	Issue   int    `json:"issue,omitempty"`
 }
 
 type WorkflowRequest struct {
@@ -231,6 +237,7 @@ func (emitter *workflowEmitter) emitNode(
 		{"branch", node.Branch}, {"base", node.Base}, {"worktreePath", node.WorktreePath}, {"onto", node.Onto},
 		{"backend", node.Backend}, {"model", node.Model}, {"effort", node.Effort}, {"prompt", node.Prompt},
 		{"outputSchema", node.OutputSchema}, {"schema", node.Schema}, {"command", node.Command},
+		{"message", node.Message}, {"title", node.Title}, {"body", node.Body},
 	} {
 		if field.value != "" {
 			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))
@@ -244,6 +251,9 @@ func (emitter *workflowEmitter) emitNode(
 				fmt.Sprintf("%s        expression: %s", indent, yamlString(routeCase.Expression)),
 			)
 		}
+	}
+	if node.Issue != 0 {
+		with = append(with, fmt.Sprintf("%s    issue: %d", indent, node.Issue))
 	}
 	if node.Retries != nil {
 		with = append(with, fmt.Sprintf("%s    retries: %d", indent, *node.Retries))

@@ -65,8 +65,13 @@ the run is recorded as cancelled.
 ## Blocks that run
 
 - **GitHub** flagged as a starting point runs its **Actions** in order:
-  *Fetch*, *Create worktree* (outputs a `workspace`), and *Rebase*. Without
-  actions it fetches. Runs use the machine's existing Git credentials.
+  *Fetch*, *Create worktree* (outputs a `workspace`), *Rebase*, *Read issue*
+  (the issue's title, body, labels and comments via `gh`), *Commit*, *Push*
+  and *Open pull request* (via `gh`). Without actions it fetches. Runs use the
+  machine's existing Git and `gh` credentials. Agents and commands that
+  receive a workspace pass it on, so worktree → agent → Commit → Push → Open
+  pull request is one chain; blocks beside a GitHub block may connect into its
+  actions.
 - **Agent** runs one conversation with a coding-agent CLI (Claude Code, Codex,
   Grok or OpenCode) in the workspace connected to it, or in its project's
   folder. Its prompt may use `{{workspace.path}}`, `{{workspace.branch}}`,

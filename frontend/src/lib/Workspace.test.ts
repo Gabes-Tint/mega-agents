@@ -2451,4 +2451,75 @@ describe("graph builder workspace", () => {
     expect(result).toHaveTextContent("--- FAIL: TestLogin");
     vi.unstubAllGlobals();
   });
+
+  test("configures the delivery actions of a GitHub block", async () => {
+    render(Workspace);
+    await githubWithActions("issue", "commit", "pullrequest");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Read issue" }));
+    await fireEvent.input(screen.getByLabelText("Issue number"), {
+      target: { value: "7" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    await fireEvent.input(screen.getByLabelText("Commit message"), {
+      target: { value: "Implement {{workspace.branch}}" },
+    });
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Open pull request" }),
+    );
+    for (const [label, value] of Object.entries({
+      Title: "Close #7",
+      Body: "Made by agents",
+      "Base branch": "develop",
+    })) {
+      await fireEvent.input(screen.getByLabelText(label), {
+        target: { value },
+      });
+    }
+
+    await fireEvent.click(screen.getByRole("button", { name: "Read issue" }));
+    expect(screen.getByLabelText("Issue number")).toHaveValue(7);
+    await fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    expect(screen.getByLabelText("Commit message")).toHaveValue(
+      "Implement {{workspace.branch}}",
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Open pull request" }),
+    );
+    expect(screen.getByLabelText("Base branch")).toHaveValue("develop");
+  });
+
+  test("shows the commit and pull request a run delivered", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [
+        record("succeeded", [
+          {
+            nodeId: "k1",
+            name: "Commit",
+            action: "commit",
+            status: "succeeded",
+            details: { commit: "abc123" },
+          },
+          {
+            nodeId: "r1",
+            name: "Open pull request",
+            action: "pullrequest",
+            status: "succeeded",
+            details: { url: "https://github.com/acme/api/pull/42", number: 42 },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Commit: abc123"));
+    expect(
+      screen.getByRole("link", { name: "https://github.com/acme/api/pull/42" }),
+    ).toHaveAttribute("href", "https://github.com/acme/api/pull/42");
+    vi.unstubAllGlobals();
+  });
 });

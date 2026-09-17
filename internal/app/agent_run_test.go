@@ -212,7 +212,7 @@ func TestAgentPlansAreCheckedBeforeRunning(t *testing.T) {
 		},
 		"workspace placeholder without a workspace": {
 			body: agent(`, "backend": "claude", "prompt": "work in {{workspace.path}}"`),
-			want: "Planner: {{workspace.path}} needs a workspace; connect a Create worktree action to this agent",
+			want: "Planner: {{workspace.path}} needs a workspace; connect a Create worktree action to this block",
 		},
 		"unknown placeholder": {
 			body: agent(`, "backend": "claude", "prompt": "{{secrets.token}}"`),
@@ -220,7 +220,7 @@ func TestAgentPlansAreCheckedBeforeRunning(t *testing.T) {
 		},
 		"result from nowhere": {
 			body: agent(`, "backend": "claude", "prompt": "{{results.reviewer}}"`),
-			want: "Planner: {{results.reviewer}} names no agent connected to this one",
+			want: "Planner: {{results.reviewer}} names no block connected to this one",
 		},
 		"negative retries": {
 			body: agent(`, "backend": "claude", "prompt": "x", "retries": -1`),

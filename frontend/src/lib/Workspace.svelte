@@ -40,6 +40,7 @@
     ["attempts", "Attempts"],
     ["case", "Route"],
     ["exitCode", "Exit code"],
+    ["commit", "Commit"],
   ];
 
   function fieldErrors(details: Record<string, unknown> | undefined): string[] {
@@ -424,6 +425,11 @@
               {#each fieldErrors(step.details) as fieldError (fieldError)}
                 <pre class="failed">{fieldError}</pre>
               {/each}
+              {#if typeof step.details?.url === "string"}
+                <a href={step.details.url} target="_blank" rel="noreferrer"
+                  >{step.details.url}</a
+                >
+              {/if}
               {#if step.details?.output && step.action === "command"}
                 <pre>{step.details.output}</pre>
               {/if}

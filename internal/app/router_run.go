@@ -14,12 +14,12 @@ import (
 // run time the one value it receives leaves on the first route whose case
 // holds, or on default, as {"case": route, "value": value}. Arrows on the
 // other routes are skipped.
-func (planner runPlanner) routerTask(node WorkflowNodeInput, included map[string]bool) (engine.Task, error) {
+func (planner runPlanner) routerTask(node WorkflowNodeInput) (engine.Task, error) {
 	compiled, err := router.Compile(node.Cases)
 	if err != nil {
 		return engine.Task{}, fmt.Errorf("%s: %w", node.Name, err)
 	}
-	needs, err := planner.valueNeeds(node, included, "routes")
+	needs, err := planner.valueNeeds(node, "routes")
 	if err != nil {
 		return engine.Task{}, err
 	}

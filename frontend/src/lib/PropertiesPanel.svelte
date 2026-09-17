@@ -61,6 +61,24 @@
     rebase: [
       { field: "onto", label: "Onto", placeholder: "the workspace base" },
     ],
+    issue: [],
+    commit: [
+      {
+        field: "message",
+        label: "Commit message",
+        placeholder: "Changes from Mega Agents run",
+      },
+    ],
+    push: [],
+    pullrequest: [
+      { field: "title", label: "Title", placeholder: "e.g. Close #7" },
+      { field: "body", label: "Body", placeholder: "what the change does" },
+      {
+        field: "base",
+        label: "Base branch",
+        placeholder: "the branch the workspace came from",
+      },
+    ],
   };
   let loadSequence = 0;
 
@@ -252,6 +270,24 @@
             />
           </label>
         {/each}
+        {#if node.action === "issue"}
+          <label>
+            Issue number
+            <input
+              type="number"
+              min="1"
+              value={node.issue ?? ""}
+              oninput={(event) =>
+                graph.setActionIssue(node.id, event.currentTarget.value)}
+            />
+          </label>
+        {/if}
+        {#if node.action === "commit" || node.action === "pullrequest"}
+          <p class="hint">
+            Text may use {"{{workspace.branch}}"} and the other workspace fields,
+            and {"{{result}}"} from a connected block.
+          </p>
+        {/if}
       {/if}
       {#if node.type === "agent"}
         <label>

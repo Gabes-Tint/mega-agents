@@ -36,10 +36,19 @@ var errNoStartingBlock = errors.New(
 
 // gitActionLabels names each Git action a GitHub block can hold.
 var gitActionLabels = map[string]string{
-	"fetch":    "Fetch",
-	"worktree": "Create worktree",
-	"rebase":   "Rebase",
+	"fetch":       "Fetch",
+	"worktree":    "Create worktree",
+	"rebase":      "Rebase",
+	"issue":       "Read issue",
+	"commit":      "Commit",
+	"push":        "Push",
+	"pullrequest": "Open pull request",
 }
+
+const (
+	pullRequestPort = "pullRequest"
+	issuePort       = "issue"
+)
 
 // Runs plans workflows and executes them as recorded runs: every run keeps
 // its record and the log of every step in the store.
@@ -135,6 +144,8 @@ type runPlanner struct {
 	nodeByID   map[string]WorkflowNodeInput
 	childrenOf map[string][]WorkflowNodeInput
 	request    WorkflowRequest
+	// included are the blocks this run executes.
+	included map[string]bool
 }
 
 func planRun(request WorkflowRequest) ([]engine.Task, error) {
@@ -142,13 +153,13 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	planner := runPlanner{nodeByID: nodeByID, childrenOf: map[string][]WorkflowNodeInput{}, request: request}
+	included := map[string]bool{}
+	planner := runPlanner{nodeByID: nodeByID, childrenOf: map[string][]WorkflowNodeInput{}, request: request, included: included}
 	for _, node := range request.Nodes {
 		if node.ParentID != "" {
 			planner.childrenOf[node.ParentID] = append(planner.childrenOf[node.ParentID], node)
 		}
 	}
-	included := map[string]bool{}
 	var tasks []engine.Task
 	for _, node := range request.Nodes {
 		switch {
@@ -176,15 +187,15 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 		var task engine.Task
 		switch node.Type {
 		case "agent":
-			task, err = planner.agentTask(node, included)
+			task, err = planner.agentTask(node)
 		case "jsonschema":
-			task, err = planner.schemaTask(node, included)
+			task, err = planner.schemaTask(node)
 		case "router":
-			task, err = planner.routerTask(node, included)
+			task, err = planner.routerTask(node)
 		case "command":
-			task, err = planner.commandTask(node, included)
+			task, err = planner.commandTask(node)
 		default:
-			task, err = planner.actionTask(node, included)
+			task, err = planner.actionTask(node)
 		}
 		if err != nil {
 			return nil, err
@@ -229,48 +240,99 @@ func (planner runPlanner) include(id string, included map[string]bool) {
 	}
 }
 
-func (planner runPlanner) actionTask(node WorkflowNodeInput, included map[string]bool) (engine.Task, error) {
+// needsWorkspace are the Git actions that work inside a workspace.
+var needsWorkspace = map[string]bool{"rebase": true, "commit": true, "push": true, "pullrequest": true}
+
+func (planner runPlanner) actionTask(node WorkflowNodeInput) (engine.Task, error) {
 	if _, known := gitActionLabels[node.Action]; !known {
 		return engine.Task{}, fmt.Errorf("unknown Git action %q on %s", node.Action, node.Name)
 	}
-	github := planner.nodeByID[node.ParentID]
-	var needs []engine.Need
-	receivesWorkspace := false
-	for _, edge := range planner.request.Edges {
-		if edge.To != node.ID || !included[edge.From] {
-			continue
-		}
-		port, err := planner.sourcePort(edge)
-		if err != nil {
-			return engine.Task{}, err
-		}
-		need := engine.Need{TaskID: edge.From}
-		if port == workspacePort && node.Action == "rebase" {
-			need.Port = workspacePort
-			receivesWorkspace = true
-		}
-		needs = append(needs, need)
+	fail := func(format string, args ...any) (engine.Task, error) {
+		return engine.Task{}, fmt.Errorf("%s: %s", node.Name, fmt.Sprintf(format, args...))
 	}
-	switch node.Action {
-	case "fetch":
+	github := planner.nodeByID[node.ParentID]
+	needs, err := planner.incomingNeeds(node)
+	if err != nil {
+		return engine.Task{}, err
+	}
+	sources := planner.sourcesOf(needs)
+	if needsWorkspace[node.Action] && !sources.workspace {
+		return engine.Task{}, fmt.Errorf(
+			"%s needs a workspace; connect a %s action before it", node.Name, gitActionLabels["worktree"],
+		)
+	}
+	for _, text := range []string{node.Message, node.Title, node.Body} {
+		if err := checkTemplate(text, sources); err != nil {
+			return fail("%v", err)
+		}
+	}
+	if node.Action == "issue" && node.Issue <= 0 {
+		return fail("set the issue number")
+	}
+	if node.Action == "fetch" {
 		task := planner.fetchTask(node, github)
 		task.Needs = needs
 		return task, nil
-	case "rebase":
-		if !receivesWorkspace {
-			return engine.Task{}, fmt.Errorf(
-				"%s needs a workspace; connect a %s action before it", node.Name, gitActionLabels["worktree"],
-			)
-		}
 	}
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: node.Action, Needs: needs,
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			ctx, cancel := context.WithTimeout(gitops.WithLog(ctx, log), runStepTimeout)
 			defer cancel()
-			if node.Action == "rebase" {
-				workspace, _ := inputs[0].Value.(gitops.Workspace)
+			workspace, _ := workspaceIn(inputs)
+			networked := node.Action == "push" || node.Action == "pullrequest" || node.Action == "issue"
+			if networked && !github.Authenticated {
+				return engine.Result{}, errors.New(
+					`check "Already authenticated" on this GitHub block; token authentication is not supported yet`,
+				)
+			}
+			switch node.Action {
+			case "rebase":
 				return workspaceResult(gitops.Rebase(ctx, workspace, node.Onto))
+			case "commit":
+				message := renderTemplate(node.Message, inputs, sources)
+				if strings.TrimSpace(node.Message) == "" {
+					message = "Changes from Mega Agents run"
+				}
+				commit, err := gitops.Commit(ctx, workspace, message)
+				result, _ := workspaceResult(workspace, err)
+				if err == nil {
+					result.Details["commit"] = commit
+				}
+				return result, err
+			case "push":
+				return workspaceResult(workspace, gitops.Push(ctx, workspace))
+			case "pullrequest":
+				pull, err := gitops.OpenPullRequest(ctx, workspace, gitops.PullRequest{
+					Title: renderTemplate(node.Title, inputs, sources),
+					Body:  renderTemplate(node.Body, inputs, sources), Base: node.Base,
+				})
+				if err != nil {
+					return engine.Result{}, err
+				}
+				value := map[string]any{"number": pull.Number, "url": pull.URL, "base": pull.Base, "title": pull.Title}
+				result, _ := workspaceResult(workspace, nil)
+				result.Outputs[pullRequestPort] = value
+				result.Details["url"], result.Details["number"] = pull.URL, pull.Number
+				return result, nil
+			case "issue":
+				repository := github.Repository
+				if strings.TrimSpace(repository) == "" {
+					dir, err := projectDir(planner.nodeByID[github.ParentID])
+					if err != nil {
+						return engine.Result{}, err
+					}
+					detected, err := gitops.DetectGitHubRepository(ctx, dir)
+					if err != nil {
+						return engine.Result{}, err
+					}
+					repository = detected.Repository
+				}
+				issue, err := gitops.ReadIssue(ctx, repository, node.Issue)
+				if err != nil {
+					return engine.Result{}, err
+				}
+				return engine.Result{Outputs: map[string]any{issuePort: issue}, Details: map[string]any{"issue": issue}}, nil
 			}
 			dir, err := projectDir(planner.nodeByID[github.ParentID])
 			if err != nil {
@@ -284,12 +346,58 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput, included map[string
 	}, nil
 }
 
+// incomingNeeds lists what a block receives from the executed blocks with
+// arrows into it: each arrow's output, and the workspace a block passes on
+// alongside its own output.
+func (planner runPlanner) incomingNeeds(node WorkflowNodeInput) ([]engine.Need, error) {
+	var needs []engine.Need
+	for _, edge := range planner.request.Edges {
+		if edge.To != node.ID || !planner.included[edge.From] {
+			continue
+		}
+		port, err := planner.sourcePort(edge)
+		if err != nil {
+			return nil, err
+		}
+		needs = append(needs, engine.Need{TaskID: edge.From, Port: port})
+		if port != workspacePort && planner.passesWorkspace(edge.From, map[string]bool{}) {
+			needs = append(needs, engine.Need{TaskID: edge.From, Port: workspacePort})
+		}
+	}
+	return needs, nil
+}
+
+// passesWorkspace reports whether a block outputs a workspace: the Git
+// actions that prepare or keep one, and agents and commands that receive one.
+func (planner runPlanner) passesWorkspace(id string, visiting map[string]bool) bool {
+	node := planner.nodeByID[id]
+	switch node.Type {
+	case "action":
+		return node.Action == "worktree" || needsWorkspace[node.Action]
+	case "agent", "command":
+		if visiting[id] {
+			return false
+		}
+		visiting[id] = true
+		for _, edge := range planner.request.Edges {
+			if edge.To == id && planner.included[edge.From] && planner.passesWorkspace(edge.From, visiting) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // sourcePort names the output an arrow carries from its source block, or
 // returns "" for an arrow that only orders the two blocks.
 func (planner runPlanner) sourcePort(edge WorkflowEdgeInput) (string, error) {
 	source := planner.nodeByID[edge.From]
 	switch {
-	case producesWorkspace(source):
+	case source.Type == "action" && source.Action == "pullrequest":
+		return pullRequestPort, nil
+	case source.Type == "action" && source.Action == "issue":
+		return issuePort, nil
+	case source.Type == "action" && (source.Action == "worktree" || needsWorkspace[source.Action]):
 		return workspacePort, nil
 	case source.Type == "agent":
 		return resultPort, nil
@@ -336,32 +444,21 @@ func joinChoices(choices []string) string {
 
 // valueNeeds collects the arrows into a block that takes exactly one value,
 // such as an agent's result, and nothing else.
-func (planner runPlanner) valueNeeds(node WorkflowNodeInput, included map[string]bool, verb string) ([]engine.Need, error) {
-	var needs []engine.Need
-	values := 0
-	for _, edge := range planner.request.Edges {
-		if edge.To != node.ID || !included[edge.From] {
-			continue
-		}
-		port, err := planner.sourcePort(edge)
-		if err != nil {
-			return nil, err
-		}
-		if port != "" && port != workspacePort {
-			values++
-		} else {
-			values += 2 // Only a value counts.
-		}
-		needs = append(needs, engine.Need{TaskID: edge.From, Port: port})
+func (planner runPlanner) valueNeeds(node WorkflowNodeInput, verb string) ([]engine.Need, error) {
+	incoming, err := planner.incomingNeeds(node)
+	if err != nil {
+		return nil, err
 	}
-	if values != 1 {
+	var needs []engine.Need
+	for _, need := range incoming {
+		if need.Port != workspacePort {
+			needs = append(needs, need)
+		}
+	}
+	if len(needs) != 1 || needs[0].Port == "" {
 		return nil, fmt.Errorf("%s: %s one value; connect exactly one block to it", node.Name, verb)
 	}
 	return needs, nil
-}
-
-func producesWorkspace(node WorkflowNodeInput) bool {
-	return node.Type == "action" && (node.Action == "worktree" || node.Action == "rebase")
 }
 
 func workspaceResult(workspace gitops.Workspace, err error) (engine.Result, error) {
