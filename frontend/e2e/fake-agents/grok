@@ -1,0 +1,6 @@
+#!/usr/bin/env bun
+// A stand-in for Grok in browser tests that cannot answer, so one backend
+// shows as unavailable. It takes a moment, so a new check can be seen running.
+await Bun.sleep(1_500);
+console.log(JSON.stringify({ type: "error", message: "no credits" }));
+process.exit(1);

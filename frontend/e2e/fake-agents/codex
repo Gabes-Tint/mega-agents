@@ -1,0 +1,12 @@
+#!/usr/bin/env bun
+// A stand-in for Codex in browser tests: it answers every turn with ACK in
+// the JSON events the real CLI prints.
+console.log(
+  JSON.stringify({ type: "thread.started", thread_id: "fake-codex" }),
+);
+console.log(
+  JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "ACK" },
+  }),
+);

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"unicode"
+
+	"github.com/Gabes-Tint/mega-agents/internal/router"
 )
 
 const workflowAPIVersion = "megaagents.dev/v1alpha1"
@@ -18,6 +20,9 @@ type WorkflowEdgeInput struct {
 	ID   string `json:"id"`
 	From string `json:"from"`
 	To   string `json:"to"`
+	// FromPort names which output of a block with several the arrow
+	// carries, such as the invalid branch of a schema block.
+	FromPort string `json:"fromPort,omitempty"`
 }
 
 type WorkflowNodeInput struct {
@@ -33,8 +38,59 @@ type WorkflowNodeInput struct {
 	Path           string  `json:"path,omitempty"`
 	Repository     string  `json:"repository,omitempty"`
 	SecretKey      string  `json:"secretKey,omitempty"`
+	Authenticated  bool    `json:"authenticated,omitempty"`
 	AppID          string  `json:"appId,omitempty"`
 	PrivateKeyPath string  `json:"privateKeyPath,omitempty"`
+	// Git action blocks nested inside a GitHub block.
+	Action       string `json:"action,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Base         string `json:"base,omitempty"`
+	WorktreePath string `json:"worktreePath,omitempty"`
+	Onto         string `json:"onto,omitempty"`
+	// Agent blocks.
+	Backend        string   `json:"backend,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	Effort         string   `json:"effort,omitempty"`
+	Prompt         string   `json:"prompt,omitempty"`
+	OutputSchema   string   `json:"outputSchema,omitempty"`
+	Retries        *int     `json:"retries,omitempty"`
+	TimeoutMinutes *float64 `json:"timeoutMinutes,omitempty"`
+	MaxCostUSD     *float64 `json:"maxCostUsd,omitempty"`
+	// ContinueSession resumes a copy of the connected agent's conversation.
+	ContinueSession bool `json:"continueSession,omitempty"`
+	// JSON Schema blocks.
+	Schema string `json:"schema,omitempty"`
+	// Router blocks.
+	Cases []router.Case `json:"cases,omitempty"`
+	// Command blocks.
+	Command string `json:"command,omitempty"`
+	// Loop blocks: how many times the blocks inside may run, and the block
+	// inside and its output that end the loop.
+	MaxIterations *int   `json:"maxIterations,omitempty"`
+	UntilNode     string `json:"untilNode,omitempty"`
+	UntilPort     string `json:"untilPort,omitempty"`
+	// WaitForAny runs an agent, command or loop when any of the arrows into
+	// it arrives, where exclusive branches join again.
+	WaitForAny bool `json:"waitForAny,omitempty"`
+	// Delivery actions: a commit message, a pull request's title and body,
+	// and the issue to read with the labels that stop it from being read.
+	// Without the setting the default labels apply; an empty list ignores none.
+	Message      string    `json:"message,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Body         string    `json:"body,omitempty"`
+	Issue        int       `json:"issue,omitempty"`
+	IgnoreLabels *[]string `json:"ignoreLabels,omitempty"`
+}
+
+// defaultIgnoreLabels are the labels Read issue ignores unless the action
+// lists its own.
+var defaultIgnoreLabels = []string{"paused", "draft", "needs-attention"}
+
+func (node WorkflowNodeInput) ignoreLabels() []string {
+	if node.IgnoreLabels == nil {
+		return defaultIgnoreLabels
+	}
+	return *node.IgnoreLabels
 }
 
 type WorkflowRequest struct {
@@ -44,12 +100,37 @@ type WorkflowRequest struct {
 }
 
 var knownComponentTypes = map[string]bool{
-	"agent":     true,
-	"tool":      true,
-	"project":   true,
-	"github":    true,
-	"gitlab":    true,
-	"githubapp": true,
+	"agent":      true,
+	"project":    true,
+	"github":     true,
+	"gitlab":     true,
+	"githubapp":  true,
+	"action":     true,
+	"jsonschema": true,
+	"router":     true,
+	"command":    true,
+	"loop":       true,
+}
+
+// containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
+// component type, the targets (including the canvas root) that accept it.
+// Any placement outside these lists is rejected so the exported YAML always
+// matches what the builder validates while dragging.
+var containmentMatrix = map[string]map[string]bool{
+	"agent":      {"project": true, "agent": true, "loop": true},
+	"project":    {"root": true, "project": true},
+	"github":     {"project": true},
+	"gitlab":     {"project": true},
+	"githubapp":  {"github": true},
+	"action":     {"github": true},
+	"jsonschema": {"agent": true},
+	"router":     {"project": true, "agent": true, "loop": true},
+	"command":    {"project": true, "agent": true, "loop": true},
+	"loop":       {"project": true},
+}
+
+func containmentAllows(target string, childType string) bool {
+	return containmentMatrix[childType][target]
 }
 
 // identifierSet tracks every identifier handed out so collision suffixes can
@@ -100,8 +181,9 @@ func yamlString(value string) string {
 // derive from. It is not a displayable component type; both forge controllers
 // emit their configuration through it to avoid duplicated serialization.
 type gitBase struct {
-	Repository string
-	SecretKey  string
+	Repository    string
+	SecretKey     string
+	Authenticated bool
 }
 
 func (base gitBase) withLines(indent string) []string {
@@ -112,11 +194,14 @@ func (base gitBase) withLines(indent string) []string {
 	if base.SecretKey != "" {
 		with = append(with, fmt.Sprintf("%ssecretKey: %s", indent, yamlString(base.SecretKey)))
 	}
+	if base.Authenticated {
+		with = append(with, fmt.Sprintf("%sauthenticated: true", indent))
+	}
 	return with
 }
 
 func gitBaseFor(node WorkflowNodeInput) gitBase {
-	return gitBase{Repository: node.Repository, SecretKey: node.SecretKey}
+	return gitBase{Repository: node.Repository, SecretKey: node.SecretKey, Authenticated: node.Authenticated}
 }
 
 type workflowEmitter struct {
@@ -132,11 +217,28 @@ func (emitter *workflowEmitter) emitNode(
 	indent string,
 ) {
 	builder.WriteString(fmt.Sprintf("%s%s:\n", indent, identifier))
-	builder.WriteString(fmt.Sprintf("%s  uses: %s@v1\n", indent, node.Type))
+	uses := node.Type
+	if node.Type == "action" {
+		// Git actions are local Git capabilities provided through their
+		// GitHub block, so they export under the git block family.
+		uses = "git/" + node.Action
+	}
+	builder.WriteString(fmt.Sprintf("%s  uses: %s@v1\n", indent, uses))
+	if node.Name != identifier {
+		// The identifier is a slug of the name; the name itself is kept so an
+		// imported workflow shows the same labels.
+		builder.WriteString(fmt.Sprintf("%s  name: %s\n", indent, yamlString(node.Name)))
+	}
 	var needs []string
 	for _, edge := range emitter.request.Edges {
 		if edge.To == node.ID {
-			needs = append(needs, emitter.identifierByNode[edge.From])
+			need := emitter.identifierByNode[edge.From]
+			if edge.FromPort != "" {
+				// Identifiers never contain dots, so identifier.port is
+				// unambiguous.
+				need += "." + edge.FromPort
+			}
+			needs = append(needs, need)
 		}
 	}
 	if len(needs) > 0 {
@@ -156,6 +258,63 @@ func (emitter *workflowEmitter) emitNode(
 	}
 	if node.Path != "" {
 		with = append(with, fmt.Sprintf("%s    path: %s", indent, yamlString(node.Path)))
+	}
+	for _, field := range []struct{ key, value string }{
+		{"branch", node.Branch}, {"base", node.Base}, {"worktreePath", node.WorktreePath}, {"onto", node.Onto},
+		{"backend", node.Backend}, {"model", node.Model}, {"effort", node.Effort}, {"prompt", node.Prompt},
+		{"outputSchema", node.OutputSchema}, {"schema", node.Schema}, {"command", node.Command},
+		{"message", node.Message}, {"title", node.Title}, {"body", node.Body},
+	} {
+		if field.value != "" {
+			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))
+		}
+	}
+	if len(node.Cases) > 0 {
+		with = append(with, fmt.Sprintf("%s    cases:", indent))
+		for _, routeCase := range node.Cases {
+			with = append(with,
+				fmt.Sprintf("%s      - name: %s", indent, yamlString(routeCase.Name)),
+				fmt.Sprintf("%s        expression: %s", indent, yamlString(routeCase.Expression)),
+			)
+		}
+	}
+	if node.MaxIterations != nil {
+		with = append(with, fmt.Sprintf("%s    maxIterations: %d", indent, *node.MaxIterations))
+	}
+	if node.UntilNode != "" {
+		// The block that ends the loop is named by its identifier, as needs are.
+		with = append(with, fmt.Sprintf("%s    untilNode: %s", indent, yamlString(emitter.identifierByNode[node.UntilNode])))
+	}
+	if node.UntilPort != "" {
+		with = append(with, fmt.Sprintf("%s    untilPort: %s", indent, yamlString(node.UntilPort)))
+	}
+	if node.Issue != 0 {
+		with = append(with, fmt.Sprintf("%s    issue: %d", indent, node.Issue))
+	}
+	if node.IgnoreLabels != nil {
+		// A cleared list is written as [] so it does not fall back to the defaults.
+		var labels []string
+		for _, label := range *node.IgnoreLabels {
+			if label = strings.TrimSpace(label); label != "" {
+				labels = append(labels, yamlString(label))
+			}
+		}
+		with = append(with, fmt.Sprintf("%s    ignoreLabels: [%s]", indent, strings.Join(labels, ", ")))
+	}
+	if node.Retries != nil {
+		with = append(with, fmt.Sprintf("%s    retries: %d", indent, *node.Retries))
+	}
+	if node.TimeoutMinutes != nil {
+		with = append(with, fmt.Sprintf("%s    timeoutMinutes: %g", indent, *node.TimeoutMinutes))
+	}
+	if node.ContinueSession {
+		with = append(with, fmt.Sprintf("%s    continueSession: true", indent))
+	}
+	if node.WaitForAny {
+		with = append(with, fmt.Sprintf("%s    waitForAny: true", indent))
+	}
+	if node.MaxCostUSD != nil {
+		with = append(with, fmt.Sprintf("%s    maxCostUsd: %g", indent, *node.MaxCostUSD))
 	}
 	if node.AppID != "" {
 		with = append(with, fmt.Sprintf("%s    appId: %s", indent, yamlString(node.AppID)))
@@ -191,55 +350,68 @@ func (emitter *workflowEmitter) emitNode(
 	}
 }
 
+// validateGraph applies the rules the editor enforces while dragging: known
+// types, unique ids, edges and parents that resolve, and the containment
+// matrix. Export and run share it so neither accepts a graph the other rejects.
+func validateGraph(request WorkflowRequest) (map[string]WorkflowNodeInput, error) {
+	if len(request.Nodes) == 0 {
+		return nil, fmt.Errorf("no nodes to export")
+	}
+	for _, node := range request.Nodes {
+		if !knownComponentTypes[node.Type] {
+			return nil, fmt.Errorf("unknown component type %q", node.Type)
+		}
+	}
+	nodeByID := make(map[string]WorkflowNodeInput, len(request.Nodes))
+	for _, node := range request.Nodes {
+		if nodeByID[node.ID].Type != "" {
+			return nil, fmt.Errorf("duplicate node id %q", node.ID)
+		}
+		nodeByID[node.ID] = node
+	}
+	for _, edge := range request.Edges {
+		_, fromOK := nodeByID[edge.From]
+		_, toOK := nodeByID[edge.To]
+		if !fromOK || !toOK {
+			return nil, fmt.Errorf("edge references an unknown node")
+		}
+	}
+	for _, node := range request.Nodes {
+		target := "root"
+		if node.ParentID != "" {
+			parent, ok := nodeByID[node.ParentID]
+			if !ok {
+				return nil, fmt.Errorf("node %q references an unknown parent", node.ID)
+			}
+			target = parent.Type
+		}
+		if !containmentAllows(target, node.Type) {
+			return nil, fmt.Errorf(
+				"%s cannot be placed inside %s",
+				node.Type,
+				target,
+			)
+		}
+	}
+	return nodeByID, nil
+}
+
 // BuildWorkflowYAML serializes the graph deterministically: identifiers are
 // assigned in a first pass so needs and containment resolve regardless of
 // declaration order, while nodes keep their input order. Contained boxes are
 // serialized as child objects inside their parent instead of using a parent
 // tag. Secrets are exported as credential references only.
 func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
-	if len(request.Nodes) == 0 {
-		return "", fmt.Errorf("no nodes to export")
-	}
-	for _, node := range request.Nodes {
-		if !knownComponentTypes[node.Type] {
-			return "", fmt.Errorf("unknown component type %q", node.Type)
-		}
+	if _, err := validateGraph(request); err != nil {
+		return "", err
 	}
 	identifiers := newIdentifierSet()
-	nodeByID := make(map[string]WorkflowNodeInput, len(request.Nodes))
 	identifierByNode := make(map[string]string, len(request.Nodes))
-	for _, node := range request.Nodes {
-		if nodeByID[node.ID].Type != "" {
-			return "", fmt.Errorf("duplicate node id %q", node.ID)
-		}
-		nodeByID[node.ID] = node
-		identifierByNode[node.ID] = identifiers.slugIdentifier(node.Name)
-	}
-	for _, edge := range request.Edges {
-		_, fromOK := identifierByNode[edge.From]
-		_, toOK := identifierByNode[edge.To]
-		if !fromOK || !toOK {
-			return "", fmt.Errorf("edge references an unknown node")
-		}
-	}
 	childrenOf := make(map[string][]WorkflowNodeInput, len(request.Nodes))
 	for _, node := range request.Nodes {
-		if node.ParentID == "" {
-			continue
-		}
-		parent, ok := nodeByID[node.ParentID]
-		if !ok {
-			return "", fmt.Errorf("node %q references an unknown parent", node.ID)
-		}
-		// A GitHub App lives inside its GitHub controller and nowhere else.
-		if node.Type == "githubapp" && parent.Type != "github" {
-			return "", fmt.Errorf("github app must be inside a github object")
-		}
-		childrenOf[node.ParentID] = append(childrenOf[node.ParentID], node)
-	}
-	for _, node := range request.Nodes {
-		if node.Type == "githubapp" && node.ParentID == "" {
-			return "", fmt.Errorf("github app must be inside a github object")
+		identifierByNode[node.ID] = identifiers.slugIdentifier(node.Name)
+		if node.ParentID != "" {
+			childrenOf[node.ParentID] = append(childrenOf[node.ParentID], node)
 		}
 	}
 	if request.Name == "" {

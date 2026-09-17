@@ -1,18 +1,49 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
 
-// Browser smoke suite for drag-and-drop, which jsdom cannot exercise. Kept
-// out of `make verify`: run explicitly with `bun run e2e`. Reuses a running
-// dev server (e.g. `make dev`); CI wiring is tracked in docs/ci-doc.md.
+// Browser suite for drag-and-drop, which jsdom cannot exercise, and for flows
+// that run on the real Go backend. Kept out of `make verify`: run explicitly
+// with `bun run e2e`. Both servers use dedicated ports so a running `make dev`
+// session is never reused, and the backend keeps its worktrees in a temporary
+// Mega Agents home.
+const backendPort = 48_080;
+// Agent CLIs the backend runs are replaced by fakes, so no flow spends a
+// real model turn.
+const fakeAgents = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "e2e",
+  "fake-agents",
+);
+const frontendPort = 45_174;
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
   use: {
-    baseURL: "http://localhost:5173/",
+    baseURL: `http://localhost:${frontendPort}/`,
     browserName: "chromium",
   },
-  webServer: {
-    command: "bun run dev -- --host",
-    url: "http://localhost:5173/",
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: "go run .",
+      cwd: "..",
+      url: `http://localhost:${backendPort}/api/status`,
+      env: {
+        PORT: String(backendPort),
+        PATH: `${fakeAgents}:${process.env.PATH ?? ""}`,
+        MEGA_AGENTS_HOME: mkdtempSync(join(tmpdir(), "mega-agents-home-")),
+      },
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command: `bun run dev -- --host --port ${frontendPort} --strictPort`,
+      url: `http://localhost:${frontendPort}/`,
+      env: { MEGA_AGENTS_API: `http://localhost:${backendPort}` },
+      reuseExistingServer: false,
+    },
+  ],
 });
