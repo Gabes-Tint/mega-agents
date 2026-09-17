@@ -427,6 +427,16 @@
         {#if node.start}
           <span class="start-flag" aria-hidden="true">▶</span>
         {/if}
+        {#if node.type === "loop"}
+          <span class="repeats" aria-hidden="true">
+            ↻
+            {#if graph.iterationOf(node.id)}
+              {graph.iterationOf(node.id)} of {node.maxIterations ?? 3}
+            {:else}
+              up to {node.maxIterations ?? 3}×
+            {/if}
+          </span>
+        {/if}
         {#if graph.severityOf(node.id)}
           <span
             class="problem-mark"
@@ -589,6 +599,16 @@
     font-weight: 400;
     color: var(--text-faint);
     letter-spacing: 0.02em;
+  }
+
+  .repeats {
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: var(--block-body);
+    color: var(--block-accent);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
 
   .problem-mark {

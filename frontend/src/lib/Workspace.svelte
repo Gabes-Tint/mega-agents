@@ -21,6 +21,8 @@
     status: string;
     error?: string;
     details?: Record<string, unknown>;
+    loop?: string;
+    iteration?: number;
   }
 
   interface RunResult {
@@ -48,6 +50,7 @@
     ["sessionId", "Session"],
     ["continuedFrom", "Continued from"],
     ["attempts", "Attempts"],
+    ["iterations", "Iterations"],
     ["case", "Route"],
     ["exitCode", "Exit code"],
     ["commit", "Commit"],
@@ -786,6 +789,9 @@
                     {step.name}: {step.action}
                     {step.status}
                   </strong>
+                  {#if step.iteration}
+                    <span class="meta">repeat {step.iteration}</span>
+                  {/if}
                   {#if runResult.id}
                     <button
                       type="button"

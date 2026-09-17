@@ -7,7 +7,8 @@ export type NodeType =
   | "action"
   | "jsonschema"
   | "router"
-  | "command";
+  | "command"
+  | "loop";
 
 export type GitAction =
   "fetch" | "worktree" | "rebase" | "issue" | "commit" | "push" | "pullrequest";
@@ -72,6 +73,16 @@ export interface Problem {
 export interface RunStepStatus {
   nodeId: string;
   status: string;
+  // The loop a step repeats in, and the iteration it shows.
+  loop?: string;
+  iteration?: number;
+}
+
+// One way a loop can end: a block inside it taking one of its outputs.
+export interface LoopExit {
+  nodeId: string;
+  port: string;
+  label: string;
 }
 
 // The canvas root as a pseudo target so the containment matrix covers
@@ -132,12 +143,19 @@ export interface GraphNode {
   title?: string;
   body?: string;
   issue?: number;
+  maxIterations?: number;
+  untilNode?: string;
+  untilPort?: string;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
 export const DEFAULT_NODE_HEIGHT = 64;
 export const MIN_NODE_WIDTH = 120;
 export const MIN_NODE_HEIGHT = 48;
+
+// A loop starts large enough to hold a gate and a fixer.
+const LOOP_WIDTH = 400;
+const LOOP_HEIGHT = 220;
 
 // Layout of a GitHub block's action sequence: below the block header, one
 // action under the other with room for the arrow between them.
@@ -193,21 +211,28 @@ export const PALETTE: readonly PaletteItem[] = [
     description:
       "Runs a shell command, such as tests or a linter, in the workspace. Exit 0 goes to passed; anything else to failed.",
   },
+  {
+    type: "loop",
+    label: "Loop",
+    description:
+      "Repeats the blocks inside it, such as a gate and a fixer, until one takes a chosen output or the repeats run out.",
+  },
 ];
 
 // Hue (OKLCH degrees) that colors each block type on the canvas and in the
 // palette, spread around the wheel so neighbours never look alike. The
 // stylesheet derives each theme's tints from it.
 export const BLOCK_HUES: Record<NodeType, number> = {
-  agent: 295,
-  project: 245,
-  action: 205,
-  jsonschema: 165,
-  command: 125,
-  router: 80,
-  gitlab: 45,
-  githubapp: 10,
-  github: 335,
+  agent: 288,
+  project: 252,
+  loop: 216,
+  action: 180,
+  jsonschema: 144,
+  command: 108,
+  router: 72,
+  gitlab: 36,
+  githubapp: 0,
+  github: 324,
 };
 
 // Single source of truth for where a block may go, agreed with the product
@@ -215,15 +240,16 @@ export const BLOCK_HUES: Record<NodeType, number> = {
 // accepts it, including the canvas root as a pseudo target. Anything absent
 // from a target's list is rejected.
 export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
-  agent: ["project", "agent"],
+  agent: ["project", "agent", "loop"],
   project: ["root", "project"],
   github: ["project"],
   gitlab: ["project"],
   githubapp: ["github"],
   action: ["github"],
-  jsonschema: ["project", "agent"],
-  router: ["project", "agent"],
-  command: ["project", "agent"],
+  jsonschema: ["project", "agent", "loop"],
+  router: ["project", "agent", "loop"],
+  command: ["project", "agent", "loop"],
+  loop: ["project"],
 };
 
 // Boxes that can host children: every target that appears as a parent in
@@ -239,6 +265,7 @@ export const CONTAINER_TYPES: readonly NodeType[] = (
     "jsonschema",
     "router",
     "command",
+    "loop",
   ] as NodeType[]
 ).filter((type) =>
   Object.values(CONTAINMENT_MATRIX).some((targets) => targets.includes(type)),
@@ -291,6 +318,7 @@ const TARGET_LABELS: Record<NodeType, string> = {
   jsonschema: "JSON Schema",
   router: "Router",
   command: "Command",
+  loop: "loop",
 };
 
 // Human-readable list of the targets a block may be dropped into, used to
@@ -348,6 +376,7 @@ export class GraphStore {
   // store to power live dragover validation on the canvas.
   draggingType = $state<NodeType | null>(null);
   runStatuses = $state<Record<string, string>>({});
+  runIterations = $state<Record<string, number>>({});
   // The run whose statuses the canvas shows, and the block whose log of that
   // run is open.
   runId = $state<string | null>(null);
@@ -413,6 +442,11 @@ export class GraphStore {
       parentId: effectiveParent,
     };
     if (type === "agent") node.backend = "claude";
+    if (type === "loop") {
+      node.maxIterations = 3;
+      node.w = LOOP_WIDTH;
+      node.h = LOOP_HEIGHT;
+    }
     if (type === "router")
       node.cases = [
         { name: "approved", expression: 'value.verdict == "approve"' },
@@ -593,6 +627,11 @@ export class GraphStore {
     );
     if (next && node.start) next.start = true;
     if (previous && next) this.connect(previous.id, next.id);
+    for (const loop of this.nodes)
+      if (loop.untilNode && removed.includes(loop.untilNode)) {
+        loop.untilNode = undefined;
+        loop.untilPort = undefined;
+      }
     if (this.selectedId && removed.includes(this.selectedId))
       this.selectedId = null;
     if (this.logNodeId && removed.includes(this.logNodeId))
@@ -756,6 +795,7 @@ export class GraphStore {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node?.type === "jsonschema") return ["valid", "invalid"];
     if (node?.type === "command") return ["passed", "failed"];
+    if (node?.type === "loop") return ["done", "exhausted"];
     if (node?.type === "router")
       return [
         ...(node.cases ?? []).map((routeCase) => routeCase.name),
@@ -797,6 +837,9 @@ export class GraphStore {
     if (field === "name") {
       for (const edge of this.outgoingEdges(id))
         if (edge.fromPort === routeCase.name) edge.fromPort = value;
+      for (const loop of this.nodes)
+        if (loop.untilNode === id && loop.untilPort === routeCase.name)
+          loop.untilPort = value;
     }
     routeCase[field] = value;
   }
@@ -853,6 +896,46 @@ export class GraphStore {
     this.runStatuses = Object.fromEntries(
       steps.map((step) => [step.nodeId, step.status]),
     );
+    const iterations: Record<string, number> = {};
+    for (const step of steps)
+      if (step.loop && step.iteration)
+        iterations[step.loop] = Math.max(
+          iterations[step.loop] ?? 0,
+          step.iteration,
+        );
+    this.runIterations = iterations;
+  }
+
+  // The iteration a loop of the shown run has reached.
+  iterationOf(id: string): number | undefined {
+    return this.runIterations[id];
+  }
+
+  // Every block inside the loop with outputs to choose from, and each output.
+  loopExits(id: string): LoopExit[] {
+    return this.nodes
+      .filter((node) => node.parentId === id)
+      .flatMap((node) =>
+        this.outputPorts(node.id).map((port) => ({
+          nodeId: node.id,
+          port,
+          label: `${node.name} takes ${port}`,
+        })),
+      );
+  }
+
+  // Sets the exit from "<block id>:<output>", or clears it with "".
+  setLoopExit(id: string, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    const separator = value.lastIndexOf(":");
+    node.untilNode = separator > 0 ? value.slice(0, separator) : undefined;
+    node.untilPort = separator > 0 ? value.slice(separator + 1) : undefined;
+  }
+
+  setMaxIterations(id: string, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.maxIterations = value === "" ? undefined : Number(value);
   }
 
   // Whether the shown run has a step, and so a log, of the block's own.

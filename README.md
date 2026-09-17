@@ -117,6 +117,17 @@ refs.
   `MEGA_AGENTS_WORKSPACE_PATH|BRANCH|BASE|REPOSITORY` set. Exit 0 leaves on
   `passed`; anything else leaves on `failed` with `{exitCode, output}` when an
   arrow takes it (for example to a fixer agent), and otherwise fails the run.
+- **Loop** repeats the blocks inside it (agents, commands, schema checks,
+  routers) until the block chosen under **Ends when** takes the chosen
+  output, at most **Repeat at most** times (3 by default, up to 20). The
+  blocks inside that no block inside feeds receive the arrows into the loop
+  on every repeat, so a loop holding *Gate* → `failed` → *Fixer* ends when
+  *Gate* takes `passed`. The loop sends that value on `done`, or the last
+  value on `exhausted` (failing the run when no arrow takes it), and passes a
+  workspace on. An agent inside that continues a conversation continues the
+  agent feeding the loop's on the first repeat and its own afterwards. The
+  canvas shows which repeat a running loop is on, and each block's log marks
+  every repeat.
 - **Router** sends the one value connected to it down the first case whose
   CEL condition over `value` holds (for example `value.verdict == "approve"`),
   or down `default`, as `{"case": ..., "value": ...}`. Expressions are

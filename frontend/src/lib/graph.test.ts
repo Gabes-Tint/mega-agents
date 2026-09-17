@@ -806,6 +806,7 @@ describe("PALETTE", () => {
       { type: "jsonschema", label: "JSON Schema" },
       { type: "router", label: "Router" },
       { type: "command", label: "Command" },
+      { type: "loop", label: "Loop" },
     ]);
   });
 
@@ -833,6 +834,7 @@ describe("canHostChild", () => {
   // blocks, columns are the targets that accept them (root = empty canvas).
   const matrix = [
     ["agent", { root: false, project: true, github: false, agent: true }],
+    ["loop", { root: false, project: true, github: false, agent: false }],
     ["project", { root: true, project: true, github: false, agent: false }],
     ["github", { root: false, project: true, github: false, agent: false }],
     ["gitlab", { root: false, project: true, github: false, agent: false }],
@@ -875,7 +877,7 @@ describe("root-level and hint rules", () => {
       "A GitHub App can only be dropped inside a GitHub box.",
     );
     expect(rejectedDropHint("agent")).toBe(
-      "An Agent can only be dropped inside a project box or another agent.",
+      "An Agent can only be dropped inside a project box, another agent or a loop box.",
     );
     expect(rejectedDropHint("github")).toBe(
       "A GitHub can only be dropped inside a project box.",
@@ -1372,6 +1374,7 @@ describe("deleting blocks", () => {
 
 describe("block colors", () => {
   const TYPES: NodeType[] = [
+    "loop",
     "agent",
     "project",
     "github",
@@ -1391,7 +1394,7 @@ describe("block colors", () => {
         expect(
           Math.min(gap, 360 - gap),
           `${type} vs ${other}`,
-        ).toBeGreaterThanOrEqual(25);
+        ).toBeGreaterThanOrEqual(35);
       }
     }
   });
@@ -1432,5 +1435,105 @@ describe("problems", () => {
 
     expect(graph.severityOf(project.id)).toBe("warning");
     expect(graph.problemCounts).toEqual({ errors: 0, warnings: 1 });
+  });
+});
+
+describe("loop blocks", () => {
+  function loopWithGate() {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const loop = graph.addNode("loop", 10, 40, project.id);
+    const gate = graph.addNode("command", 10, 40, loop.id);
+    const fixer = graph.addNode("agent", 200, 40, loop.id);
+    graph.connect(gate.id, fixer.id);
+    return { graph, project, loop, gate, fixer };
+  }
+
+  test("a loop holds steps, repeats three times by default and is roomy", () => {
+    const { loop } = loopWithGate();
+
+    expect(canHostChild("loop", "command")).toBe(true);
+    expect(canHostChild("loop", "router")).toBe(true);
+    expect(canHostChild("loop", "jsonschema")).toBe(true);
+    expect(canHostChild("loop", "loop")).toBe(false);
+    expect(canHostChild("loop", "github")).toBe(false);
+    expect(loop.maxIterations).toBe(3);
+    expect(loop.w).toBeGreaterThan(DEFAULT_NODE_WIDTH * 2);
+  });
+
+  test("a loop sends done or exhausted", () => {
+    const { graph, loop } = loopWithGate();
+
+    expect(graph.outputPorts(loop.id)).toEqual(["done", "exhausted"]);
+  });
+
+  test("the ways a loop can end are its blocks' outputs", () => {
+    const { graph, loop, gate } = loopWithGate();
+    const route = graph.addNode("router", 10, 150, loop.id);
+
+    expect(graph.loopExits(loop.id)).toEqual([
+      { nodeId: gate.id, port: "passed", label: "Command 1 takes passed" },
+      { nodeId: gate.id, port: "failed", label: "Command 1 takes failed" },
+      { nodeId: route.id, port: "approved", label: "Router 1 takes approved" },
+      { nodeId: route.id, port: "default", label: "Router 1 takes default" },
+    ]);
+  });
+
+  test("sets how the loop ends and how often it may repeat", () => {
+    const { graph, loop, gate } = loopWithGate();
+
+    graph.setLoopExit(loop.id, `${gate.id}:passed`);
+    graph.setMaxIterations(loop.id, "5");
+
+    expect(loop).toMatchObject({
+      untilNode: gate.id,
+      untilPort: "passed",
+      maxIterations: 5,
+    });
+
+    graph.setLoopExit(loop.id, "");
+    graph.setMaxIterations(loop.id, "");
+
+    expect(loop.untilNode).toBeUndefined();
+    expect(loop.untilPort).toBeUndefined();
+    expect(loop.maxIterations).toBeUndefined();
+  });
+
+  test("deleting the block that ends a loop clears the ending", () => {
+    const { graph, loop, gate } = loopWithGate();
+    graph.setLoopExit(loop.id, `${gate.id}:failed`);
+
+    graph.removeNode(gate.id);
+
+    expect(loop.untilNode).toBeUndefined();
+    expect(loop.untilPort).toBeUndefined();
+  });
+
+  test("renaming the case that ends a loop keeps the ending", () => {
+    const { graph, loop } = loopWithGate();
+    const route = graph.addNode("router", 10, 150, loop.id);
+    graph.setLoopExit(loop.id, `${route.id}:approved`);
+
+    graph.setCase(route.id, 0, "name", "lgtm");
+
+    expect(loop.untilPort).toBe("lgtm");
+  });
+
+  test("a run shows the iteration a loop is in", () => {
+    const { graph, loop, gate, fixer } = loopWithGate();
+
+    graph.showRun(
+      [
+        { nodeId: loop.id, status: "running" },
+        { nodeId: gate.id, status: "failed", loop: loop.id, iteration: 2 },
+        { nodeId: fixer.id, status: "running", loop: loop.id, iteration: 2 },
+      ],
+      "run-1",
+    );
+
+    expect(graph.iterationOf(loop.id)).toBe(2);
+    expect(graph.iterationOf(gate.id)).toBeUndefined();
+    graph.showRun([]);
+    expect(graph.iterationOf(loop.id)).toBeUndefined();
   });
 });

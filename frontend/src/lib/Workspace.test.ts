@@ -3001,3 +3001,43 @@ function draftIdOf(block: HTMLElement): string {
   if (!node) throw new Error("block not in the draft");
   return node.id;
 }
+
+describe("loop properties", () => {
+  test("a loop's properties choose how often it repeats and what ends it", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+    await dropComponent("Loop", 60, 60);
+    await fireEvent.click(screen.getByRole("button", { name: "Loop 1" }));
+
+    expect(screen.getByLabelText("Repeat at most")).toHaveValue(3);
+    expect(screen.getByLabelText("Ends when")).toBeDisabled();
+    expect(
+      screen.getByText(
+        "Put a command, schema check or router inside the loop to end it.",
+      ),
+    ).toBeInTheDocument();
+
+    await dropComponent("Command", 80, 120);
+    await fireEvent.click(screen.getByRole("button", { name: "Loop 1" }));
+    await fireEvent.change(screen.getByLabelText("Ends when"), {
+      target: {
+        value: screen
+          .getByRole("option", { name: "Command 1 takes passed" })
+          .getAttribute("value"),
+      },
+    });
+    await fireEvent.input(screen.getByLabelText("Repeat at most"), {
+      target: { value: "4" },
+    });
+
+    await waitFor(() => {
+      const draft = JSON.parse(
+        localStorage.getItem("mega-agents:draft") ?? "{}",
+      ) as { nodes: { type: string }[] };
+      expect(draft.nodes.find((node) => node.type === "loop")).toMatchObject({
+        untilPort: "passed",
+        maxIterations: 4,
+      });
+    });
+  });
+});

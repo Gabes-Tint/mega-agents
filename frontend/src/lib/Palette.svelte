@@ -9,10 +9,11 @@
 
   let { graph }: { graph: GraphStore } = $props();
 
-  // Where the work happens, then what does the work.
+  // Where the work happens, what does the work, and what steers it.
   const GROUPS: { title: string; types: readonly NodeType[] }[] = [
     { title: "Sources", types: ["project", "github", "gitlab", "githubapp"] },
-    { title: "Steps", types: ["agent", "command", "jsonschema", "router"] },
+    { title: "Steps", types: ["agent", "command"] },
+    { title: "Flow", types: ["jsonschema", "router", "loop"] },
   ];
 
   function itemsOf(types: readonly NodeType[]): PaletteItem[] {

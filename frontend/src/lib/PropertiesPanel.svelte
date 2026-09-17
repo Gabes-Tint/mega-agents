@@ -506,6 +506,48 @@
           Add case
         </button>
       {/if}
+      {#if node.type === "loop"}
+        {@const exits = graph.loopExits(node.id)}
+        <label>
+          Repeat at most
+          <input
+            type="number"
+            min="1"
+            max="20"
+            placeholder="3"
+            value={node.maxIterations ?? ""}
+            oninput={(event) =>
+              graph.setMaxIterations(node.id, event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Ends when
+          <select
+            disabled={exits.length === 0}
+            value={node.untilNode && node.untilPort
+              ? `${node.untilNode}:${node.untilPort}`
+              : ""}
+            onchange={(event) =>
+              graph.setLoopExit(node.id, event.currentTarget.value)}
+          >
+            <option value="">Choose a block's output</option>
+            {#each exits as exit (`${exit.nodeId}:${exit.port}`)}
+              <option value="{exit.nodeId}:{exit.port}">{exit.label}</option>
+            {/each}
+          </select>
+        </label>
+        {#if exits.length === 0}
+          <p class="hint">
+            Put a command, schema check or router inside the loop to end it.
+          </p>
+        {:else}
+          <p class="hint">
+            Blocks inside that no block inside feeds receive the arrows into the
+            loop on every repeat. The loop sends the ending value on done, or
+            the last value on exhausted.
+          </p>
+        {/if}
+      {/if}
       {#if graph.outputPorts(node.id).length > 0}
         {#each graph.outgoingEdges(node.id) as edge (edge.id)}
           {@const target = graph.nodes.find(
