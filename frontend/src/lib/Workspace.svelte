@@ -10,6 +10,13 @@
   import Canvas from "./Canvas.svelte";
   import PropertiesPanel from "./PropertiesPanel.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
+  import Splitter from "./Splitter.svelte";
+  import {
+    loadLayout,
+    saveLayout,
+    type PanelLayout,
+    type PanelName,
+  } from "./panelLayout.js";
 
   // What the backend said about itself, shown in the status bar.
   let { status = "" }: { status?: string } = $props();
@@ -130,6 +137,12 @@
 
   // The bottom panel shows what to fix before running, or the run.
   let panelTab = $state<"problems" | "run">("problems");
+  let layout = $state<PanelLayout>(loadLayout());
+
+  function resizePanel(name: PanelName, size: number): void {
+    layout[name] = size;
+    saveLayout(layout);
+  }
   let problemsChecked = $state(false);
   let problemsRequest = 0;
 
@@ -492,7 +505,12 @@
   }
 </script>
 
-<div class="workspace">
+<div
+  class="workspace"
+  style:--palette-width="{layout.palette}px"
+  style:--properties-width="{layout.properties}px"
+  style:--panel-height="{layout.panel}px"
+>
   <header class="topbar">
     <div class="brand">
       <svg class="logo" viewBox="0 0 20 20" aria-hidden="true">
@@ -675,6 +693,27 @@
   <Palette {graph} />
   <Canvas {graph} />
   <PropertiesPanel {graph} />
+  <Splitter
+    label="Resize components sidebar"
+    name="palette"
+    size={layout.palette}
+    grows="right"
+    onresize={(size) => resizePanel("palette", size)}
+  />
+  <Splitter
+    label="Resize properties sidebar"
+    name="properties"
+    size={layout.properties}
+    grows="left"
+    onresize={(size) => resizePanel("properties", size)}
+  />
+  <Splitter
+    label="Resize output panel"
+    name="panel"
+    size={layout.panel}
+    grows="up"
+    onresize={(size) => resizePanel("panel", size)}
+  />
   <section class="panel" aria-label="Output">
     <div class="panel-header" role="tablist" aria-label="Output">
       <button
@@ -878,8 +917,10 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) 300px;
-    grid-template-rows: auto minmax(0, 1fr) clamp(7rem, 28vh, 18rem) auto;
+    grid-template-columns: var(--palette-width) minmax(0, 1fr) var(
+        --properties-width
+      );
+    grid-template-rows: auto minmax(0, 1fr) var(--panel-height) auto;
     grid-template-areas:
       "top top top"
       "palette canvas properties"
@@ -897,6 +938,23 @@
 
   .workspace > :global(aside[aria-label="Node properties"]) {
     grid-area: properties;
+  }
+
+  /* Each splitter overlays the border between its panel and the canvas. */
+  .workspace > :global(.splitter-palette) {
+    grid-area: palette;
+    justify-self: end;
+    margin-right: -4px;
+  }
+
+  .workspace > :global(.splitter-properties) {
+    grid-area: properties;
+    justify-self: start;
+    margin-left: -4px;
+  }
+
+  .workspace > :global(.splitter-panel) {
+    grid-area: panel;
   }
 
   .topbar {

@@ -3284,3 +3284,85 @@ describe("waiting for any arrow in the panel", () => {
     });
   });
 });
+
+describe("resizable panels", () => {
+  const sizeOf = (name: string) =>
+    Number(
+      screen.getByRole("separator", { name }).getAttribute("aria-valuenow"),
+    );
+
+  test("each sidebar and the output panel have a splitter", () => {
+    render(Workspace);
+
+    expect(sizeOf("Resize components sidebar")).toBe(220);
+    expect(sizeOf("Resize properties sidebar")).toBe(300);
+    expect(sizeOf("Resize output panel")).toBe(200);
+  });
+
+  test("dragging a splitter resizes its panel", async () => {
+    render(Workspace);
+    const workspace = document.querySelector(".workspace") as HTMLElement;
+
+    const drag = async (name: string, dx: number, dy: number) => {
+      const splitter = screen.getByRole("separator", { name });
+      await fireEvent.pointerDown(splitter, {
+        button: 0,
+        clientX: 500,
+        clientY: 500,
+      });
+      await fireEvent.pointerMove(window, {
+        clientX: 500 + dx,
+        clientY: 500 + dy,
+      });
+      await fireEvent.pointerUp(window);
+    };
+    await drag("Resize components sidebar", 60, 0);
+    await drag("Resize properties sidebar", -40, 0);
+    await drag("Resize output panel", 0, -80);
+
+    expect(workspace.style.getPropertyValue("--palette-width")).toBe("280px");
+    expect(workspace.style.getPropertyValue("--properties-width")).toBe(
+      "340px",
+    );
+    expect(workspace.style.getPropertyValue("--panel-height")).toBe("280px");
+  });
+
+  test("the arrow keys resize a panel within its limits", async () => {
+    render(Workspace);
+    const splitter = screen.getByRole("separator", {
+      name: "Resize components sidebar",
+    });
+
+    await fireEvent.keyDown(splitter, { key: "ArrowRight" });
+    expect(sizeOf("Resize components sidebar")).toBe(236);
+    await fireEvent.keyDown(splitter, { key: "Home" });
+    expect(sizeOf("Resize components sidebar")).toBe(160);
+    await fireEvent.keyDown(splitter, { key: "ArrowLeft" });
+    expect(sizeOf("Resize components sidebar")).toBe(160);
+    await fireEvent.keyDown(splitter, { key: "End" });
+    expect(sizeOf("Resize components sidebar")).toBe(480);
+  });
+
+  test("panel sizes are remembered, and a double click restores one", async () => {
+    render(Workspace);
+    const output = screen.getByRole("separator", {
+      name: "Resize output panel",
+    });
+    await fireEvent.keyDown(output, { key: "ArrowUp" });
+    cleanup();
+
+    render(Workspace);
+    expect(sizeOf("Resize output panel")).toBe(216);
+    await fireEvent.dblClick(
+      screen.getByRole("separator", { name: "Resize output panel" }),
+    );
+    expect(sizeOf("Resize output panel")).toBe(200);
+  });
+
+  test("unreadable stored sizes fall back to the defaults", () => {
+    localStorage.setItem("mega-agents:layout", "{not json");
+    render(Workspace);
+
+    expect(sizeOf("Resize properties sidebar")).toBe(300);
+  });
+});
