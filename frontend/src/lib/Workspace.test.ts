@@ -2522,4 +2522,74 @@ describe("graph builder workspace", () => {
     ).toHaveAttribute("href", "https://github.com/acme/api/pull/42");
     vi.unstubAllGlobals();
   });
+
+  test("retries a failed run and follows the retry", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    const calls = fakeBackend({
+      "POST /api/runs": [record("failed", [step("failed", { error: "boom" })])],
+      "POST /api/runs/run-1/retry": [
+        () =>
+          Response.json(
+            {
+              id: "run-2",
+              status: "running",
+              retryOf: "run-1",
+              steps: [step("pending")],
+            },
+            { status: 202 },
+          ),
+      ],
+      "GET /api/runs/run-2": [
+        () =>
+          Response.json({
+            id: "run-2",
+            status: "succeeded",
+            retryOf: "run-1",
+            steps: [step("succeeded", { details: { reusedFrom: "run-1" } })],
+          }),
+      ],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Retry from failure" }),
+    );
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
+    expect(result).toHaveTextContent("Retry of run-1");
+    expect(result).toHaveTextContent("Reused from: run-1");
+    expect(calls).toContain("POST /api/runs/run-1/retry");
+    expect(
+      screen.queryByRole("button", { name: "Retry from failure" }),
+    ).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  test("explains a retry the backend refuses", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [record("cancelled", [step("failed")])],
+      "POST /api/runs/run-1/retry": [
+        () =>
+          new Response("run run-1 did not record its workflow", {
+            status: 409,
+          }),
+      ],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Retry from failure" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Run result" }),
+      ).toHaveTextContent("did not record its workflow"),
+    );
+    vi.unstubAllGlobals();
+  });
 });

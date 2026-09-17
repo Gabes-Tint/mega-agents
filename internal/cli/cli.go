@@ -39,6 +39,7 @@ Commands:
   run <workflow.yaml|.json>    run a workflow file and record the run
   run <name>                   run a workflow saved from the editor
   workflows                    list workflows saved from the editor
+  retry <run-id>               run a failed run again, reusing the steps that succeeded
   runs                         list recorded runs, newest first
   runs show <run-id>           show a run and each of its steps
   logs <run-id> [step]         print a run's logs, or one step's by id or name
@@ -65,6 +66,8 @@ func Main(args []string, env Env) int {
 		return listOrShow(args[1:], env)
 	case "workflows":
 		return listWorkflows(env)
+	case "retry":
+		return retryRun(args[1:], env)
 	case "logs":
 		return printLogs(args[1:], env)
 	case "help", "-h", "--help":
@@ -104,6 +107,33 @@ func runWorkflow(args []string, env Env) int {
 		return 2
 	}
 	fmt.Fprintf(env.Stdout, "Run %s started %s\n", record.ID, record.Workflow)
+	return follow(execute, env)
+}
+
+func retryRun(args []string, env Env) int {
+	if len(args) != 1 {
+		fmt.Fprintln(env.Stderr, "usage: mega-agents retry <run-id>")
+		return 2
+	}
+	store, ok := store(env)
+	if !ok {
+		return 2
+	}
+	record, execute, err := app.Runs{Store: store}.Retry(args[0])
+	if errors.Is(err, runs.ErrNotFound) {
+		fmt.Fprintf(env.Stderr, "run %s not found\n", args[0])
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return 1
+	}
+	fmt.Fprintf(env.Stdout, "Run %s started %s, retrying %s\n", record.ID, record.Workflow, record.RetryOf)
+	return follow(execute, env)
+}
+
+// follow executes a started run, printing each step as it changes.
+func follow(execute app.Execution, env Env) int {
 	reported := map[string]engine.Status{}
 	ctx := env.Context
 	if ctx == nil {

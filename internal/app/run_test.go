@@ -504,3 +504,7 @@ func TestUnknownRunsAndLogsAreNotFound(t *testing.T) {
 		}
 	}
 }
+
+func jsonUnmarshal(text string, value any) error {
+	return json.Unmarshal([]byte(text), value)
+}

@@ -20,6 +20,7 @@
 
   interface RunResult {
     id?: string;
+    retryOf?: string;
     status: string;
     steps: RunStep[];
   }
@@ -41,6 +42,7 @@
     ["case", "Route"],
     ["exitCode", "Exit code"],
     ["commit", "Commit"],
+    ["reusedFrom", "Reused from"],
   ];
 
   function fieldErrors(details: Record<string, unknown> | undefined): string[] {
@@ -114,6 +116,34 @@
       }
     } catch {
       runError = "Cannot reach the backend";
+    }
+  }
+
+  async function retryRun(): Promise<void> {
+    const id = runResult?.id;
+    if (!id) return;
+    running = true;
+    runError = "";
+    try {
+      const response = await fetch(
+        `/api/runs/${encodeURIComponent(id)}/retry`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
+      if (!response.ok) {
+        runError = (await response.text()).trim();
+        return;
+      }
+      const retried = (await response.json()) as RunResult;
+      showResult(retried);
+      await follow(retried);
+    } catch {
+      runError = "Cannot reach the backend";
+    } finally {
+      running = false;
     }
   }
 
@@ -391,7 +421,15 @@
       {:else if runResult}
         <p class="run-status {runResult.status}">
           Run {runResult.status}
+          {#if runResult.retryOf}
+            <span>Retry of {runResult.retryOf}</span>
+          {/if}
         </p>
+        {#if runResult.id && !running && ["failed", "cancelled", "interrupted"].includes(runResult.status)}
+          <button type="button" onclick={() => void retryRun()}>
+            Retry from failure
+          </button>
+        {/if}
         <ul>
           {#each runResult.steps as step (step.nodeId)}
             <li>

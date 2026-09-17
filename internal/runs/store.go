@@ -46,6 +46,10 @@ type Record struct {
 	// one whose process died.
 	PID   int           `json:"pid"`
 	Steps []engine.Step `json:"steps"`
+	// Graph is the workflow as it ran, so the run can be retried.
+	Graph json.RawMessage `json:"graph,omitempty"`
+	// RetryOf names the run this one retries.
+	RetryOf string `json:"retryOf,omitempty"`
 }
 
 type Store struct {

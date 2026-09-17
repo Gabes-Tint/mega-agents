@@ -303,3 +303,17 @@ func TestRunTimesEachStep(t *testing.T) {
 		t.Fatalf("step = %+v", step)
 	}
 }
+
+func TestASucceededStepKeepsItsOutputs(t *testing.T) {
+	tasks := []Task{{ID: "worktree", Run: func(context.Context, []Input, io.Writer) (Result, error) {
+		return Result{Outputs: map[string]any{"workspace": "w"}}, nil
+	}}}
+
+	run, err := Execute(context.Background(), tasks, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Steps[0].Outputs["workspace"] != "w" {
+		t.Fatalf("step = %+v", run.Steps[0])
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
+	"maps"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -66,6 +67,34 @@ type Execution func(ctx context.Context, observe func(runs.Record)) runs.Record
 // along their arrows, or a plain fetch when it holds no actions. Actions not
 // reachable from a starting action do not run.
 func (service Runs) Start(request WorkflowRequest) (runs.Record, Execution, error) {
+	return service.start(request, nil)
+}
+
+var errNothingToRetry = errors.New("there is nothing to retry")
+
+// Retry starts a new run of a failed, cancelled or interrupted run's
+// workflow. Steps that succeeded before are not run again: they give their
+// recorded outputs to the steps after them, so only what failed, and what
+// depends on it, runs.
+func (service Runs) Retry(id string) (runs.Record, Execution, error) {
+	previous, err := service.Store.Load(id)
+	if err != nil {
+		return runs.Record{}, nil, err
+	}
+	switch previous.Status {
+	case engine.Succeeded:
+		return runs.Record{}, nil, fmt.Errorf("run %s succeeded; %w", id, errNothingToRetry)
+	case engine.Running:
+		return runs.Record{}, nil, fmt.Errorf("run %s is still running; %w yet", id, errNothingToRetry)
+	}
+	var request WorkflowRequest
+	if err := json.Unmarshal(previous.Graph, &request); err != nil || len(previous.Graph) == 0 {
+		return runs.Record{}, nil, fmt.Errorf("run %s did not record its workflow; %w", id, errNothingToRetry)
+	}
+	return service.start(request, &previous)
+}
+
+func (service Runs) start(request WorkflowRequest, previous *runs.Record) (runs.Record, Execution, error) {
 	tasks, err := planRun(request)
 	if err != nil {
 		return runs.Record{}, nil, err
@@ -77,6 +106,9 @@ func (service Runs) Start(request WorkflowRequest) (runs.Record, Execution, erro
 	for i, task := range tasks {
 		steps[i] = engine.Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: engine.Pending}
 	}
+	if previous != nil {
+		reuseSucceededSteps(tasks, *previous)
+	}
 	name := request.Name
 	if name == "" {
 		name = "workflow"
@@ -85,10 +117,70 @@ func (service Runs) Start(request WorkflowRequest) (runs.Record, Execution, erro
 	if err != nil {
 		return runs.Record{}, nil, err
 	}
+	record.Graph, _ = json.Marshal(request)
+	if previous != nil {
+		record.RetryOf = previous.ID
+	}
+	if err := service.Store.Save(record); err != nil {
+		return runs.Record{}, nil, err
+	}
 	execute := func(ctx context.Context, observe func(runs.Record)) runs.Record {
 		return service.execute(ctx, record, tasks, observe)
 	}
 	return record, execute, nil
+}
+
+// reuseSucceededSteps replaces each task that succeeded in the previous run
+// with one that gives back the outputs it recorded.
+func reuseSucceededSteps(tasks []engine.Task, previous runs.Record) {
+	succeeded := map[string]engine.Step{}
+	for _, step := range previous.Steps {
+		if step.Status == engine.Succeeded {
+			succeeded[step.TaskID] = step
+		}
+	}
+	for i, task := range tasks {
+		step, ok := succeeded[task.ID]
+		if !ok {
+			continue
+		}
+		outputs := restoredOutputs(step.Outputs)
+		details := maps.Clone(step.Details)
+		if details == nil {
+			details = map[string]any{}
+		}
+		details["reusedFrom"] = previous.ID
+		name := task.Name
+		tasks[i].Run = func(context.Context, []engine.Input, io.Writer) (engine.Result, error) {
+			return engine.Result{Outputs: outputs, Details: details}, nil
+		}
+		tasks[i].Run = logged(tasks[i].Run, fmt.Sprintf("Reused the result of %s from run %s", name, previous.ID))
+	}
+}
+
+func logged(run func(context.Context, []engine.Input, io.Writer) (engine.Result, error), line string) func(context.Context, []engine.Input, io.Writer) (engine.Result, error) {
+	return func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
+		fmt.Fprintln(log, line)
+		return run(ctx, inputs, log)
+	}
+}
+
+// restoredOutputs turns recorded outputs back into what tasks exchange: a
+// workspace is a gitops.Workspace again, and every other output stays JSON.
+func restoredOutputs(recorded map[string]any) map[string]any {
+	outputs := make(map[string]any, len(recorded))
+	for port, value := range recorded {
+		if port == workspacePort {
+			var workspace gitops.Workspace
+			encoded, _ := json.Marshal(value)
+			if json.Unmarshal(encoded, &workspace) == nil {
+				outputs[port] = workspace
+				continue
+			}
+		}
+		outputs[port] = value
+	}
+	return outputs
 }
 
 func (service Runs) execute(
@@ -516,6 +608,16 @@ func projectDir(project WorkflowNodeInput) (string, error) {
 func registerRunHandler(mux *http.ServeMux, service Runs) {
 	// Cancel functions of the runs this server is executing, by run id.
 	var active sync.Map
+	// launch executes a started run in the background, cancellable by id.
+	launch := func(r *http.Request, record runs.Record, execute Execution) {
+		ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+		active.Store(record.ID, cancel)
+		go func() {
+			defer active.Delete(record.ID)
+			defer cancel()
+			execute(ctx, nil)
+		}()
+	}
 
 	// The editor asks for the repository when a GitHub block lands in a
 	// project, so the field can be prefilled from the project's clone.
@@ -554,13 +656,29 @@ func registerRunHandler(mux *http.ServeMux, service Runs) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
-		active.Store(record.ID, cancel)
-		go func() {
-			defer active.Delete(record.ID)
-			defer cancel()
-			execute(ctx, nil)
-		}()
+		launch(r, record, execute)
+		writeJSON(w, http.StatusAccepted, record)
+	})
+
+	mux.HandleFunc("POST /api/runs/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if mediaType != "application/json" {
+			http.Error(w, "retrying a run requires a JSON request", http.StatusUnsupportedMediaType)
+			return
+		}
+		record, execute, err := service.Retry(r.PathValue("id"))
+		switch {
+		case errors.Is(err, runs.ErrNotFound):
+			http.Error(w, "run not found", http.StatusNotFound)
+			return
+		case errors.Is(err, errNothingToRetry):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		launch(r, record, execute)
 		writeJSON(w, http.StatusAccepted, record)
 	})
 

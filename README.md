@@ -47,6 +47,7 @@ The same binary runs workflows headless and inspects recorded runs:
 ./bin/mega-agents runs                  # recorded runs, newest first
 ./bin/mega-agents runs show <run-id>    # each step's status, error and details
 ./bin/mega-agents logs <run-id> [step]  # every step's log, or one by id or name
+./bin/mega-agents retry <run-id>        # rerun what failed, reusing what succeeded
 ```
 
 The editor's **Save** writes the workflow as YAML to
@@ -60,7 +61,10 @@ record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
 **Show logs**, or use **Logs** beside a step in the run result. **Cancel run**
 stops the run in progress (its agent CLIs included), **Runs…** reopens any
 recorded run on the canvas, and Ctrl-C stops a command-line run; either way
-the run is recorded as cancelled.
+the run is recorded as cancelled. **Retry from failure** (or `mega-agents
+retry`) starts a new run of a failed, cancelled or interrupted run's workflow in
+which the steps that already succeeded give back their recorded outputs
+instead of running again.
 
 ## Blocks that run
 

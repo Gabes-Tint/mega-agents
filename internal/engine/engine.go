@@ -65,6 +65,9 @@ type Step struct {
 	// StartedAt and FinishedAt are RFC 3339 UTC times; empty until reached.
 	StartedAt  string `json:"startedAt,omitempty"`
 	FinishedAt string `json:"finishedAt,omitempty"`
+	// Outputs are what a succeeded step gave its dependents, kept so a retry
+	// can reuse the step instead of running it again.
+	Outputs map[string]any `json:"outputs,omitempty"`
 }
 
 type Run struct {
@@ -146,6 +149,7 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 			fmt.Fprintf(log, "%s failed in %s: %s\n", label, elapsed, err)
 		} else {
 			step.Status = Succeeded
+			step.Outputs = result.Outputs
 			outputs[task.ID] = result.Outputs
 			fmt.Fprintf(log, "%s succeeded in %s\n", label, elapsed)
 		}
@@ -260,6 +264,7 @@ func snapshot(run Run) Run {
 	steps := make([]Step, len(run.Steps))
 	for i, step := range run.Steps {
 		step.Details = maps.Clone(step.Details)
+		step.Outputs = maps.Clone(step.Outputs)
 		steps[i] = step
 	}
 	return Run{Status: run.Status, Steps: steps}

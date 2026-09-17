@@ -366,3 +366,31 @@ func TestRunIsRecordedAsCancelledWhenInterrupted(t *testing.T) {
 		t.Fatalf("code = %d\n%s\n%s", code, stdout.String(), stderr.String())
 	}
 }
+
+func TestRetryRunsWhatFailedAgain(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	marker := filepath.Join(t.TempDir(), "fixed")
+	path := writeWorkflow(t, "gate.json", fmt.Sprintf(`{"name": "gate", "nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true},
+		{"id": "f1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},
+		{"id": "c1", "type": "command", "name": "Gate", "parentId": "p1", "command": "test -e %s"}
+	], "edges": [{"id": "e1", "from": "f1", "to": "c1"}]}`, projectClone(t), marker))
+	first := run(t, "run", path)
+	id := runID.FindStringSubmatch(first.stdout)[1]
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := run(t, "retry", id)
+
+	if got.code != 0 || !strings.Contains(got.stdout, "retrying "+id) || !strings.Contains(got.stdout, "✔ Gate succeeded") {
+		t.Fatalf("code = %d\n%s\n%s", got.code, got.stdout, got.stderr)
+	}
+	if again := run(t, "retry", runID.FindStringSubmatch(got.stdout)[1]); again.code != 1 || !strings.Contains(again.stderr, "nothing to retry") {
+		t.Fatalf("retrying a success = %d %q", again.code, again.stderr)
+	}
+	if usage := run(t, "retry"); usage.code != 2 || !strings.Contains(usage.stderr, "usage: mega-agents retry <run-id>") {
+		t.Fatalf("usage = %d %q", usage.code, usage.stderr)
+	}
+}
