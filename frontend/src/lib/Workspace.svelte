@@ -38,6 +38,7 @@
     ["backend", "Backend"],
     ["model", "Model"],
     ["sessionId", "Session"],
+    ["continuedFrom", "Continued from"],
     ["attempts", "Attempts"],
     ["case", "Route"],
     ["exitCode", "Exit code"],

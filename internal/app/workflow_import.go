@@ -139,6 +139,9 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		case "authenticated":
 			node.Authenticated = value == true
 			continue
+		case "continueSession":
+			node.ContinueSession = value == true
+			continue
 		case "cases":
 			cases, err := importedCases(value)
 			if err != nil {

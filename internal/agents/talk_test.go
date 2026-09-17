@@ -111,3 +111,18 @@ func TestTalkRunsThroughTheRunner(t *testing.T) {
 		t.Fatalf("result = %+v, err = %v", result, err)
 	}
 }
+
+func TestRepairsOfAForkedTurnContinueTheFork(t *testing.T) {
+	agent := &scripted{replies: []Reply{
+		{SessionID: "copy", Text: "no"},
+		{SessionID: "copy", Text: `{"verdict":"ok"}`, Structured: map[string]any{"verdict": "ok"}},
+	}}
+
+	if _, err := talk(context.Background(), claude{}, Turn{Prompt: "p", SessionID: "original", Fork: true, Schema: strictSchema(t)}, 1, agent.run, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	first, repair := agent.turns[0], agent.turns[1]
+	if first.SessionID != "original" || !first.Fork || repair.SessionID != "copy" || repair.Fork {
+		t.Fatalf("turns = %+v", agent.turns)
+	}
+}

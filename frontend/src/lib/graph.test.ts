@@ -1099,6 +1099,9 @@ describe("agent configuration", () => {
     graph.setAgentField("missing", "prompt", "ignored");
     graph.setAgentNumber("missing", "retries", "1");
 
+    graph.setContinueSession(agent.id, true);
+    graph.setContinueSession("missing", true);
+    expect(agent.continueSession).toBe(true);
     expect(agent.prompt).toBe("Review");
     expect(agent.retries).toBe(3);
     expect(agent.timeoutMinutes).toBeUndefined();

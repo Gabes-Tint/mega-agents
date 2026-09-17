@@ -135,6 +135,9 @@ test.describe("Agent blocks", () => {
     await page.mouse.up();
     const merger = await dropAgent(page, "Project 1", "Merger");
     await page.getByLabel("Prompt").fill("Merge if {{result}}");
+    await page
+      .getByLabel("Continue the connected agent's conversation")
+      .check();
 
     await selectBlock(reviewer);
     await page.getByRole("button", { name: "Connect" }).click();
@@ -146,6 +149,7 @@ test.describe("Agent blocks", () => {
     await expect(result).toContainText(
       `worked in ${fixture.clone}: Merge if {"verdict":"approve"}`,
     );
+    await expect(result).toContainText("Continued from: fake-");
   });
 
   test("a prompt naming a missing workspace is rejected before running", async ({

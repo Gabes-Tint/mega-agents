@@ -2709,4 +2709,32 @@ describe("graph builder workspace", () => {
 
     expect(screen.getByLabelText("Max cost (USD)")).toHaveValue(0.5);
   });
+
+  test("lets an agent continue the connected agent's conversation", async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        posted.push(...(JSON.parse(String(init?.body)) as { nodes: [] }).nodes);
+        return new Response("stop", { status: 400 });
+      }),
+    );
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Agent", 410, 410);
+    const box = screen.getByLabelText(
+      "Continue the connected agent's conversation",
+    );
+    expect(box).not.toBeChecked();
+
+    await fireEvent.click(box);
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await waitFor(() =>
+      expect(posted.find((node) => node.type === "agent")).toMatchObject({
+        continueSession: true,
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
 });

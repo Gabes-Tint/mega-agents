@@ -56,6 +56,8 @@ type WorkflowNodeInput struct {
 	Retries        *int     `json:"retries,omitempty"`
 	TimeoutMinutes *float64 `json:"timeoutMinutes,omitempty"`
 	MaxCostUSD     *float64 `json:"maxCostUsd,omitempty"`
+	// ContinueSession resumes a copy of the connected agent's conversation.
+	ContinueSession bool `json:"continueSession,omitempty"`
 	// JSON Schema blocks.
 	Schema string `json:"schema,omitempty"`
 	// Router blocks.
@@ -261,6 +263,9 @@ func (emitter *workflowEmitter) emitNode(
 	}
 	if node.TimeoutMinutes != nil {
 		with = append(with, fmt.Sprintf("%s    timeoutMinutes: %g", indent, *node.TimeoutMinutes))
+	}
+	if node.ContinueSession {
+		with = append(with, fmt.Sprintf("%s    continueSession: true", indent))
 	}
 	if node.MaxCostUSD != nil {
 		with = append(with, fmt.Sprintf("%s    maxCostUsd: %g", indent, *node.MaxCostUSD))

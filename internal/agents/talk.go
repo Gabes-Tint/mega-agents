@@ -88,7 +88,9 @@ func talk(ctx context.Context, backend Backend, turn Turn, retries int, run turn
 			return Result{Reply: reply, Attempts: number, Usage: usage}, &BudgetError{Spent: usage.CostUSD, Budget: turn.MaxCostUSD, Reason: invalid}
 		}
 		if reply.SessionID != "" {
-			attempt.SessionID = reply.SessionID
+			// Repairs continue the conversation the first attempt started,
+			// which is already this turn's own copy when it forked.
+			attempt.SessionID, attempt.Fork = reply.SessionID, false
 		}
 		// The rejected reply is not quoted back: the session holds it, and
 		// the model's own text is data rather than instruction.

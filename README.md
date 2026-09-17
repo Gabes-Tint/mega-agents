@@ -93,7 +93,9 @@ refs.
   repaired on the same session up to **Retries** times, unless its
   **Max cost (USD)** is already spent. Each agent step reports the tokens it
   used and, where the CLI prices it, its cost; run results and
-  `mega-agents runs show` add them up. An agent flagged as a starting point
+  `mega-agents runs show` add them up. **Continue the connected agent's
+  conversation** resumes a copy (fork) of the connected agent's session, so a
+  fixer keeps everything the coder learned. An agent flagged as a starting point
   starts a run on its own.
 
 - **JSON Schema** (`output/json-schema@v1`) validates the one value connected

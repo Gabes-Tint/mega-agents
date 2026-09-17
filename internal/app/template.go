@@ -34,7 +34,7 @@ func (planner runPlanner) sourcesOf(needs []engine.Need) templateSources {
 	sources := templateSources{resultFrom: map[string]string{}}
 	for _, need := range needs {
 		switch need.Port {
-		case "":
+		case "", sessionPort:
 		case workspacePort:
 			sources.workspace = true
 		default:
@@ -76,7 +76,7 @@ func renderTemplate(text string, inputs []engine.Input, sources templateSources)
 	workspace, _ := workspaceIn(inputs)
 	results := map[string]any{}
 	for _, input := range inputs {
-		if input.Port != workspacePort {
+		if input.Port != workspacePort && input.Port != sessionPort {
 			results[input.TaskID] = input.Value
 		}
 	}

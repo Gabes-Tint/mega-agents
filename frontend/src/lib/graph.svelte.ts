@@ -115,6 +115,7 @@ export interface GraphNode {
   retries?: number;
   timeoutMinutes?: number;
   maxCostUsd?: number;
+  continueSession?: boolean;
   schema?: string;
   cases?: RouteCase[];
   command?: string;
@@ -704,6 +705,11 @@ export class GraphStore {
   setAgentField(id: string, field: AgentField, value: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node[field] = value;
+  }
+
+  setContinueSession(id: string, continueSession: boolean): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.continueSession = continueSession;
   }
 
   // An empty field clears the setting so the backend default applies.

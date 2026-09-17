@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	sessionPort          = "session"
 	resultPort           = "result"
 	defaultAgentRetries  = 2
 	maxAgentRetries      = 5
@@ -71,6 +72,21 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 	if err := checkTemplate(node.Prompt, sources); err != nil {
 		return fail("%v", err)
 	}
+	if node.ContinueSession {
+		var agentsBefore []WorkflowNodeInput
+		for _, edge := range planner.request.Edges {
+			if edge.To == node.ID && planner.included[edge.From] && planner.nodeByID[edge.From].Type == "agent" {
+				agentsBefore = append(agentsBefore, planner.nodeByID[edge.From])
+			}
+		}
+		if len(agentsBefore) != 1 {
+			return fail("continuing a session needs exactly one agent connected to this one")
+		}
+		if agentsBefore[0].Backend != node.Backend {
+			return fail("continues the session of %s, which runs on %s, not %s", agentsBefore[0].Name, agentsBefore[0].Backend, node.Backend)
+		}
+		needs = append(needs, engine.Need{TaskID: agentsBefore[0].ID, Port: sessionPort})
+	}
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "agent", Needs: needs,
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
@@ -88,12 +104,19 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 				}
 			}
 			prompt := renderTemplate(node.Prompt, inputs, sources)
+			continued := ""
+			for _, input := range inputs {
+				if input.Port == sessionPort {
+					continued, _ = input.Value.(string)
+					details["continuedFrom"] = continued
+				}
+			}
 			ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout*float64(time.Minute)))
 			defer cancel()
 			fmt.Fprintf(log, "Working in %s\nPrompt:\n%s\n", dir, prompt)
 			conversation, err := agents.Talk(ctx, agents.Runner{}, backend, agents.Turn{
 				Prompt: prompt, Dir: dir, Model: node.Model, Effort: node.Effort, Schema: outputSchema,
-				MaxCostUSD: maxCost,
+				MaxCostUSD: maxCost, SessionID: continued, Fork: continued != "",
 			}, retries, log)
 			details["attempts"] = conversation.Attempts
 			details["usage"] = conversation.Usage
@@ -119,6 +142,9 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 			}
 			details["result"] = result
 			outputs := map[string]any{resultPort: result}
+			if conversation.Reply.SessionID != "" {
+				outputs[sessionPort] = conversation.Reply.SessionID
+			}
 			if hasWorkspace {
 				outputs[workspacePort] = workspace
 			}

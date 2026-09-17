@@ -28,6 +28,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -p) printf '%s' "$2" > "$here/prompt-$count"; shift ;;
     --model) echo "$2" > "$here/model-$count"; shift ;;
+    --resume) echo "$2" > "$here/resume-$count"; shift ;;
+    --fork-session) touch "$here/fork-$count" ;;
   esac
   shift
 done
@@ -290,5 +292,65 @@ func TestAnAgentCostBudgetMustBePositive(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "Planner: the cost budget must be more than 0 dollars") {
 		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestAFixerContinuesACopyOfTheCodersConversation(t *testing.T) {
+	bin := fakeClaude(t)
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a1", "type": "agent", "name": "Coder", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Code"},
+		{"id": "a2", "type": "agent", "name": "Fixer", "parentId": "p1", "backend": "claude", "prompt": "Now fix it", "continueSession": true}
+	], "edges": [{"id": "e1", "from": "a1", "to": "a2"}]}`, t.TempDir())
+
+	record := finishedRunOnly(t, body)
+
+	if record.Status != engine.Succeeded {
+		t.Fatalf("record = %+v", record)
+	}
+	if recorded(t, bin, "resume-2") != "session-1" {
+		t.Fatalf("the fixer resumed %q, want the coder's session-1", recorded(t, bin, "resume-2"))
+	}
+	if _, err := os.Stat(filepath.Join(bin, "fork-2")); err != nil {
+		t.Fatal("the fixer resumed the coder's session itself instead of a copy")
+	}
+	if details := record.Steps[1].Details; details["continuedFrom"] != "session-1" || details["sessionId"] != "session-2" {
+		t.Fatalf("details = %+v", details)
+	}
+}
+
+func TestContinuingASessionNeedsOneAgentOfTheSameBackend(t *testing.T) {
+	flow := func(coderBackend string, edges string) string {
+		return fmt.Sprintf(`{"nodes": [
+			{"id": "p1", "type": "project", "name": "api", "path": "/tmp"},
+			{"id": "a1", "type": "agent", "name": "Coder", "parentId": "p1", "start": true, "backend": %q, "prompt": "Code"},
+			{"id": "a2", "type": "agent", "name": "Fixer", "parentId": "p1", "backend": "claude", "prompt": "Fix", "continueSession": true}
+		], "edges": [%s]}`, coderBackend, edges)
+	}
+	cases := map[string]struct {
+		body string
+		want string
+	}{
+		"another backend": {
+			body: flow("opencode", `{"id": "e1", "from": "a1", "to": "a2"}`),
+			want: "Fixer: continues the session of Coder, which runs on opencode, not claude",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			response, _ := postRun(t, testCase.body)
+
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), testCase.want) {
+				t.Fatalf("response = %d %q, want %q", response.Code, response.Body.String(), testCase.want)
+			}
+		})
+	}
+	lonely := `{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": "/tmp"},
+		{"id": "a2", "type": "agent", "name": "Fixer", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Fix", "continueSession": true}
+	]}`
+	if response, _ := postRun(t, lonely); response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "Fixer: continuing a session needs exactly one agent connected to this one") {
+		t.Fatalf("lonely = %d %q", response.Code, response.Body.String())
 	}
 }

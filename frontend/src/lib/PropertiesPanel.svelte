@@ -370,6 +370,15 @@
           />
         </label>
         <label>
+          <input
+            type="checkbox"
+            checked={node.continueSession ?? false}
+            onchange={(event) =>
+              graph.setContinueSession(node.id, event.currentTarget.checked)}
+          />
+          Continue the connected agent's conversation
+        </label>
+        <label>
           Max cost (USD)
           <input
             type="number"

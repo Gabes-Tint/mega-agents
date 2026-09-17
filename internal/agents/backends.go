@@ -27,6 +27,8 @@ type Turn struct {
 	Schema    *schema.Schema
 	// SchemaPath is Schema written to a file, for CLIs that read one.
 	SchemaPath string
+	// Fork resumes a copy of SessionID, leaving the original untouched.
+	Fork bool
 	// MaxCostUSD stops repair turns once the conversation has cost more;
 	// zero means no budget.
 	MaxCostUSD float64
@@ -212,6 +214,9 @@ func (claude) Command(turn Turn) Command {
 	}
 	if turn.SessionID != "" {
 		args = append(args, "--resume", turn.SessionID)
+		if turn.Fork {
+			args = append(args, "--fork-session")
+		}
 	}
 	return Command{Args: append(args, "-p", turn.Prompt)}
 }
@@ -303,7 +308,11 @@ func (codex) Command(turn Turn) Command {
 		args = append(args, "--config", fmt.Sprintf("model_reasoning_effort=%q", turn.Effort))
 	}
 	if turn.SessionID != "" {
-		args = append(args, "resume", turn.SessionID)
+		subcommand := "resume"
+		if turn.Fork {
+			subcommand = "fork"
+		}
+		args = append(args, subcommand, turn.SessionID)
 	}
 	args = append(args, turn.Prompt, "--json", "--skip-git-repo-check")
 	if turn.Schema != nil {
@@ -420,6 +429,9 @@ func (grok) Command(turn Turn) Command {
 	}
 	if turn.SessionID != "" {
 		args = append(args, "--resume", turn.SessionID)
+		if turn.Fork {
+			args = append(args, "--fork-session")
+		}
 	}
 	// Glued to its flag so a prompt starting with "-" is never read as one.
 	return Command{Args: append(args, "--single="+turn.Prompt)}
@@ -476,6 +488,9 @@ func (opencode) Command(turn Turn) Command {
 	}
 	if turn.SessionID != "" {
 		args = append(args, "--session", turn.SessionID)
+		if turn.Fork {
+			args = append(args, "--fork")
+		}
 	}
 	// OpenCode joins positional arguments; stdin keeps the prompt verbatim.
 	return Command{Args: args, Stdin: turn.Prompt}

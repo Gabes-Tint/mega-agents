@@ -236,3 +236,23 @@ func TestEventsAreDescribedForTheLog(t *testing.T) {
 		}
 	}
 }
+
+func TestForkingResumesACopyOfTheSession(t *testing.T) {
+	cases := map[string]string{
+		"claude":   "--resume s1 --fork-session",
+		"codex":    "fork s1",
+		"grok":     "--resume s1 --fork-session",
+		"opencode": "--session s1 --fork",
+	}
+	for name, want := range cases {
+		backend, _ := Lookup(name)
+		args := strings.Join(backend.Command(Turn{Prompt: "p", Dir: "/w", SessionID: "s1", Fork: true}).Args, " ")
+		if !strings.Contains(args, want) {
+			t.Errorf("%s args = %q, want %q", name, args, want)
+		}
+		plain := strings.Join(backend.Command(Turn{Prompt: "p", Dir: "/w", SessionID: "s1"}).Args, " ")
+		if strings.Contains(plain, "fork") {
+			t.Errorf("%s resumed without forking: %q", name, plain)
+		}
+	}
+}
