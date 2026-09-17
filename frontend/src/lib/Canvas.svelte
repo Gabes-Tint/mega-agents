@@ -402,6 +402,8 @@
       type="button"
       class="node block-{node.type} status-{graph.statusOf(node.id) ?? 'idle'}"
       class:selected={node.id === graph.selectedId}
+      class:problem-error={graph.severityOf(node.id) === "error"}
+      class:problem-warning={graph.severityOf(node.id) === "warning"}
       class:drop-ok={previewing && previewTargetId === node.id && previewValid}
       class:drop-no={previewing && previewTargetId === node.id && !previewValid}
       aria-pressed={node.id === graph.selectedId}
@@ -424,6 +426,15 @@
         {node.name}
         {#if node.start}
           <span class="start-flag" aria-hidden="true">▶</span>
+        {/if}
+        {#if graph.severityOf(node.id)}
+          <span
+            class="problem-mark"
+            title={graph.severityOf(node.id) === "error"
+              ? "Has errors to fix"
+              : "Has warnings"}
+            aria-hidden="true"
+          ></span>
         {/if}
         <span class="node-id" aria-hidden="true">{shortNodeId(node.id)}</span>
       </span>
@@ -578,6 +589,27 @@
     font-weight: 400;
     color: var(--text-faint);
     letter-spacing: 0.02em;
+  }
+
+  .problem-mark {
+    margin-left: auto;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+  }
+
+  .problem-mark + .node-id {
+    margin-left: 0;
+  }
+
+  .problem-error .problem-mark {
+    background: var(--fail);
+    box-shadow: 0 0 0 3px var(--fail-soft);
+  }
+
+  .problem-warning .problem-mark {
+    background: var(--warn);
+    box-shadow: 0 0 0 3px var(--warn-soft);
   }
 
   .resize-handle {

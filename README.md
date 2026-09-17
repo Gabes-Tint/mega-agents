@@ -58,6 +58,13 @@ The editor's **Save** writes the workflow as YAML to
 ready-made workflow: issue to pull request, review and route, or gate and fix. The graph in progress is also kept in
 the browser, so reloading the page does not lose it.
 
+As the graph changes, the editor's **Problems** panel lists what to fix
+before running: errors a run would stop on (a missing prompt, an arrow
+without a route, no starting point) and warnings such as blocks no starting
+point reaches. Choosing a problem selects its block; the status bar counts
+them. Select a block and choose **Delete block**, or press Delete, to remove
+it with everything inside it.
+
 Every run, whether started from the editor or the command line, keeps its
 record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
 `~/.mega-agents/runs`). In the editor, select a block after a run and choose

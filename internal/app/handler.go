@@ -41,6 +41,7 @@ func NewHandler(assets fs.FS) http.Handler {
 func NewHandlerWithRuns(assets fs.FS, service Runs, workflows WorkflowStore) http.Handler {
 	mux := http.NewServeMux()
 	registerWorkflowYAMLHandler(mux)
+	registerProblemsHandler(mux)
 	registerWorkflowStoreHandler(mux, workflows)
 	registerTemplateHandler(mux)
 	registerRunHandler(mux, service)

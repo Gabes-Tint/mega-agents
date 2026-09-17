@@ -2856,3 +2856,148 @@ describe("palette tooltips", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });
+
+describe("problems panel", () => {
+  function problemsBackend(
+    problems: { nodeId?: string; severity: string; message: string }[],
+  ) {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url === "/api/workflows/problems"
+          ? new Response(JSON.stringify(problems), {
+              headers: { "content-type": "application/json" },
+            })
+          : new Response("not found", { status: 404 }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("lists what to fix before running, checked as the graph changes", async () => {
+    const fetchMock = problemsBackend([]);
+    render(Workspace);
+    await dropComponent("Project");
+    const project = screen.getByRole("button", { name: "Project 1" });
+    const id = draftIdOf(project);
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        new Response(
+          url === "/api/workflows/problems"
+            ? JSON.stringify([
+                { severity: "error", message: "flag a starting point" },
+                {
+                  nodeId: id,
+                  severity: "warning",
+                  message: "Project 1: set the folder its blocks work in",
+                },
+              ])
+            : "",
+        ),
+      ),
+    );
+
+    await fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "api" },
+    });
+
+    const panel = await screen.findByRole("tabpanel", { name: /Problems/ });
+    await waitFor(() =>
+      expect(panel).toHaveTextContent("flag a starting point"),
+    );
+    expect(panel).toHaveTextContent(
+      "Project 1: set the folder its blocks work in",
+    );
+    const request = (fetchMock.mock.calls as unknown as [string, RequestInit][])
+      .filter(([url]) => url === "/api/workflows/problems")
+      .at(-1)!;
+    expect(JSON.parse(String(request[1].body)).nodes[0].name).toBe("api");
+    expect(
+      screen.getByRole("button", { name: "1 error, 1 warning" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(project).toHaveClass("problem-warning"));
+  });
+
+  test("choosing a problem selects its block", async () => {
+    problemsBackend([]);
+    render(Workspace);
+    await dropComponent("Project");
+    await dropComponent("Project", 400, 20);
+    const first = screen.getByRole("button", { name: "Project 1" });
+    const id = draftIdOf(first);
+    problemsBackend([
+      { nodeId: id, severity: "error", message: "Project 1 is broken" },
+    ]);
+    await fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Project 2b" },
+    });
+
+    await fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Select the block with problem 1",
+        description: "Project 1 is broken",
+      }),
+    );
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Project 1");
+  });
+
+  test("shows that nothing needs fixing", async () => {
+    problemsBackend([]);
+    render(Workspace);
+    await dropComponent("Project");
+
+    const panel = screen.getByRole("tabpanel", { name: /Problems/ });
+
+    await waitFor(() => expect(panel).toHaveTextContent("No problems found"));
+    expect(
+      screen.getByRole("button", { name: "0 errors, 0 warnings" }),
+    ).toBeInTheDocument();
+  });
+
+  test("the Run tab shows a run once it starts", async () => {
+    problemsBackend([]);
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("tab", { name: "Run" }));
+
+    expect(screen.getByRole("tab", { name: "Run" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: "0 errors, 0 warnings" }),
+    );
+    expect(screen.getByRole("tab", { name: /Problems/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Run" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+  });
+});
+
+// The id a block on the canvas stands for, read from the draft the editor
+// keeps of the graph.
+function draftIdOf(block: HTMLElement): string {
+  const draft = JSON.parse(
+    localStorage.getItem("mega-agents:draft") ?? "{}",
+  ) as {
+    nodes: { id: string; name: string }[];
+  };
+  const node = draft.nodes.find(
+    (candidate) =>
+      candidate.name === block.textContent?.match(/Project \d/)?.[0],
+  );
+  if (!node) throw new Error("block not in the draft");
+  return node.id;
+}

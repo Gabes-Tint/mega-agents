@@ -1396,3 +1396,41 @@ describe("block colors", () => {
     }
   });
 });
+
+describe("problems", () => {
+  test("a block shows its worst problem", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const agent = graph.addNode("agent", 10, 40, project.id);
+
+    graph.problems = [
+      {
+        nodeId: agent.id,
+        severity: "warning",
+        message: "Agent 1 does not run",
+      },
+      {
+        nodeId: agent.id,
+        severity: "error",
+        message: "Agent 1: write the prompt",
+      },
+      { severity: "error", message: "flag a starting point" },
+    ];
+
+    expect(graph.severityOf(agent.id)).toBe("error");
+    expect(graph.severityOf(project.id)).toBeUndefined();
+    expect(graph.problemCounts).toEqual({ errors: 2, warnings: 1 });
+  });
+
+  test("a block with only warnings shows a warning", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+
+    graph.problems = [
+      { nodeId: project.id, severity: "warning", message: "set the folder" },
+    ];
+
+    expect(graph.severityOf(project.id)).toBe("warning");
+    expect(graph.problemCounts).toEqual({ errors: 0, warnings: 1 });
+  });
+});

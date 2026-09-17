@@ -3,6 +3,7 @@
   import {
     GraphStore,
     workflowSlug,
+    type Problem,
     type WorkflowGraph,
   } from "./graph.svelte.js";
   import Palette from "./Palette.svelte";
@@ -31,6 +32,9 @@
 
   // How often a started run is polled for progress.
   const RUN_POLL_MS = 250;
+
+  // How long the graph must stay unchanged before its problems are checked.
+  const PROBLEMS_DELAY_MS = 300;
 
   // Step details shown as labelled lines, in this order.
   const DETAIL_LABELS: [string, string][] = [
@@ -106,6 +110,46 @@
     }
   });
 
+  // The bottom panel shows what to fix before running, or the run.
+  let panelTab = $state<"problems" | "run">("problems");
+  let problemsChecked = $state(false);
+  let problemsRequest = 0;
+
+  $effect(() => {
+    const body = JSON.stringify(graph.toRequest());
+    const request = ++problemsRequest;
+    const timer = setTimeout(
+      () => void checkProblems(body, request),
+      PROBLEMS_DELAY_MS,
+    );
+    return () => globalThis.clearTimeout(timer);
+  });
+
+  async function checkProblems(body: string, request: number): Promise<void> {
+    try {
+      const response = await fetch("/api/workflows/problems", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!response.ok) return;
+      const problems: unknown = await response.json();
+      if (request !== problemsRequest || !Array.isArray(problems)) return;
+      graph.problems = problems as Problem[];
+      problemsChecked = true;
+    } catch {
+      // The list keeps its last answer until the backend answers again.
+    }
+  }
+
+  function nameOf(nodeId: string | undefined): string {
+    return graph.nodes.find((node) => node.id === nodeId)?.name ?? "";
+  }
+
+  function plural(count: number, word: string): string {
+    return `${count} ${word}${count === 1 ? "" : "s"}`;
+  }
+
   interface WorkflowSummary {
     name: string;
     updatedAt: string;
@@ -133,6 +177,7 @@
 
   async function openRun(id: string): Promise<void> {
     historyDialog = false;
+    panelTab = "run";
     runError = "";
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
@@ -156,6 +201,7 @@
     const id = runResult?.id;
     if (!id) return;
     running = true;
+    panelTab = "run";
     runError = "";
     try {
       const response = await fetch(
@@ -382,6 +428,7 @@
       });
       if (!response.ok) {
         yamlError = await response.text();
+        panelTab = "run";
         return;
       }
       const blob = await response.blob();
@@ -395,11 +442,13 @@
       URL.revokeObjectURL(url);
     } catch {
       yamlError = "Cannot reach the backend";
+      panelTab = "run";
     }
   }
 
   async function runFlow(): Promise<void> {
     running = true;
+    panelTab = "run";
     runResult = null;
     runError = "";
     graph.showRun([]);
@@ -607,101 +656,195 @@
   <Palette {graph} />
   <Canvas {graph} />
   <PropertiesPanel {graph} />
-  <section class="panel" aria-label="Run result" aria-live="polite">
-    <div class="panel-header">
-      <h2>Run</h2>
-      {#if runResult && !runError}
-        <span class="run-status {runResult.status}">
-          <span class="dot" aria-hidden="true"></span>
-          Run {runResult.status}
-        </span>
-        {#if runResult.retryOf}
-          <span class="meta">Retry of {runResult.retryOf}</span>
+  <section class="panel" aria-label="Output">
+    <div class="panel-header" role="tablist" aria-label="Output">
+      <button
+        type="button"
+        role="tab"
+        id="tab-problems"
+        class="tab"
+        aria-selected={panelTab === "problems"}
+        aria-controls="panel-problems"
+        onclick={() => (panelTab = "problems")}
+      >
+        Problems
+        {#if graph.problems.length > 0}
+          <span class="count" class:has-errors={graph.problemCounts.errors > 0}
+            >{graph.problems.length}</span
+          >
         {/if}
-        {#if runUsage(runResult)}
-          <span class="meta">{runUsage(runResult)}</span>
-        {/if}
-        {#if runResult.id && !running && ["failed", "cancelled", "interrupted"].includes(runResult.status)}
-          <button type="button" class="small" onclick={() => void retryRun()}>
-            Retry from failure
-          </button>
-        {/if}
-      {/if}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="tab-run"
+        class="tab"
+        aria-selected={panelTab === "run"}
+        aria-controls="panel-run"
+        onclick={() => (panelTab = "run")}
+      >
+        Run
+      </button>
     </div>
-    <div class="panel-body">
-      {#if yamlError}
-        <p class="error">{yamlError}</p>
-      {/if}
-      {#if runError}
-        <p class="error">{runError}</p>
-      {:else if runResult}
-        <ul class="steps">
-          {#each runResult.steps as step (step.nodeId)}
-            <li class="step {step.status}">
-              <div class="step-line">
-                <span class="dot" aria-hidden="true"></span>
-                <strong>
-                  {step.name}: {step.action}
-                  {step.status}
-                </strong>
-                {#if runResult.id}
-                  <button
-                    type="button"
-                    class="small ghost"
-                    aria-label="Logs of {step.name}"
-                    onclick={() => graph.openLog(step.nodeId)}
-                  >
-                    Logs
-                  </button>
-                {/if}
-              </div>
-              <div class="details">
-                {#if usageOf(step)}
-                  {@const usage = usageOf(step)!}
-                  <span
-                    >Cost: ${usage.costUsd.toFixed(4)} · {usage.inputTokens} in /
-                    {usage.outputTokens} out</span
-                  >
-                {/if}
-                {#if step.details && "valid" in step.details}
-                  <span>Valid: {String(step.details.valid)}</span>
-                {/if}
-                {#each DETAIL_LABELS as [key, label] (key)}
-                  {#if step.details?.[key] !== undefined && step.details?.[key] !== ""}
-                    <span>{label}: {step.details[key]}</span>
-                  {/if}
-                {/each}
-                {#if typeof step.details?.url === "string"}
-                  <a href={step.details.url} target="_blank" rel="noreferrer"
-                    >{step.details.url}</a
-                  >
-                {/if}
-              </div>
-              {#if step.error}
-                <pre class="failed">{step.error}</pre>
-              {:else if step.details?.output}
-                <pre>{step.details.output}</pre>
-              {/if}
-              {#each fieldErrors(step.details) as fieldError (fieldError)}
-                <pre class="failed">{fieldError}</pre>
-              {/each}
-              {#if step.details?.output && step.action === "command"}
-                <pre>{step.details.output}</pre>
-              {/if}
-              {#if step.details?.reply}
-                <pre>{step.details.reply}</pre>
+    <div
+      class="panel-body"
+      role="tabpanel"
+      id="panel-problems"
+      aria-labelledby="tab-problems"
+      hidden={panelTab !== "problems"}
+    >
+      {#if graph.problems.length > 0}
+        <ul class="problems">
+          {#each graph.problems as problem, index (index)}
+            <li class="problem {problem.severity}">
+              <span class="severity" aria-hidden="true"></span>
+              <span class="message" id="problem-{index}">{problem.message}</span
+              >
+              {#if problem.nodeId}
+                {@const nodeId = problem.nodeId}
+                <button
+                  type="button"
+                  class="small ghost"
+                  aria-label="Select the block with problem {index + 1}"
+                  aria-describedby="problem-{index}"
+                  onclick={() => graph.select(nodeId)}
+                >
+                  {nameOf(nodeId)}
+                </button>
               {/if}
             </li>
           {/each}
         </ul>
-      {:else if !yamlError}
+      {:else if graph.nodes.length === 0}
         <p class="muted">
-          No run yet. Run flow executes the graph from its starting points.
+          Nothing to check yet. Drag components onto the canvas.
         </p>
+      {:else if problemsChecked}
+        <p class="muted">No problems found. The workflow is ready to run.</p>
+      {:else}
+        <p class="muted">Checking…</p>
       {/if}
+    </div>
+    <div
+      class="panel-body"
+      role="tabpanel"
+      id="panel-run"
+      aria-labelledby="tab-run"
+      hidden={panelTab !== "run"}
+    >
+      <section aria-label="Run result" aria-live="polite">
+        <div class="run-summary">
+          {#if runResult && !runError}
+            <span class="run-status {runResult.status}">
+              <span class="dot" aria-hidden="true"></span>
+              Run {runResult.status}
+            </span>
+            {#if runResult.retryOf}
+              <span class="meta">Retry of {runResult.retryOf}</span>
+            {/if}
+            {#if runUsage(runResult)}
+              <span class="meta">{runUsage(runResult)}</span>
+            {/if}
+            {#if runResult.id && !running && ["failed", "cancelled", "interrupted"].includes(runResult.status)}
+              <button
+                type="button"
+                class="small"
+                onclick={() => void retryRun()}
+              >
+                Retry from failure
+              </button>
+            {/if}
+          {/if}
+        </div>
+        {#if yamlError}
+          <p class="error">{yamlError}</p>
+        {/if}
+        {#if runError}
+          <p class="error">{runError}</p>
+        {:else if runResult}
+          <ul class="steps">
+            {#each runResult.steps as step (step.nodeId)}
+              <li class="step {step.status}">
+                <div class="step-line">
+                  <span class="dot" aria-hidden="true"></span>
+                  <strong>
+                    {step.name}: {step.action}
+                    {step.status}
+                  </strong>
+                  {#if runResult.id}
+                    <button
+                      type="button"
+                      class="small ghost"
+                      aria-label="Logs of {step.name}"
+                      onclick={() => graph.openLog(step.nodeId)}
+                    >
+                      Logs
+                    </button>
+                  {/if}
+                </div>
+                <div class="details">
+                  {#if usageOf(step)}
+                    {@const usage = usageOf(step)!}
+                    <span
+                      >Cost: ${usage.costUsd.toFixed(4)} · {usage.inputTokens} in
+                      /
+                      {usage.outputTokens} out</span
+                    >
+                  {/if}
+                  {#if step.details && "valid" in step.details}
+                    <span>Valid: {String(step.details.valid)}</span>
+                  {/if}
+                  {#each DETAIL_LABELS as [key, label] (key)}
+                    {#if step.details?.[key] !== undefined && step.details?.[key] !== ""}
+                      <span>{label}: {step.details[key]}</span>
+                    {/if}
+                  {/each}
+                  {#if typeof step.details?.url === "string"}
+                    <a href={step.details.url} target="_blank" rel="noreferrer"
+                      >{step.details.url}</a
+                    >
+                  {/if}
+                </div>
+                {#if step.error}
+                  <pre class="failed">{step.error}</pre>
+                {:else if step.details?.output}
+                  <pre>{step.details.output}</pre>
+                {/if}
+                {#each fieldErrors(step.details) as fieldError (fieldError)}
+                  <pre class="failed">{fieldError}</pre>
+                {/each}
+                {#if step.details?.output && step.action === "command"}
+                  <pre>{step.details.output}</pre>
+                {/if}
+                {#if step.details?.reply}
+                  <pre>{step.details.reply}</pre>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {:else if !yamlError}
+          <p class="muted">
+            No run yet. Run flow executes the graph from its starting points.
+          </p>
+        {/if}
+      </section>
     </div>
   </section>
   <footer class="statusbar">
+    <button
+      type="button"
+      class="problem-counts"
+      aria-label="{plural(graph.problemCounts.errors, 'error')}, {plural(
+        graph.problemCounts.warnings,
+        'warning',
+      )}"
+      onclick={() => (panelTab = "problems")}
+    >
+      <span class="severity error" aria-hidden="true"></span>
+      {graph.problemCounts.errors}
+      <span class="severity warning" aria-hidden="true"></span>
+      {graph.problemCounts.warnings}
+    </button>
     <span class="backend">{status}</span>
     <span class="file-status" role="status" aria-label="Workflow file"
       >{fileStatus}</span
@@ -879,13 +1022,126 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .panel-header h2 {
-    margin: 0;
+  .panel-header {
+    gap: 0.25rem;
+    padding-block: 0;
+  }
+
+  .tab {
+    min-height: 2rem;
+    padding: 0.25rem 0.6rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-muted);
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+  }
+
+  .tab:hover:not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
+
+  .tab[aria-selected="true"] {
+    border-bottom-color: var(--accent);
+    color: var(--text);
+  }
+
+  .count {
+    min-width: 1.1rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 11px;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .count.has-errors {
+    background: var(--fail-soft);
+    color: var(--fail);
+  }
+
+  .run-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .run-summary:empty {
+    display: none;
+  }
+
+  .problems {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+  }
+
+  .problem {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: 1.75rem;
+    padding: 0 0.4rem;
+    border-radius: var(--radius);
+  }
+
+  .problem:hover {
+    background: var(--surface-sunken);
+  }
+
+  .problem .message {
+    color: var(--text);
+  }
+
+  .problem button {
+    color: var(--text-faint);
+    font-weight: 400;
+  }
+
+  .severity {
+    flex: none;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+
+  .error > .severity,
+  .severity.error {
+    background: var(--fail);
+  }
+
+  .warning > .severity,
+  .severity.warning {
+    border-radius: 1px;
+    background: var(--warn);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  .problem-counts {
+    min-height: 1.4rem;
+    gap: 0.3rem;
+    padding: 0 0.4rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: var(--text-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .problem-counts .severity.warning {
+    margin-left: 0.35rem;
   }
 
   .panel-body {

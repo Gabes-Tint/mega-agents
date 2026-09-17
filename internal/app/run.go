@@ -241,9 +241,27 @@ type runPlanner struct {
 }
 
 func planRun(request WorkflowRequest) ([]engine.Task, error) {
+	tasks, failures, _ := plan(request)
+	if len(failures) > 0 {
+		return nil, failures[0].err
+	}
+	return tasks, nil
+}
+
+// planFailure is a reason the flow cannot run, with the block it concerns
+// when there is one.
+type planFailure struct {
+	nodeID string
+	err    error
+}
+
+// plan turns the graph into tasks, collecting every reason it cannot run
+// instead of stopping at the first, in the order a run would meet them. It
+// also returns the blocks the run reaches from its starting points.
+func plan(request WorkflowRequest) ([]engine.Task, []planFailure, map[string]bool) {
 	nodeByID, err := validateGraph(request)
 	if err != nil {
-		return nil, err
+		return nil, []planFailure{{err: err}}, nil
 	}
 	included := map[string]bool{}
 	planner := runPlanner{nodeByID: nodeByID, childrenOf: map[string][]WorkflowNodeInput{}, request: request, included: included}
@@ -253,6 +271,7 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 		}
 	}
 	var tasks []engine.Task
+	var failures []planFailure
 	for _, node := range request.Nodes {
 		switch {
 		case node.Type == "agent" && node.Start:
@@ -260,7 +279,8 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 		case node.Type == "github" && node.Start:
 			start, hasActions, err := planner.startingAction(node)
 			if err != nil {
-				return nil, err
+				failures = append(failures, planFailure{nodeID: node.ID, err: err})
+				continue
 			}
 			if !hasActions {
 				tasks = append(tasks, planner.fetchTask(node, node))
@@ -269,8 +289,8 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 			planner.include(start.ID, included)
 		}
 	}
-	if len(tasks) == 0 && len(included) == 0 {
-		return nil, errNoStartingBlock
+	if len(tasks) == 0 && len(included) == 0 && len(failures) == 0 {
+		return nil, []planFailure{{err: errNoStartingBlock}}, included
 	}
 	for _, node := range request.Nodes {
 		if !included[node.ID] {
@@ -290,11 +310,12 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 			task, err = planner.actionTask(node)
 		}
 		if err != nil {
-			return nil, err
+			failures = append(failures, planFailure{nodeID: node.ID, err: err})
+			continue
 		}
 		tasks = append(tasks, task)
 	}
-	return tasks, nil
+	return tasks, failures, included
 }
 
 // startingAction finds the action a GitHub block's sequence starts from.

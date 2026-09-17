@@ -62,6 +62,13 @@ export function workflowSlug(name: string): string {
   return slug || "workflow";
 }
 
+// Something to fix before running, as the backend's check reports it.
+export interface Problem {
+  nodeId?: string;
+  severity: string;
+  message: string;
+}
+
 export interface RunStepStatus {
   nodeId: string;
   status: string;
@@ -346,6 +353,8 @@ export class GraphStore {
   runId = $state<string | null>(null);
   workflowName = $state("workflow");
   logNodeId = $state<string | null>(null);
+  // What the backend's check found to fix in the graph as it is now.
+  problems = $state<Problem[]>([]);
 
   // Replaces the whole graph, as when a saved workflow is opened.
   load(workflow: WorkflowGraph): void {
@@ -868,6 +877,22 @@ export class GraphStore {
     if (statuses.includes("failed")) return "failed";
     if (statuses.every((status) => status === statuses[0])) return statuses[0];
     return "running";
+  }
+
+  // The worst problem a block has: an error, a warning, or none.
+  severityOf(id: string): "error" | "warning" | undefined {
+    const severities = this.problems
+      .filter((problem) => problem.nodeId === id)
+      .map((problem) => problem.severity);
+    if (severities.includes("error")) return "error";
+    if (severities.includes("warning")) return "warning";
+    return undefined;
+  }
+
+  get problemCounts(): { errors: number; warnings: number } {
+    const count = (severity: string) =>
+      this.problems.filter((problem) => problem.severity === severity).length;
+    return { errors: count("error"), warnings: count("warning") };
   }
 
   setAppId(id: string, appId: string): void {
