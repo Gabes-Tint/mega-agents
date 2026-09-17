@@ -6,6 +6,7 @@
     type NodeType,
     type PaletteItem,
   } from "./graph.svelte.js";
+  import { hideDragImage } from "./dragImage.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -36,6 +37,7 @@
     if (!event.dataTransfer) return;
     event.dataTransfer.setData("text/plain", item.type);
     event.dataTransfer.effectAllowed = "copy";
+    hideDragImage(event.dataTransfer);
     graph.draggingType = item.type;
   }
 

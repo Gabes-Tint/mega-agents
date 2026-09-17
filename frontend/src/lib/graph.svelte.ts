@@ -159,6 +159,13 @@ export const MIN_NODE_HEIGHT = 48;
 const LOOP_WIDTH = 400;
 const LOOP_HEIGHT = 220;
 
+// The size a block of the type starts with.
+export function defaultSize(type: NodeType): { w: number; h: number } {
+  return type === "loop"
+    ? { w: LOOP_WIDTH, h: LOOP_HEIGHT }
+    : { w: DEFAULT_NODE_WIDTH, h: DEFAULT_NODE_HEIGHT };
+}
+
 // Layout of a GitHub block's action sequence: below the block header, one
 // action under the other with room for the arrow between them.
 const ACTION_INSET = 12;
@@ -439,16 +446,11 @@ export class GraphStore {
       name: `${paletteLabel(type)} ${count}`,
       x,
       y,
-      w: DEFAULT_NODE_WIDTH,
-      h: DEFAULT_NODE_HEIGHT,
+      ...defaultSize(type),
       parentId: effectiveParent,
     };
     if (type === "agent") node.backend = "claude";
-    if (type === "loop") {
-      node.maxIterations = 3;
-      node.w = LOOP_WIDTH;
-      node.h = LOOP_HEIGHT;
-    }
+    if (type === "loop") node.maxIterations = 3;
     if (type === "router")
       node.cases = [
         { name: "approved", expression: 'value.verdict == "approve"' },

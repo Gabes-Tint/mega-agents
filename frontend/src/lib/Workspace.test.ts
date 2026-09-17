@@ -1424,6 +1424,76 @@ describe("graph builder workspace", () => {
     );
   });
 
+  test("previews where a palette component lands while it is dragged", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Loop" }), {
+      dataTransfer,
+    });
+
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 90,
+      clientY: 60,
+    });
+
+    const preview = canvas().querySelector(".drop-preview");
+    expect(preview).toHaveTextContent("Loop");
+    expect(preview).toHaveStyle({
+      left: "90px",
+      top: "60px",
+      width: "400px",
+      height: "220px",
+    });
+    expect(preview).not.toHaveClass("invalid");
+
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 90, clientY: 60 });
+    expect(canvas().querySelector(".drop-preview")).toBeNull();
+  });
+
+  test("marks the preview of a drop the canvas would reject", async () => {
+    render(Workspace);
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Agent" }), {
+      dataTransfer,
+    });
+
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 40,
+      clientY: 40,
+    });
+
+    expect(canvas().querySelector(".drop-preview")).toHaveClass("invalid");
+    await dispatchDragEvent("dragleave", canvas(), {});
+    expect(canvas().querySelector(".drop-preview")).toBeNull();
+  });
+
+  test("previews a moved block at its landing spot with its own size", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    const project = screen.getByRole("button", { name: "Project 1" });
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(project, { dataTransfer, clientX: 10, clientY: 5 });
+
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 210,
+      clientY: 105,
+    });
+
+    const preview = canvas().querySelector(".drop-preview");
+    expect(preview).toHaveTextContent("Project 1");
+    expect(preview).toHaveStyle({
+      left: "200px",
+      top: "100px",
+      width: "160px",
+      height: "64px",
+    });
+    expect(project).toHaveClass("dragging");
+  });
+
   test("nests a GitHub App inside a GitHub box that sits in a project", async () => {
     render(Workspace);
 

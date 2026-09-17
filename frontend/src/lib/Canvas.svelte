@@ -3,13 +3,16 @@
     BLOCK_HUES,
     canExistTopLevel,
     canHostChild,
+    defaultSize,
     GraphStore,
+    labelFor,
     PALETTE,
     rejectedDropHint,
     shortNodeId,
     type GraphNode,
     type NodeType,
   } from "./graph.svelte.js";
+  import { hideDragImage } from "./dragImage.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -28,6 +31,17 @@
   let previewTargetId = $state<string | null>(null);
   let previewValid = $state(false);
   let previewing = $state(false);
+  // Where the dragged block would land, drawn in place of the browser's
+  // drag image, and the block being moved, if any.
+  let landing = $state<{
+    type: NodeType;
+    name: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+  let movingId = $state<string | null>(null);
 
   // Starting pointer position and box size of an active resize gesture.
   let resizeState: {
@@ -115,6 +129,23 @@
     previewing = true;
     previewTargetId = container?.id ?? null;
     previewValid = valid;
+    const moved = dragState ? nodeById(dragState.id) : undefined;
+    landing = moved
+      ? {
+          type,
+          name: moved.name,
+          x: contentX - (dragState?.dx ?? 0),
+          y: contentY - (dragState?.dy ?? 0),
+          w: moved.w,
+          h: moved.h,
+        }
+      : {
+          type,
+          name: labelFor(type),
+          x: contentX,
+          y: contentY,
+          ...defaultSize(type),
+        };
     if (event.dataTransfer) {
       // A dragged box always permits the drop: the drop handler decides
       // between moving, re-parenting, or staying put. Palette drags are
@@ -136,6 +167,13 @@
     }
     previewing = false;
     previewTargetId = null;
+    landing = null;
+  }
+
+  function endNodeDrag() {
+    dragState = null;
+    movingId = null;
+    clearPreview();
   }
 
   function startNodeDrag(
@@ -146,6 +184,8 @@
     const rect = event.currentTarget.getBoundingClientRect();
     event.dataTransfer.setData("text/plain", `node:${node.id}`);
     event.dataTransfer.effectAllowed = "move";
+    hideDragImage(event.dataTransfer);
+    movingId = node.id;
     dragState = {
       id: node.id,
       dx: event.clientX - rect.left,
@@ -261,6 +301,7 @@
       const node = nodeById(id);
       const grab = dragState;
       dragState = null;
+      movingId = null;
       if (!node || !grab || grab.id !== id) return;
       // The dragged box never resolves as its own drop container.
       const container = graph.containerAt(contentX, contentY, id);
@@ -406,6 +447,7 @@
       class:problem-warning={graph.severityOf(node.id) === "warning"}
       class:drop-ok={previewing && previewTargetId === node.id && previewValid}
       class:drop-no={previewing && previewTargetId === node.id && !previewValid}
+      class:dragging={node.id === movingId}
       aria-pressed={node.id === graph.selectedId}
       draggable="true"
       style:--block-hue={BLOCK_HUES[node.type]}
@@ -414,6 +456,7 @@
       style:width="{node.w}px"
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}
+      ondragend={endNodeDrag}
       onclick={() => selectOrConnect(node)}
       onkeydown={(event) => {
         // Delete or Backspace deletes the focused block.
@@ -456,6 +499,20 @@
       ></span>
     </button>
   {/each}
+  {#if landing}
+    <div
+      class="drop-preview block-{landing.type}"
+      class:invalid={!previewValid}
+      aria-hidden="true"
+      style:--block-hue={BLOCK_HUES[landing.type]}
+      style:left="{landing.x}px"
+      style:top="{landing.y}px"
+      style:width="{landing.w}px"
+      style:height="{landing.h}px"
+    >
+      <span class="node-title">{landing.name}</span>
+    </div>
+  {/if}
   {#if graph.nodes.length === 0}
     <p class="hint">Drag components here to build your graph</p>
   {/if}
@@ -655,6 +712,36 @@
     box-shadow:
       0 0 0 3px var(--focus),
       var(--shadow);
+  }
+
+  /* The landing spot of a dragged block: its outline and header, see-through
+     so the blocks under it stay readable. */
+  .drop-preview {
+    box-sizing: border-box;
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    border: 1.5px dashed var(--block-accent);
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklch, var(--block-body) 55%, transparent);
+    box-shadow: var(--shadow);
+    pointer-events: none;
+    overflow: hidden;
+    opacity: 0.9;
+  }
+
+  .drop-preview .node-title {
+    background: color-mix(in oklch, var(--block-soft) 80%, transparent);
+  }
+
+  .drop-preview.invalid {
+    border-color: var(--fail);
+    background: color-mix(in oklch, var(--fail-soft) 50%, transparent);
+  }
+
+  .node.dragging {
+    opacity: 0.4;
   }
 
   .canvas.preview-invalid {
