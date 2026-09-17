@@ -935,10 +935,13 @@ describe("Git actions inside a GitHub block", () => {
     const { graph, githubId } = githubInProject();
     const issue = graph.addAction(githubId, "issue")!;
 
+    // 0 reads the next available issue.
+    expect(issue.issue).toBe(0);
     graph.setActionIssue(issue.id, "7");
     expect(issue.issue).toBe(7);
     graph.setActionIssue(issue.id, "");
-    expect(issue.issue).toBeUndefined();
+    expect(issue.issue).toBe(0);
+    expect(graph.addAction(githubId, "commit")!.issue).toBeUndefined();
     graph.setActionIssue("missing", "1");
   });
 

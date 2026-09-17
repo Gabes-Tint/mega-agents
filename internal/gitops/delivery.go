@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -105,6 +106,52 @@ func ReadIssue(ctx context.Context, repository string, number int) (map[string]a
 		return nil, fmt.Errorf("gh issue view %d printed no issue: %w", number, err)
 	}
 	return issue, nil
+}
+
+// nextIssueLimit is how many of the oldest open issues NextIssue considers.
+const nextIssueLimit = 100
+
+// SkippedIssue is an older open issue NextIssue passed over and the label
+// to ignore that it carries.
+type SkippedIssue struct {
+	Number int
+	Label  string
+}
+
+// PickedIssue is the issue NextIssue chose and the older ones it skipped.
+type PickedIssue struct {
+	Number  int
+	Skipped []SkippedIssue
+}
+
+// NextIssue picks the next available issue: the oldest open issue, the one
+// with the lowest number, without a label to ignore. Pull requests are not
+// issues to the GitHub CLI, so they never count.
+func NextIssue(ctx context.Context, repository string, ignore []string) (PickedIssue, error) {
+	output, err := gh(ctx, "", "issue", "list", "--repo", repository, "--state", "open",
+		"--search", "sort:created-asc", "--limit", strconv.Itoa(nextIssueLimit), "--json", "number,labels")
+	if err != nil {
+		return PickedIssue{}, fmt.Errorf("gh issue list failed: %w", err)
+	}
+	var issues []map[string]any
+	if err := json.Unmarshal([]byte(output), &issues); err != nil {
+		return PickedIssue{}, fmt.Errorf("gh issue list printed no issues: %w", err)
+	}
+	number := func(issue map[string]any) int {
+		value, _ := issue["number"].(float64)
+		return int(value)
+	}
+	sort.SliceStable(issues, func(i, j int) bool { return number(issues[i]) < number(issues[j]) })
+	var picked PickedIssue
+	for _, issue := range issues {
+		if label := IgnoredLabel(issue, ignore); label != "" {
+			picked.Skipped = append(picked.Skipped, SkippedIssue{Number: number(issue), Label: label})
+			continue
+		}
+		picked.Number = number(issue)
+		return picked, nil
+	}
+	return PickedIssue{}, fmt.Errorf("no open issue without the labels to ignore in %s", repository)
 }
 
 // IgnoredLabel returns the first of an issue's labels that matches one of

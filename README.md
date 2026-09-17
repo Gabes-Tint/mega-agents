@@ -101,7 +101,9 @@ refs.
 
 - **GitHub** flagged as a starting point runs its **Actions** in order:
   *Fetch*, *Create worktree* (outputs a `workspace`), *Rebase*, *Read issue*
-  (the issue's title, body, labels and comments via `gh`), *Commit*, *Push*
+  (the issue's title, body, labels and comments via `gh`; issue number 0, the
+  default, reads the next available issue: the oldest open one without a
+  label to ignore), *Commit*, *Push*
   and *Open pull request* (via `gh`). Without actions it fetches. Runs use the
   machine's existing Git and `gh` credentials. Agents and commands that
   receive a workspace pass it on, so worktree → agent → Commit → Push → Open

@@ -2511,6 +2511,17 @@ describe("graph builder workspace", () => {
                 parentId: "gh",
                 issue: 8,
               },
+              {
+                id: "next",
+                type: "action",
+                action: "issue",
+                name: "Next issue",
+                x: 10,
+                y: 120,
+                w: 160,
+                h: 64,
+                parentId: "gh",
+              },
             ],
             edges: [],
           }),
@@ -2528,6 +2539,9 @@ describe("graph builder workspace", () => {
     expect(labels).toHaveValue("paused, draft, needs-attention");
     await fireEvent.input(labels, { target: { value: "" } });
     expect(labels).toHaveValue("");
+    // Without a number it reads the next available issue.
+    await fireEvent.click(screen.getByRole("button", { name: "Next issue" }));
+    expect(screen.getByLabelText("Issue number")).toHaveValue(0);
     vi.unstubAllGlobals();
   });
 
@@ -2744,6 +2758,12 @@ describe("graph builder workspace", () => {
     await githubWithActions("issue", "commit", "pullrequest");
 
     await fireEvent.click(screen.getByRole("button", { name: "Read issue" }));
+    expect(screen.getByLabelText("Issue number")).toHaveValue(0);
+    expect(
+      screen.getByText(
+        "0 reads the next available issue: the oldest open one without a label to ignore.",
+      ),
+    ).toBeInTheDocument();
     await fireEvent.input(screen.getByLabelText("Issue number"), {
       target: { value: "7" },
     });

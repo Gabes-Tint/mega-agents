@@ -10,6 +10,7 @@ import {
   git,
   mouseDrag,
   projectClone,
+  selectBlock,
   type ProjectClone,
 } from "./fixtures";
 
@@ -141,5 +142,49 @@ test.describe("GitHub delivery", () => {
     await labels.fill("draft");
     await page.getByRole("button", { name: "Run flow" }).click();
     await expect(result).toContainText("Run succeeded", { timeout: 15_000 });
+  });
+
+  test("Read issue with 0 reads the next available issue", async ({ page }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+    const project = page.getByRole("button", { name: "Project 1" });
+    await page.getByLabel("Path").fill(fixture.clone);
+    const box = await project.boundingBox();
+    const palette = await page
+      .getByRole("button", { name: "GitHub", exact: true })
+      .boundingBox();
+    if (!box || !palette) throw new Error("not visible");
+    await page.mouse.move(palette.x + 20, palette.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 30, box.y + 45, { steps: 10 });
+    await page.mouse.up();
+    const github = page.getByRole("button", { name: "GitHub 1" });
+    await page.getByLabel("Already authenticated (OAuth)").check();
+    await page.getByLabel("Starting point").check();
+    await addAction(page, github, "Read issue");
+    await expect(page.getByLabel("Issue number")).toHaveValue("0");
+    await expect(
+      page.getByText(
+        "0 reads the next available issue: the oldest open one without a label to ignore.",
+      ),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Run flow" }).click();
+
+    await expect(
+      page.getByRole("region", { name: "Run result" }),
+    ).toContainText("Run succeeded", { timeout: 15_000 });
+    // The fake GitHub CLI lists #8, labeled "paused", and #9 without labels.
+    await selectBlock(
+      page.getByRole("button", { name: "Read issue", exact: true }),
+    );
+    await page.getByRole("button", { name: "Show logs" }).click();
+    const log = page.getByRole("dialog", { name: "Logs: Read issue" });
+    await expect(log).toContainText('Skipped issue #8, labeled "paused"');
+    await expect(log).toContainText("📌 Picked the next available issue #9");
+    await expect(log).toContainText("$ gh issue view 9");
   });
 });

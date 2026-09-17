@@ -456,8 +456,8 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput) (engine.Task, error
 			return fail("%v", err)
 		}
 	}
-	if node.Action == "issue" && node.Issue <= 0 {
-		return fail("set the issue number")
+	if node.Action == "issue" && node.Issue < 0 {
+		return fail("the issue number must be 0 for the next available issue, or a positive number")
 	}
 	if node.Action == "fetch" {
 		task := planner.fetchTask(node, github)
@@ -518,14 +518,26 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput) (engine.Task, error
 					}
 					repository = detected.Repository
 				}
-				issue, err := gitops.ReadIssue(ctx, repository, node.Issue)
+				number := node.Issue
+				if number == 0 {
+					picked, err := gitops.NextIssue(ctx, repository, node.ignoreLabels())
+					if err != nil {
+						return engine.Result{}, err
+					}
+					for _, skipped := range picked.Skipped {
+						fmt.Fprintf(log, "Skipped issue #%d, labeled %q\n", skipped.Number, skipped.Label)
+					}
+					fmt.Fprintf(log, "📌 Picked the next available issue #%d\n", picked.Number)
+					number = picked.Number
+				}
+				issue, err := gitops.ReadIssue(ctx, repository, number)
 				if err != nil {
 					return engine.Result{}, err
 				}
-				// A fixed issue that carries a label to ignore fails the step
-				// so nothing after it works on an issue meant to be left alone.
+				// An issue that carries a label to ignore fails the step so
+				// nothing after it works on an issue meant to be left alone.
 				if label := gitops.IgnoredLabel(issue, node.ignoreLabels()); label != "" {
-					return engine.Result{}, fmt.Errorf("issue #%d is labeled %q, one of the labels to ignore", node.Issue, label)
+					return engine.Result{}, fmt.Errorf("issue #%d is labeled %q, one of the labels to ignore", number, label)
 				}
 				return engine.Result{Outputs: map[string]any{issuePort: issue}, Details: map[string]any{"issue": issue}}, nil
 			}

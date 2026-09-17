@@ -424,7 +424,8 @@ func TestWorkflowYAMLExportsGitActionsAsVersionedGitBlocks(t *testing.T) {
 			{"id": "n4", "type": "action", "action": "rebase", "name": "Rebase", "x": 12, "y": 128, "w": 160, "h": 64, "parentId": "n2", "onto": "origin/release"},
 			{"id": "n5", "type": "action", "action": "issue", "name": "Read issue", "x": 12, "y": 216, "w": 160, "h": 64, "parentId": "n2", "issue": 7, "ignoreLabels": ["paused", "", "needs attention"]},
 			{"id": "n6", "type": "action", "action": "issue", "name": "Cleared", "x": 12, "y": 304, "w": 160, "h": 64, "parentId": "n2", "issue": 8, "ignoreLabels": [""]},
-			{"id": "n7", "type": "action", "action": "issue", "name": "Old", "x": 12, "y": 392, "w": 160, "h": 64, "parentId": "n2", "issue": 9}
+			{"id": "n7", "type": "action", "action": "issue", "name": "Old", "x": 12, "y": 392, "w": 160, "h": 64, "parentId": "n2", "issue": 9},
+			{"id": "n8", "type": "action", "action": "issue", "name": "Next", "x": 12, "y": 480, "w": 160, "h": 64, "parentId": "n2", "issue": 0}
 		],
 		"edges": [{"id": "e1", "from": "n3", "to": "n4"}, {"id": "e2", "from": "n4", "to": "n5"}]
 	}`)
@@ -441,6 +442,8 @@ func TestWorkflowYAMLExportsGitActionsAsVersionedGitBlocks(t *testing.T) {
 		"            with:\n              issue: 7\n              ignoreLabels: [\"paused\", \"needs attention\"]\n",
 		"            with:\n              issue: 8\n              ignoreLabels: []\n",
 		"            with:\n              issue: 9\n            layout:\n",
+		// 0 reads the next available issue; it is written so the file shows it.
+		"          next:\n            uses: git/issue@v1\n            name: \"Next\"\n            with:\n              issue: 0\n            layout:\n",
 	}
 	for _, expected := range expectations {
 		if !strings.Contains(body, expected) {

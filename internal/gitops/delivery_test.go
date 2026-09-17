@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -141,6 +142,53 @@ func TestReadIssueReturnsItsFields(t *testing.T) {
 	}
 	fakeGH(t, "issue not found", 1)
 	if _, err := ReadIssue(context.Background(), "acme/api", 9); err == nil || !strings.Contains(err.Error(), "gh issue view 9 failed: issue not found") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNextIssuePicksTheOldestOpenIssueWithoutALabelToIgnore(t *testing.T) {
+	// Listed out of order: the lowest number is the oldest issue.
+	bin := fakeGH(t, `[
+		{"number":12,"title":"Later","labels":[]},
+		{"number":5,"title":"Paused","labels":[{"name":"Paused"}]},
+		{"number":9,"title":"Next","labels":[{"name":"story"}]},
+		{"number":3,"title":"Draft","labels":[{"name":"story"},{"name":"draft"}]}
+	]`, 0)
+
+	next, err := NextIssue(context.Background(), "acme/api", []string{"paused", "draft"})
+
+	if err != nil || next.Number != 9 {
+		t.Fatalf("next = %+v, %v", next, err)
+	}
+	want := []SkippedIssue{{Number: 3, Label: "draft"}, {Number: 5, Label: "Paused"}}
+	if !reflect.DeepEqual(next.Skipped, want) {
+		t.Fatalf("skipped = %+v, want %+v", next.Skipped, want)
+	}
+	args, _ := os.ReadFile(filepath.Join(bin, "args"))
+	if !strings.HasPrefix(string(args), "issue\nlist\n--repo\nacme/api\n--state\nopen\n--search\nsort:created-asc\n--limit\n100\n--json\nnumber,labels\n") {
+		t.Fatalf("args = %q", args)
+	}
+}
+
+func TestNextIssueFailsWhenNoOpenIssueQualifies(t *testing.T) {
+	fakeGH(t, `[{"number":5,"title":"Paused","labels":[{"name":"paused"}]}]`, 0)
+	if _, err := NextIssue(context.Background(), "acme/api", []string{"paused"}); err == nil ||
+		err.Error() != "no open issue without the labels to ignore in acme/api" {
+		t.Fatalf("err = %v", err)
+	}
+	fakeGH(t, `[]`, 0)
+	if _, err := NextIssue(context.Background(), "acme/api", nil); err == nil ||
+		err.Error() != "no open issue without the labels to ignore in acme/api" {
+		t.Fatalf("err = %v", err)
+	}
+	fakeGH(t, "could not resolve to a Repository", 1)
+	if _, err := NextIssue(context.Background(), "acme/api", nil); err == nil ||
+		!strings.Contains(err.Error(), "gh issue list failed: could not resolve to a Repository") {
+		t.Fatalf("err = %v", err)
+	}
+	fakeGH(t, "not json", 0)
+	if _, err := NextIssue(context.Background(), "acme/api", nil); err == nil ||
+		!strings.Contains(err.Error(), "gh issue list printed no issues") {
 		t.Fatalf("err = %v", err)
 	}
 }
