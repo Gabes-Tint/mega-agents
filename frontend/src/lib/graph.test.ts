@@ -804,6 +804,7 @@ describe("PALETTE", () => {
       { type: "githubapp", label: "GitHub App" },
       { type: "jsonschema", label: "JSON Schema" },
       { type: "router", label: "Router" },
+      { type: "command", label: "Command" },
     ]);
   });
 });
@@ -831,6 +832,7 @@ describe("canHostChild", () => {
     ["action", { root: false, project: false, github: true, agent: false }],
     ["jsonschema", { root: false, project: true, github: false, agent: true }],
     ["router", { root: false, project: true, github: false, agent: true }],
+    ["command", { root: false, project: true, github: false, agent: true }],
   ] as const;
 
   for (const [childType, targets] of matrix) {
@@ -1209,5 +1211,19 @@ describe("whole workflows", () => {
   test("names the saved file after the workflow", () => {
     expect(workflowSlug("Issue to PR!")).toBe("issue-to-pr");
     expect(workflowSlug("  ")).toBe("workflow");
+  });
+});
+
+describe("command blocks", () => {
+  test("have passed and failed outputs and a command to run", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const gate = graph.addNode("command", 10, 10, project.id);
+
+    graph.setCommand(gate.id, "make verify");
+    graph.setCommand("missing", "ignored");
+
+    expect(graph.outputPorts(gate.id)).toEqual(["passed", "failed"]);
+    expect(gate.command).toBe("make verify");
   });
 });

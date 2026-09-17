@@ -83,6 +83,11 @@ the run is recorded as cancelled.
   fails the run. Choose each outgoing arrow's output in the block's
   properties.
 
+- **Command** runs a shell command (a test suite, a linter, `make verify`) in
+  the workspace connected to it or its project's folder, with
+  `MEGA_AGENTS_WORKSPACE_PATH|BRANCH|BASE|REPOSITORY` set. Exit 0 leaves on
+  `passed`; anything else leaves on `failed` with `{exitCode, output}` when an
+  arrow takes it (for example to a fixer agent), and otherwise fails the run.
 - **Router** sends the one value connected to it down the first case whose
   CEL condition over `value` holds (for example `value.verdict == "approve"`),
   or down `default`, as `{"case": ..., "value": ...}`. Expressions are

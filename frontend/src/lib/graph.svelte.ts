@@ -6,7 +6,8 @@ export type NodeType =
   | "githubapp"
   | "action"
   | "jsonschema"
-  | "router";
+  | "router"
+  | "command";
 
 export type GitAction = "fetch" | "worktree" | "rebase";
 
@@ -109,6 +110,7 @@ export interface GraphNode {
   timeoutMinutes?: number;
   schema?: string;
   cases?: RouteCase[];
+  command?: string;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -130,6 +132,7 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "githubapp", label: "GitHub App" },
   { type: "jsonschema", label: "JSON Schema" },
   { type: "router", label: "Router" },
+  { type: "command", label: "Command" },
 ];
 
 // Single source of truth for where a block may go, agreed with the product
@@ -145,6 +148,7 @@ export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
   action: ["github"],
   jsonschema: ["project", "agent"],
   router: ["project", "agent"],
+  command: ["project", "agent"],
 };
 
 // Boxes that can host children: every target that appears as a parent in
@@ -159,6 +163,7 @@ export const CONTAINER_TYPES: readonly NodeType[] = (
     "action",
     "jsonschema",
     "router",
+    "command",
   ] as NodeType[]
 ).filter((type) =>
   Object.values(CONTAINMENT_MATRIX).some((targets) => targets.includes(type)),
@@ -210,6 +215,7 @@ const TARGET_LABELS: Record<NodeType, string> = {
   action: "Git action",
   jsonschema: "JSON Schema",
   router: "Router",
+  command: "Command",
 };
 
 // Human-readable list of the targets a block may be dropped into, used to
@@ -610,6 +616,7 @@ export class GraphStore {
   outputPorts(id: string): string[] {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node?.type === "jsonschema") return ["valid", "invalid"];
+    if (node?.type === "command") return ["passed", "failed"];
     if (node?.type === "router")
       return [
         ...(node.cases ?? []).map((routeCase) => routeCase.name),
@@ -663,6 +670,11 @@ export class GraphStore {
     node.cases.splice(index, 1);
     for (const edge of this.outgoingEdges(id))
       if (edge.fromPort === removed.name) edge.fromPort = "default";
+  }
+
+  setCommand(id: string, command: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.command = command;
   }
 
   setSchema(id: string, schema: string): void {

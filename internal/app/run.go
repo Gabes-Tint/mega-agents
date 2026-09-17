@@ -181,6 +181,8 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 			task, err = planner.schemaTask(node, included)
 		case "router":
 			task, err = planner.routerTask(node, included)
+		case "command":
+			task, err = planner.commandTask(node, included)
 		default:
 			task, err = planner.actionTask(node, included)
 		}
@@ -212,7 +214,7 @@ func (planner runPlanner) startingAction(github WorkflowNodeInput) (WorkflowNode
 }
 
 // executableTypes are the blocks a run executes when a start reaches them.
-var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true, "router": true}
+var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true, "router": true, "command": true}
 
 // include marks the node and every executable node its arrows reach.
 func (planner runPlanner) include(id string, included map[string]bool) {
@@ -299,6 +301,14 @@ func (planner runPlanner) sourcePort(edge WorkflowEdgeInput) (string, error) {
 			return edge.FromPort, nil
 		}
 		return "", fmt.Errorf("%s has no output %q; use %s or %s", source.Name, edge.FromPort, validPort, invalidPort)
+	case source.Type == "command":
+		switch edge.FromPort {
+		case "":
+			return passedPort, nil
+		case passedPort, failedPort:
+			return edge.FromPort, nil
+		}
+		return "", fmt.Errorf("%s has no output %q; use %s or %s", source.Name, edge.FromPort, passedPort, failedPort)
 	case source.Type == "router":
 		routes := []string{}
 		for _, routeCase := range source.Cases {

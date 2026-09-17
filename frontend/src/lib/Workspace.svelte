@@ -39,6 +39,7 @@
     ["sessionId", "Session"],
     ["attempts", "Attempts"],
     ["case", "Route"],
+    ["exitCode", "Exit code"],
   ];
 
   function fieldErrors(details: Record<string, unknown> | undefined): string[] {
@@ -411,7 +412,7 @@
                 <span>Valid: {String(step.details.valid)}</span>
               {/if}
               {#each DETAIL_LABELS as [key, label] (key)}
-                {#if step.details?.[key]}
+                {#if step.details?.[key] !== undefined && step.details?.[key] !== ""}
                   <span>{label}: {step.details[key]}</span>
                 {/if}
               {/each}
@@ -423,6 +424,9 @@
               {#each fieldErrors(step.details) as fieldError (fieldError)}
                 <pre class="failed">{fieldError}</pre>
               {/each}
+              {#if step.details?.output && step.action === "command"}
+                <pre>{step.details.output}</pre>
+              {/if}
               {#if step.details?.reply}
                 <pre>{step.details.reply}</pre>
               {/if}

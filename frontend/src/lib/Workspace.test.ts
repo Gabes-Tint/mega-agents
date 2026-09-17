@@ -507,6 +507,9 @@ describe("graph builder workspace", () => {
     expect(palette).toContainElement(
       screen.getByRole("button", { name: "Router" }),
     );
+    expect(palette).toContainElement(
+      screen.getByRole("button", { name: "Command" }),
+    );
   });
 
   test("shows repository and secret key fields only for forge boxes", async () => {
@@ -2402,6 +2405,50 @@ describe("graph builder workspace", () => {
     expect(
       await screen.findByText("No runs recorded yet."),
     ).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("configures a command gate", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Command", 410, 410);
+
+    await fireEvent.input(screen.getByLabelText("Command"), {
+      target: { value: "go test ./..." },
+    });
+    await fireEvent.input(screen.getByLabelText("Timeout (minutes)"), {
+      target: { value: "15" },
+    });
+    await fireEvent.click(screen.getByText("Project 1"));
+    await fireEvent.click(screen.getByText("Command 1"));
+
+    expect(screen.getByLabelText("Command")).toHaveValue("go test ./...");
+    expect(screen.getByLabelText("Timeout (minutes)")).toHaveValue(15);
+  });
+
+  test("shows a command step's exit code and output", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [
+        record("failed", [
+          {
+            nodeId: "c1",
+            name: "Tests",
+            action: "command",
+            status: "failed",
+            error: "Tests exited 1: FAIL",
+            details: { exitCode: 1, output: "--- FAIL: TestLogin" },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Exit code: 1"));
+    expect(result).toHaveTextContent("--- FAIL: TestLogin");
     vi.unstubAllGlobals();
   });
 });

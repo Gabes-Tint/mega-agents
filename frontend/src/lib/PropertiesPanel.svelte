@@ -365,6 +365,39 @@
           <p class="error" role="alert">The schema is not valid JSON</p>
         {/if}
       {/if}
+      {#if node.type === "command"}
+        <label>
+          Command
+          <textarea
+            rows="3"
+            placeholder="e.g. make verify"
+            value={node.command ?? ""}
+            oninput={(event) =>
+              graph.setCommand(node.id, event.currentTarget.value)}
+          ></textarea>
+        </label>
+        <p class="hint">
+          Runs with sh in the connected workspace or the project folder. Exit 0
+          takes passed; anything else takes failed, or fails the run when no
+          arrow takes failed.
+        </p>
+        <label>
+          Timeout (minutes)
+          <input
+            type="number"
+            min="1"
+            max="240"
+            placeholder="10"
+            value={node.timeoutMinutes ?? ""}
+            oninput={(event) =>
+              graph.setAgentNumber(
+                node.id,
+                "timeoutMinutes",
+                event.currentTarget.value,
+              )}
+          />
+        </label>
+      {/if}
       {#if node.type === "router"}
         <h3>Cases</h3>
         <p class="hint">

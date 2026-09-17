@@ -59,6 +59,8 @@ type WorkflowNodeInput struct {
 	Schema string `json:"schema,omitempty"`
 	// Router blocks.
 	Cases []router.Case `json:"cases,omitempty"`
+	// Command blocks.
+	Command string `json:"command,omitempty"`
 }
 
 type WorkflowRequest struct {
@@ -76,6 +78,7 @@ var knownComponentTypes = map[string]bool{
 	"action":     true,
 	"jsonschema": true,
 	"router":     true,
+	"command":    true,
 }
 
 // containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
@@ -91,6 +94,7 @@ var containmentMatrix = map[string]map[string]bool{
 	"action":     {"github": true},
 	"jsonschema": {"project": true, "agent": true},
 	"router":     {"project": true, "agent": true},
+	"command":    {"project": true, "agent": true},
 }
 
 func containmentAllows(target string, childType string) bool {
@@ -226,7 +230,7 @@ func (emitter *workflowEmitter) emitNode(
 	for _, field := range []struct{ key, value string }{
 		{"branch", node.Branch}, {"base", node.Base}, {"worktreePath", node.WorktreePath}, {"onto", node.Onto},
 		{"backend", node.Backend}, {"model", node.Model}, {"effort", node.Effort}, {"prompt", node.Prompt},
-		{"outputSchema", node.OutputSchema}, {"schema", node.Schema},
+		{"outputSchema", node.OutputSchema}, {"schema", node.Schema}, {"command", node.Command},
 	} {
 		if field.value != "" {
 			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))

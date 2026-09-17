@@ -131,7 +131,7 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		"appId": &node.AppID, "privateKeyPath": &node.PrivateKeyPath, "branch": &node.Branch,
 		"base": &node.Base, "worktreePath": &node.WorktreePath, "onto": &node.Onto,
 		"backend": &node.Backend, "model": &node.Model, "effort": &node.Effort, "prompt": &node.Prompt,
-		"outputSchema": &node.OutputSchema, "schema": &node.Schema,
+		"outputSchema": &node.OutputSchema, "schema": &node.Schema, "command": &node.Command,
 	}
 	for key, value := range entry.With {
 		switch key {
