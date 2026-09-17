@@ -75,18 +75,23 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 	}
 	if node.ContinueSession {
 		agentsBefore := planner.agentsInto(node)
-		if loop := planner.loopOf(node); len(agentsBefore) == 0 && loop.ID != "" {
+		loop := planner.loopOf(node)
+		if len(agentsBefore) == 0 && loop.ID != "" {
 			// Inside a loop, an agent may continue the conversation of the
 			// agent that feeds the loop, such as a fixer the coder's.
 			agentsBefore = planner.agentsInto(loop)
 		}
-		if len(agentsBefore) != 1 {
+		switch {
+		case len(agentsBefore) == 0 && loop.ID != "":
+			// With no agent to continue, it starts its own conversation and
+			// continues that one on every later repeat.
+		case len(agentsBefore) != 1:
 			return fail("continuing a session needs exactly one agent connected to this one")
-		}
-		if agentsBefore[0].Backend != node.Backend {
+		case agentsBefore[0].Backend != node.Backend:
 			return fail("continues the session of %s, which runs on %s, not %s", agentsBefore[0].Name, agentsBefore[0].Backend, node.Backend)
+		default:
+			needs = append(needs, engine.Need{TaskID: agentsBefore[0].ID, Port: sessionPort})
 		}
-		needs = append(needs, engine.Need{TaskID: agentsBefore[0].ID, Port: sessionPort})
 	}
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "agent", Needs: needs, WaitForAny: sources.anyOne,

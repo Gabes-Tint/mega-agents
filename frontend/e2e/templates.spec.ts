@@ -7,6 +7,7 @@ test.describe("Templates", () => {
     for (const [title, block] of [
       ["Issue to pull request", "Open pull request"],
       ["Review and route", "Route"],
+      ["Fit_ development flow", "Solver implements"],
       ["Gate and fix", "Gate again"],
     ]) {
       await page.getByRole("button", { name: "Templates…" }).click();

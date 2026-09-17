@@ -1,0 +1,591 @@
+apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+
+metadata:
+  name: fit-development-flow
+  title: "Fit_ development flow"
+  description: "The fitflow driver as blocks: pick a story, decide whose call it is, slice it, write failing tests, choose the capability rung, implement in bounded loops that escalate mechanic, builder, solver, then open the pull request, review, fix CI, merge, deploy and clean up."
+
+nodes:
+  fit:
+    uses: project@v1
+    name: "Fit_"
+    layout:
+      x: 40
+      y: 40
+      w: 2000
+      h: 1040
+    children:
+      repository:
+        uses: github@v1
+        name: "Repository"
+        start: true
+        with:
+          authenticated: true
+        layout:
+          x: 20
+          y: 60
+          w: 250
+          h: 500
+        children:
+          sync:
+            uses: git/fetch@v1
+            name: "Sync"
+            start: true
+            layout:
+              x: 20
+              y: 40
+              w: 210
+              h: 64
+          story-worktree:
+            uses: git/worktree@v1
+            name: "Story worktree"
+            needs:
+              - sync
+            with:
+              branch: "story"
+            layout:
+              x: 20
+              y: 130
+              w: 210
+              h: 64
+          freeze:
+            uses: git/commit@v1
+            name: "Freeze"
+            needs:
+              - final-barrier
+            with:
+              message: "feat: implement the picked story\n\nBuilt by the Fit_ development flow in Mega Agents."
+            layout:
+              x: 20
+              y: 220
+              w: 210
+              h: 64
+          push-integration:
+            uses: git/push@v1
+            name: "Push integration branch"
+            needs:
+              - freeze
+            layout:
+              x: 20
+              y: 310
+              w: 210
+              h: 64
+          open-pull-request:
+            uses: git/pullrequest@v1
+            name: "Open pull request"
+            needs:
+              - push-integration
+            with:
+              title: "Implement the picked story"
+              body: "Planned, tested and implemented by the Fit_ development flow.\n\nCloses the story named in the first commit's run."
+            layout:
+              x: 20
+              y: 400
+              w: 210
+              h: 64
+      pick-story:
+        uses: command@v1
+        name: "Pick story"
+        needs:
+          - story-worktree
+        with:
+          command: "n=$(gh issue list --state open --label story --limit 1000 --json number,labels --jq '[.[] | select([.labels[].name] | any(. == \"in-progress\" or . == \"blocked\" or . == \"needs-gabriel\" or . == \"paused\") | not)] | sort_by(.number) | .[0].number // empty'); [ -n \"$n\" ] || { echo \"NOTHING_TO_PICK: no open story is free\"; exit 10; }; echo \"$n\" > \"$(git rev-parse --git-common-dir)/mega-agents-story\"; gh issue view \"$n\" --json number,title,body,labels,comments"
+        layout:
+          x: 300
+          y: 60
+          w: 180
+          h: 64
+      whose-call:
+        uses: agent@v1
+        name: "Whose call"
+        needs:
+          - pick-story
+        with:
+          backend: "claude"
+          model: "opus"
+          effort: "low"
+          prompt: "Decide whose call this story is. It is Gabriel's call when it needs a product decision, spends money, touches infrastructure or secrets, lowers a quality gate, or deletes data; otherwise it is the orchestrator's. For Gabriel's call, ask one question with options (always including \"Do nothing\") and your recommendation.\n\nThe story, with its comments and timeline:\n{{result}}"
+          outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"owner\",\"category\",\"reason\",\"question\",\"options\",\"recommendation\"],\"properties\":{\"owner\":{\"type\":\"string\",\"enum\":[\"orchestrator\",\"gabriel\"]},\"category\":{\"type\":\"string\",\"enum\":[\"none\",\"product\",\"spend\",\"infra\",\"secrets\",\"gate-lowering\",\"data-deletion\"]},\"reason\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"options\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"recommendation\":{\"type\":\"string\"}}}"
+        layout:
+          x: 300
+          y: 170
+          w: 180
+          h: 64
+      gabriels-call:
+        uses: router@v1
+        name: "Gabriel's call?"
+        needs:
+          - whose-call
+        with:
+          cases:
+            - name: "gabriel"
+              expression: "value.owner == \"gabriel\""
+        layout:
+          x: 300
+          y: 280
+          w: 180
+          h: 64
+      hold:
+        uses: command@v1
+        name: "Hold"
+        needs:
+          - gabriels-call.default
+        with:
+          command: "gh issue edit \"$(cat \"$(git rev-parse --git-common-dir)/mega-agents-story\")\" --add-label in-progress"
+        layout:
+          x: 300
+          y: 390
+          w: 180
+          h: 64
+      slice:
+        uses: agent@v1
+        name: "Slice at layer boundary"
+        needs:
+          - whose-call
+          - hold
+        with:
+          backend: "claude"
+          model: "opus"
+          effort: "low"
+          prompt: "Slice the story at its layer boundary: one slice, or two (domain, then ui) when it spans both. Give each slice a title, a brief that stays inside its layer, its acceptance criteria and its test kind. The story's issue number is in $(git rev-parse --git-common-dir)/mega-agents-story; read the story, its comments and the slicing brief with gh issue view. With two slices, create a child issue for each (gh issue create --label story --label in-progress) and comment \"Split into: ...\" on the story; with one, comment the brief on the story."
+          outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"spans_domain_and_ui\",\"slices\"],\"properties\":{\"spans_domain_and_ui\":{\"type\":\"boolean\"},\"slices\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"layer\",\"title\",\"brief\",\"acceptance\",\"test_kind\"],\"properties\":{\"layer\":{\"type\":\"string\",\"enum\":[\"domain\",\"ui\",\"workflow\"]},\"title\":{\"type\":\"string\"},\"brief\":{\"type\":\"string\"},\"acceptance\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"test_kind\":{\"type\":\"string\",\"enum\":[\"vitest\",\"playwright\",\"pytest\"]}}}}}}"
+          continueSession: true
+        layout:
+          x: 300
+          y: 500
+          w: 180
+          h: 64
+      failing-tests:
+        uses: loop@v1
+        name: "Write failing tests"
+        needs:
+          - slice
+        with:
+          maxIterations: 4
+          untilNode: "tests-fail"
+          untilPort: "passed"
+        layout:
+          x: 260
+          y: 610
+          w: 440
+          h: 210
+        children:
+          tests-fail:
+            uses: command@v1
+            name: "Tests fail as intended"
+            with:
+              command: "git diff --quiet HEAD || { echo \"The worktree has uncommitted changes; commit and push the tests\"; exit 1; }; git log --oneline \"$MEGA_AGENTS_WORKSPACE_BASE\"..HEAD | grep -q . || { echo \"No failing acceptance tests are committed yet\"; exit 1; }; if make test; then echo \"The acceptance tests pass already; they must fail until the slice is implemented\"; exit 1; fi; echo \"The acceptance tests fail as intended\""
+            layout:
+              x: 20
+              y: 50
+              w: 180
+              h: 64
+          test-writer:
+            uses: agent@v1
+            name: "Test writer"
+            needs:
+              - tests-fail.failed
+            with:
+              backend: "claude"
+              model: "haiku"
+              effort: "medium"
+              prompt: "Write the failing acceptance tests for the story's slices in {{workspace.path}}, following the repository's test conventions, and nothing else. The story's issue number is in $(git rev-parse --git-common-dir)/mega-agents-story; read the story, its comments and the slicing brief with gh issue view. Commit and push them. If they cannot be written, return no test files and say why.\n\nWhat the check reported:\n{{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"test_files\",\"why_they_fail\"],\"properties\":{\"test_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"why_they_fail\":{\"type\":\"string\"}}}"
+            layout:
+              x: 240
+              y: 130
+              w: 180
+              h: 64
+      delegate:
+        uses: agent@v1
+        name: "Delegate"
+        needs:
+          - failing-tests
+          - slice
+        with:
+          backend: "claude"
+          model: "opus"
+          effort: "low"
+          prompt: "Read the slices and their failing tests, then report the signals that choose who implements them, each with evidence pointing at the brief or an acceptance criterion.\n\nThe slices: {{results.slice-at-layer-boundary}}\nThe failing tests: {{results.write-failing-tests}}"
+          outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"objective_clear\",\"area_known\",\"pattern_known\",\"procedure_complete\",\"solution_uncertain\",\"cause_uncertain\",\"human_decision\",\"technical_choice\",\"sensitive_areas\",\"evidence\",\"reason\"],\"properties\":{\"objective_clear\":{\"type\":\"boolean\"},\"area_known\":{\"type\":\"boolean\"},\"pattern_known\":{\"type\":\"boolean\"},\"procedure_complete\":{\"type\":\"boolean\"},\"solution_uncertain\":{\"type\":\"boolean\"},\"cause_uncertain\":{\"type\":\"boolean\"},\"human_decision\":{\"type\":\"boolean\"},\"technical_choice\":{\"type\":\"string\",\"enum\":[\"none\",\"bounded\",\"open\"]},\"sensitive_areas\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"auth\",\"shared_state\",\"store\",\"security\",\"persistence\"]}},\"evidence\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"signal\",\"source_ref\",\"detail\"],\"properties\":{\"signal\":{\"type\":\"string\"},\"source_ref\":{\"type\":\"string\"},\"detail\":{\"type\":\"string\"}}}},\"reason\":{\"type\":\"string\"}}}"
+          continueSession: true
+        layout:
+          x: 780
+          y: 60
+          w: 180
+          h: 64
+      capability-rung:
+        uses: router@v1
+        name: "Capability rung"
+        needs:
+          - delegate
+        with:
+          cases:
+            - name: "gabriel"
+              expression: "(value.procedure_complete && value.technical_choice != \"none\") || (value.solution_uncertain && value.technical_choice == \"bounded\") || value.human_decision || !value.objective_clear"
+            - name: "solver"
+              expression: "size(value.sensitive_areas) > 0 || value.solution_uncertain || value.cause_uncertain || value.technical_choice == \"open\" || !value.area_known || (!value.pattern_known && !value.procedure_complete)"
+            - name: "mechanic"
+              expression: "value.procedure_complete"
+        layout:
+          x: 780
+          y: 170
+          w: 180
+          h: 64
+      mechanic-implements:
+        uses: loop@v1
+        name: "Mechanic implements"
+        needs:
+          - capability-rung.mechanic
+        with:
+          maxIterations: 4
+          untilNode: "mechanic-gates"
+          untilPort: "passed"
+          waitForAny: true
+        layout:
+          x: 760
+          y: 290
+          w: 440
+          h: 210
+        children:
+          mechanic-gates:
+            uses: command@v1
+            name: "Mechanic gates"
+            with:
+              command: "make test && make verify"
+            layout:
+              x: 20
+              y: 50
+              w: 180
+              h: 64
+          mechanic:
+            uses: agent@v1
+            name: "Mechanic"
+            needs:
+              - mechanic-gates.failed
+            with:
+              backend: "claude"
+              model: "haiku"
+              effort: "medium"
+              prompt: "You are the mechanic implementing the story in {{workspace.path}}. The story's issue number is in $(git rev-parse --git-common-dir)/mega-agents-story; read the story, its comments and the slicing brief with gh issue view. Make the failing acceptance tests pass without modifying them, keep every quality gate green, stay out of CI, quality and deployment configuration, and never commit or push. When a test contradicts the brief or its layer, say so in objection instead of working around it.\n\nWhat the gates reported:\n{{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"changed_files\",\"summary\",\"objection\"],\"properties\":{\"changed_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"},\"objection\":{\"type\":\"string\"}}}"
+              continueSession: true
+            layout:
+              x: 240
+              y: 130
+              w: 180
+              h: 64
+      builder-implements:
+        uses: loop@v1
+        name: "Builder implements"
+        needs:
+          - capability-rung.default
+          - mechanic-implements.exhausted
+        with:
+          maxIterations: 4
+          untilNode: "builder-gates"
+          untilPort: "passed"
+          waitForAny: true
+        layout:
+          x: 760
+          y: 530
+          w: 440
+          h: 210
+        children:
+          builder-gates:
+            uses: command@v1
+            name: "Builder gates"
+            with:
+              command: "make test && make verify"
+            layout:
+              x: 20
+              y: 50
+              w: 180
+              h: 64
+          builder:
+            uses: agent@v1
+            name: "Builder"
+            needs:
+              - builder-gates.failed
+            with:
+              backend: "claude"
+              model: "opus"
+              effort: "low"
+              prompt: "You are the builder implementing the story in {{workspace.path}}. The story's issue number is in $(git rev-parse --git-common-dir)/mega-agents-story; read the story, its comments and the slicing brief with gh issue view. Make the failing acceptance tests pass without modifying them, keep every quality gate green, stay out of CI, quality and deployment configuration, and never commit or push. When a test contradicts the brief or its layer, say so in objection instead of working around it.\n\nWhat the gates reported:\n{{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"changed_files\",\"summary\",\"objection\"],\"properties\":{\"changed_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"},\"objection\":{\"type\":\"string\"}}}"
+              continueSession: true
+            layout:
+              x: 240
+              y: 130
+              w: 180
+              h: 64
+      solver-implements:
+        uses: loop@v1
+        name: "Solver implements"
+        needs:
+          - capability-rung.solver
+          - builder-implements.exhausted
+        with:
+          maxIterations: 4
+          untilNode: "solver-gates"
+          untilPort: "passed"
+          waitForAny: true
+        layout:
+          x: 760
+          y: 770
+          w: 440
+          h: 210
+        children:
+          solver-gates:
+            uses: command@v1
+            name: "Solver gates"
+            with:
+              command: "make test && make verify"
+            layout:
+              x: 20
+              y: 50
+              w: 180
+              h: 64
+          solver:
+            uses: agent@v1
+            name: "Solver"
+            needs:
+              - solver-gates.failed
+            with:
+              backend: "claude"
+              model: "opus"
+              effort: "high"
+              prompt: "You are the solver implementing the story in {{workspace.path}}. The story's issue number is in $(git rev-parse --git-common-dir)/mega-agents-story; read the story, its comments and the slicing brief with gh issue view. Make the failing acceptance tests pass without modifying them, keep every quality gate green, stay out of CI, quality and deployment configuration, and never commit or push. When a test contradicts the brief or its layer, say so in objection instead of working around it.\n\nWhat the gates reported:\n{{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"changed_files\",\"summary\",\"objection\"],\"properties\":{\"changed_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"},\"objection\":{\"type\":\"string\"}}}"
+              continueSession: true
+            layout:
+              x: 240
+              y: 130
+              w: 180
+              h: 64
+      final-barrier:
+        uses: command@v1
+        name: "Final barrier"
+        needs:
+          - mechanic-implements.done
+          - builder-implements.done
+          - solver-implements.done
+        with:
+          command: "make verify"
+          waitForAny: true
+        layout:
+          x: 1260
+          y: 60
+          w: 180
+          h: 64
+      review-rounds:
+        uses: loop@v1
+        name: "Review rounds"
+        needs:
+          - open-pull-request
+        with:
+          maxIterations: 3
+          untilNode: "verdict"
+          untilPort: "merge"
+        layout:
+          x: 1240
+          y: 180
+          w: 460
+          h: 330
+        children:
+          reviewer:
+            uses: agent@v1
+            name: "Reviewer"
+            with:
+              backend: "claude"
+              model: "opus"
+              effort: "medium"
+              prompt: "Review the change in {{workspace.path}} (git diff {{workspace.base}}...HEAD) against the repository's guidelines, read-only. Answer merge, or fix with findings that each name a file in the diff, a line, a category and the required fix.\n\nThe pull request: {{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"verdict\",\"findings\"],\"properties\":{\"verdict\":{\"type\":\"string\",\"enum\":[\"merge\",\"fix\"]},\"findings\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"file\",\"line\",\"category\",\"required_fix\"],\"properties\":{\"file\":{\"type\":\"string\"},\"line\":{\"type\":\"integer\",\"minimum\":1},\"category\":{\"type\":\"string\",\"enum\":[\"correctness\",\"security\",\"data-loss\",\"concurrency\",\"contract\",\"regression-coverage\",\"threshold-policy\"]},\"required_fix\":{\"type\":\"string\"}}}}}}"
+            layout:
+              x: 20
+              y: 50
+              w: 180
+              h: 64
+          verdict:
+            uses: router@v1
+            name: "Verdict"
+            needs:
+              - reviewer
+            with:
+              cases:
+                - name: "merge"
+                  expression: "value.verdict == \"merge\""
+            layout:
+              x: 20
+              y: 160
+              w: 180
+              h: 64
+          review-fixer:
+            uses: agent@v1
+            name: "Review fixer"
+            needs:
+              - verdict.default
+            with:
+              backend: "claude"
+              model: "opus"
+              effort: "low"
+              prompt: "Address the review findings in {{workspace.path}} with the smallest correct change, keep the acceptance tests unmodified and every gate green, and do not commit.\n\nThe review:\n{{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"changed_files\",\"summary\",\"objection\"],\"properties\":{\"changed_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"},\"objection\":{\"type\":\"string\"}}}"
+            layout:
+              x: 250
+              y: 160
+              w: 180
+              h: 64
+          push-review-fixes:
+            uses: command@v1
+            name: "Push review fixes"
+            needs:
+              - review-fixer
+            with:
+              command: "make verify && git add -A && git commit -m \"fix: address review findings\" && git push"
+            layout:
+              x: 250
+              y: 250
+              w: 180
+              h: 64
+      ci-fix-rounds:
+        uses: loop@v1
+        name: "CI fix rounds"
+        needs:
+          - review-rounds.done
+        with:
+          maxIterations: 3
+          untilNode: "required-checks"
+          untilPort: "passed"
+        layout:
+          x: 1240
+          y: 540
+          w: 440
+          h: 210
+        children:
+          required-checks:
+            uses: command@v1
+            name: "Required checks"
+            with:
+              command: "gh pr checks --watch --required --fail-fast"
+            layout:
+              x: 20
+              y: 50
+              w: 180
+              h: 64
+          ci-fixer:
+            uses: agent@v1
+            name: "CI fixer"
+            needs:
+              - required-checks.failed
+            with:
+              backend: "claude"
+              model: "opus"
+              effort: "low"
+              prompt: "The pull request's required checks failed. Read the failing run's log (gh run list --branch {{workspace.branch}} --limit 1, then gh run view <id> --log-failed), fix the cause in {{workspace.path}} without weakening any check, then commit and push.\n\nThe checks reported:\n{{result}}"
+              outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"changed_files\",\"summary\",\"objection\"],\"properties\":{\"changed_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"},\"objection\":{\"type\":\"string\"}}}"
+            layout:
+              x: 240
+              y: 130
+              w: 180
+              h: 64
+      merge:
+        uses: command@v1
+        name: "Merge"
+        needs:
+          - ci-fix-rounds.done
+        with:
+          command: "if git diff --name-only \"$MEGA_AGENTS_WORKSPACE_BASE\"...HEAD | grep -q \"^workflow/\"; then echo \"The change touches the development flow driver; Gabriel merges it\"; exit 1; fi; gh pr merge --auto --merge"
+        layout:
+          x: 1260
+          y: 790
+          w: 180
+          h: 64
+      qa-deploy:
+        uses: command@v1
+        name: "QA deploy"
+        needs:
+          - merge.passed
+        with:
+          command: "until [ \"$(gh pr view --json state --jq .state)\" = MERGED ]; do sleep 30; done; make deploy-qa"
+        layout:
+          x: 1760
+          y: 60
+          w: 180
+          h: 64
+      main-ci:
+        uses: command@v1
+        name: "Main CI green"
+        needs:
+          - qa-deploy.passed
+        with:
+          command: "sha=$(gh pr view --json mergeCommit --jq .mergeCommit.oid); run=$(gh run list --commit \"$sha\" --event push --limit 1 --json databaseId --jq \".[0].databaseId\"); [ -n \"$run\" ] || { echo \"Flaky: main has no push run for the merge\"; exit 1; }; gh run watch \"$run\" --exit-status || { echo \"Flaky: main CI is not green\"; exit 1; }"
+        layout:
+          x: 1760
+          y: 170
+          w: 180
+          h: 64
+      production-deploy:
+        uses: command@v1
+        name: "Production deploy"
+        needs:
+          - main-ci.passed
+        with:
+          command: "make deploy && make android-release"
+        layout:
+          x: 1760
+          y: 280
+          w: 180
+          h: 64
+      cleanup:
+        uses: command@v1
+        name: "Cleanup"
+        needs:
+          - production-deploy.passed
+          - main-ci.failed
+        with:
+          command: "gh issue edit \"$(cat \"$(git rev-parse --git-common-dir)/mega-agents-story\")\" --remove-label in-progress && gh issue comment \"$(cat \"$(git rev-parse --git-common-dir)/mega-agents-story\")\" --body \"Shipped by the development flow\""
+          waitForAny: true
+        layout:
+          x: 1760
+          y: 390
+          w: 180
+          h: 64
+      hand-to-gabriel:
+        uses: agent@v1
+        name: "Hand to Gabriel"
+        needs:
+          - gabriels-call.gabriel
+          - capability-rung.gabriel
+          - review-rounds.exhausted
+          - ci-fix-rounds.exhausted
+          - merge.failed
+          - qa-deploy.failed
+          - production-deploy.failed
+        with:
+          backend: "claude"
+          model: "haiku"
+          effort: "medium"
+          prompt: "This story needs Gabriel. The story's issue number is in $(git rev-parse --git-common-dir)/mega-agents-story; read the story, its comments and the slicing brief with gh issue view. Add the needs-gabriel label and assign the story to the repository owner with gh issue edit, then comment on it with the question, the options (always including \"Do nothing\") and the recommendation, or with what stopped the flow. Change nothing else.\n\nWhat stopped here:\n{{result}}"
+          waitForAny: true
+        layout:
+          x: 1760
+          y: 540
+          w: 180
+          h: 64
+      mark-blocked:
+        uses: command@v1
+        name: "Mark blocked"
+        needs:
+          - failing-tests.exhausted
+          - solver-implements.exhausted
+        with:
+          command: "gh issue edit \"$(cat \"$(git rev-parse --git-common-dir)/mega-agents-story\")\" --add-label blocked; echo \"CAPACITY_EXHAUSTED: the story is blocked\"; exit 1"
+          waitForAny: true
+        layout:
+          x: 1760
+          y: 650
+          w: 180
+          h: 64

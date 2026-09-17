@@ -202,3 +202,32 @@ func TestARetryReusesALoopThatEnded(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAgentInALoopFedByNoAgentContinuesItsOwnConversation(t *testing.T) {
+	bin := fakeClaude(t)
+	gate := `n=$(( $(cat runs 2>/dev/null || echo 0) + 1 )); echo $n > runs; [ $n -ge 3 ]`
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a0", "type": "agent", "name": "Start", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Go"},
+		{"id": "c0", "type": "command", "name": "Prepare", "parentId": "p1", "command": "true"},
+		{"id": "l1", "type": "loop", "name": "Implement", "parentId": "p1", "maxIterations": 3, "untilNode": "c1", "untilPort": "passed"},
+		{"id": "c1", "type": "command", "name": "Gate", "parentId": "l1", "command": %q},
+		{"id": "f1", "type": "agent", "name": "Implementer", "parentId": "l1", "backend": "claude", "prompt": "Fix {{result}}", "continueSession": true}
+	], "edges": [
+		{"id": "e0", "from": "a0", "to": "c0"},
+		{"id": "e1", "from": "c0", "to": "l1"},
+		{"id": "e2", "from": "c1", "to": "f1", "fromPort": "failed"}
+	]}`, t.TempDir(), gate)
+
+	record := finishedRunOnly(t, body)
+
+	if record.Status != engine.Succeeded {
+		t.Fatalf("record = %+v", record)
+	}
+	if _, err := os.Stat(filepath.Join(bin, "resume-2")); err == nil {
+		t.Fatal("the first implementation turn resumed a conversation")
+	}
+	if recorded(t, bin, "resume-3") != "session-2" {
+		t.Fatalf("the second turn resumed %q, want its own session-2", recorded(t, bin, "resume-3"))
+	}
+}

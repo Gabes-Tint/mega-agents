@@ -55,7 +55,12 @@ The same binary runs workflows headless and inspects recorded runs:
 The editor's **Save** writes the workflow as YAML to
 `$MEGA_AGENTS_HOME/workflows/<name>.yaml`; **Open…** loads one back and
 **Import YAML** loads any exported file, and **Templates…** starts from a
-ready-made workflow: issue to pull request, review and route, or gate and fix. The graph in progress is also kept in
+ready-made workflow: issue to pull request, review and route, gate and fix,
+or the **Fit_ development flow**, the fitflow driver drawn as blocks: pick a
+story, whose call, slice, failing tests in a bounded loop, the capability
+rung, implementation loops that escalate mechanic → builder → solver, the
+pull request with review and CI fix rounds, merge, deploy and cleanup, with
+every stop handed to Gabriel or marked blocked. The graph in progress is also kept in
 the browser, so reloading the page does not lose it.
 
 As the graph changes, the editor's **Problems** panel lists what to fix
