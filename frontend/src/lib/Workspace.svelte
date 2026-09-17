@@ -74,6 +74,65 @@
     updatedAt: string;
   }
 
+  interface RunSummary {
+    id: string;
+    workflow: string;
+    status: string;
+    startedAt: string;
+  }
+
+  let historyDialog = $state(false);
+  let pastRuns = $state<RunSummary[] | null>(null);
+
+  async function listRuns(): Promise<void> {
+    pastRuns = null;
+    try {
+      const response = await fetch("/api/runs");
+      pastRuns = response.ok ? ((await response.json()) as RunSummary[]) : [];
+    } catch {
+      pastRuns = [];
+    }
+  }
+
+  async function openRun(id: string): Promise<void> {
+    historyDialog = false;
+    runError = "";
+    try {
+      const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+      if (!response.ok) {
+        runError = (await response.text()).trim();
+        return;
+      }
+      const opened = (await response.json()) as RunResult;
+      showResult(opened);
+      if (opened.status === "running" && !running) {
+        running = true;
+        await follow(opened);
+        running = false;
+      }
+    } catch {
+      runError = "Cannot reach the backend";
+    }
+  }
+
+  async function cancelRun(): Promise<void> {
+    const id = runResult?.id;
+    if (!id) return;
+    try {
+      const response = await fetch(
+        `/api/runs/${encodeURIComponent(id)}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
+      if (!response.ok) runError = (await response.text()).trim();
+    } catch {
+      runError = "Cannot reach the backend";
+    }
+  }
+
   let fileStatus = $state("");
   let openDialog = $state(false);
   let savedWorkflows = $state<WorkflowSummary[] | null>(null);
@@ -275,6 +334,20 @@
       >
         {running ? "Running…" : "Run flow"}
       </button>
+      {#if running && runResult?.id && runResult.status === "running"}
+        <button type="button" onclick={() => void cancelRun()}>
+          Cancel run
+        </button>
+      {/if}
+      <button
+        type="button"
+        onclick={() => {
+          historyDialog = true;
+          void listRuns();
+        }}
+      >
+        Runs…
+      </button>
       <button type="button" onclick={() => void downloadYaml()}>
         Download YAML
       </button>
@@ -372,6 +445,30 @@
           Logs: {loggedStep?.name ?? ""}
         </Dialog.Title>
         <pre class="log-text">{logText || "Loading…"}</pre>
+        <Dialog.Close class="close-button">Close</Dialog.Close>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
+  <Dialog.Root bind:open={historyDialog}>
+    <Dialog.Portal>
+      <Dialog.Overlay class="backdrop" />
+      <Dialog.Content class="log-viewer">
+        <Dialog.Title class="dialog-title">Run history</Dialog.Title>
+        {#if pastRuns === null}
+          <p>Loading…</p>
+        {:else if pastRuns.length === 0}
+          <p>No runs recorded yet.</p>
+        {:else}
+          <ul class="saved-workflows">
+            {#each pastRuns as pastRun (pastRun.id)}
+              <li>
+                <button type="button" onclick={() => void openRun(pastRun.id)}
+                  >{pastRun.workflow} · {pastRun.status} · {pastRun.startedAt}</button
+                >
+              </li>
+            {/each}
+          </ul>
+        {/if}
         <Dialog.Close class="close-button">Close</Dialog.Close>
       </Dialog.Content>
     </Dialog.Portal>

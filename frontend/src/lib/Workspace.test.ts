@@ -2311,4 +2311,97 @@ describe("graph builder workspace", () => {
     expect(screen.getByLabelText("Workflow name")).toHaveValue("draft");
     localStorage.clear();
   });
+
+  test("cancels the run in progress", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    let cancelled = false;
+    const calls = fakeBackend({
+      "POST /api/runs": [record("running", [step("running")])],
+      "GET /api/runs/run-1": [
+        () =>
+          Response.json({
+            id: "run-1",
+            status: cancelled ? "cancelled" : "running",
+            steps: [step(cancelled ? "failed" : "running")],
+          }),
+      ],
+      "POST /api/runs/run-1/cancel": [
+        () => {
+          cancelled = true;
+          return Response.json(
+            { id: "run-1", status: "cancelling" },
+            { status: 202 },
+          );
+        },
+      ],
+    });
+    expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel run" }),
+    );
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run cancelled"));
+    expect(calls).toContain("POST /api/runs/run-1/cancel");
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull(),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("opens a past run from the run history", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "GET /api/runs": [
+        () =>
+          Response.json([
+            {
+              id: "run-7",
+              workflow: "nightly",
+              status: "failed",
+              startedAt: "2026-09-17T01:00:00Z",
+              steps: [],
+            },
+          ]),
+      ],
+      "GET /api/runs/run-7": [
+        () =>
+          Response.json({
+            id: "run-7",
+            workflow: "nightly",
+            status: "failed",
+            steps: [step("failed", { error: "no route to github.com" })],
+          }),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Runs…" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: /nightly · failed/ }),
+    );
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run failed"));
+    expect(result).toHaveTextContent("no route to github.com");
+    expect(
+      screen.getByRole("button", { name: "Logs of GitHub 1" }),
+    ).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("shows when no run has been recorded", async () => {
+    fakeBackend({ "GET /api/runs": [() => Response.json([])] });
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Runs…" }));
+
+    expect(
+      await screen.findByText("No runs recorded yet."),
+    ).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });

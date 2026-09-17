@@ -28,6 +28,9 @@ import (
 // before the run did.
 const Interrupted engine.Status = "interrupted"
 
+// Cancelled marks a run someone stopped.
+const Cancelled engine.Status = "cancelled"
+
 var ErrNotFound = errors.New("not found")
 
 // identifier restricts run and step ids to one safe path segment.

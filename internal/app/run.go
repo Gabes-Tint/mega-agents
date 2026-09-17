@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
@@ -25,6 +26,9 @@ import (
 const runStepTimeout = 2 * time.Minute
 
 const workspacePort = "workspace"
+
+// Cancelled is the status of a run someone stopped.
+const Cancelled = runs.Cancelled
 
 var errNoStartingBlock = errors.New(
 	"flag a GitHub block or an agent as the starting point to run the flow",
@@ -119,6 +123,9 @@ func (service Runs) execute(
 		record.Steps = finished.Steps
 	}
 	record.Status = finished.Status
+	if errors.Is(ctx.Err(), context.Canceled) {
+		record.Status = Cancelled
+	}
 	record.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 	save()
 	return record
@@ -400,6 +407,9 @@ func projectDir(project WorkflowNodeInput) (string, error) {
 }
 
 func registerRunHandler(mux *http.ServeMux, service Runs) {
+	// Cancel functions of the runs this server is executing, by run id.
+	var active sync.Map
+
 	// The editor asks for the repository when a GitHub block lands in a
 	// project, so the field can be prefilled from the project's clone.
 	mux.HandleFunc("GET /api/git/repository", func(w http.ResponseWriter, r *http.Request) {
@@ -437,8 +447,33 @@ func registerRunHandler(mux *http.ServeMux, service Runs) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		go execute(context.WithoutCancel(r.Context()), nil)
+		ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+		active.Store(record.ID, cancel)
+		go func() {
+			defer active.Delete(record.ID)
+			defer cancel()
+			execute(ctx, nil)
+		}()
 		writeJSON(w, http.StatusAccepted, record)
+	})
+
+	mux.HandleFunc("POST /api/runs/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if mediaType != "application/json" {
+			http.Error(w, "cancelling a run requires a JSON request", http.StatusUnsupportedMediaType)
+			return
+		}
+		id := r.PathValue("id")
+		if cancel, running := active.Load(id); running {
+			cancel.(context.CancelFunc)()
+			writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "status": "cancelling"})
+			return
+		}
+		if _, err := service.Store.Load(id); err != nil {
+			storeError(w, "run", err)
+			return
+		}
+		http.Error(w, "run "+id+" is not running here", http.StatusConflict)
 	})
 
 	mux.HandleFunc("GET /api/runs", func(w http.ResponseWriter, _ *http.Request) {

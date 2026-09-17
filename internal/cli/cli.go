@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/Gabes-Tint/mega-agents/internal/app"
@@ -25,6 +27,9 @@ type Env struct {
 	Stderr io.Writer
 	// Serve starts the editor's web server and blocks while it runs.
 	Serve func() error
+	// Context bounds a run; nil stops it on an interrupt (Ctrl-C), which
+	// records the run as cancelled.
+	Context context.Context
 }
 
 const usage = `Usage: mega-agents [command]
@@ -100,7 +105,13 @@ func runWorkflow(args []string, env Env) int {
 	}
 	fmt.Fprintf(env.Stdout, "Run %s started %s\n", record.ID, record.Workflow)
 	reported := map[string]engine.Status{}
-	finished := execute(context.Background(), func(current runs.Record) {
+	ctx := env.Context
+	if ctx == nil {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
+	finished := execute(ctx, func(current runs.Record) {
 		for _, step := range current.Steps {
 			if reported[step.TaskID] == step.Status {
 				continue

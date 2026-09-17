@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/app"
 	"github.com/Gabes-Tint/mega-agents/internal/gitops"
@@ -339,5 +341,28 @@ func TestWorkflowsWithNothingSaved(t *testing.T) {
 
 	if got := run(t, "workflows"); got.code != 0 || !strings.Contains(got.stdout, "No workflows saved yet") {
 		t.Fatalf("got %d %q", got.code, got.stdout)
+	}
+}
+
+func TestRunIsRecordedAsCancelledWhenInterrupted(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nsleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path := writeWorkflow(t, "slow.json", fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a1", "type": "agent", "name": "Slow", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Think"}
+	]}`, t.TempDir()))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(300*time.Millisecond, cancel)
+	var stdout, stderr bytes.Buffer
+
+	code := Main([]string{"run", path}, Env{Stdout: &stdout, Stderr: &stderr, Context: ctx})
+
+	if code != 1 || !strings.Contains(stdout.String(), "cancelled") {
+		t.Fatalf("code = %d\n%s\n%s", code, stdout.String(), stderr.String())
 	}
 }

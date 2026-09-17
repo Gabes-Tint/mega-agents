@@ -57,7 +57,10 @@ the browser, so reloading the page does not lose it.
 Every run, whether started from the editor or the command line, keeps its
 record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
 `~/.mega-agents/runs`). In the editor, select a block after a run and choose
-**Show logs**, or use **Logs** beside a step in the run result.
+**Show logs**, or use **Logs** beside a step in the run result. **Cancel run**
+stops the run in progress (its agent CLIs included), **Runs…** reopens any
+recorded run on the canvas, and Ctrl-C stops a command-line run; either way
+the run is recorded as cancelled.
 
 ## Blocks that run
 
