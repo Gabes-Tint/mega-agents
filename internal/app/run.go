@@ -17,13 +17,14 @@ import (
 const runStepTimeout = 2 * time.Minute
 
 type RunStep struct {
-	NodeID string `json:"nodeId"`
-	Name   string `json:"name"`
-	Action string `json:"action"`
-	Status string `json:"status"`
-	Remote string `json:"remote,omitempty"`
-	Output string `json:"output,omitempty"`
-	Error  string `json:"error,omitempty"`
+	NodeID     string `json:"nodeId"`
+	Name       string `json:"name"`
+	Action     string `json:"action"`
+	Status     string `json:"status"`
+	Repository string `json:"repository,omitempty"`
+	Remote     string `json:"remote,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type RunResponse struct {
@@ -37,7 +38,8 @@ var errNoStartingGitHub = errors.New(
 
 // RunWorkflow executes the flow's runnable starting points. In this first
 // slice only a GitHub block flagged as a starting point runs, and its action
-// is a fetch inside the path of the project that contains it. Downstream
+// is a fetch inside the path of the project that contains it. An empty
+// repository is loaded from that project's GitHub remote. Downstream
 // nodes are not executed yet.
 func RunWorkflow(ctx context.Context, request WorkflowRequest) (RunResponse, error) {
 	nodeByID, err := validateGraph(request)
@@ -67,9 +69,6 @@ func fetchGitHubBlock(ctx context.Context, node WorkflowNodeInput, project Workf
 	case !node.Authenticated:
 		step.Error = `Check "Already authenticated" on this GitHub block; token authentication is not supported yet`
 		return step
-	case node.Repository == "":
-		step.Error = "Set the repository on this GitHub block"
-		return step
 	case project.Path == "":
 		step.Error = "Set the path on the project that contains this GitHub block"
 		return step
@@ -85,12 +84,30 @@ func fetchGitHubBlock(ctx context.Context, node WorkflowNodeInput, project Workf
 		return step
 	}
 	step.Status = "succeeded"
+	step.Repository = result.Repository
 	step.Remote = result.Remote
 	step.Output = result.Output
 	return step
 }
 
 func registerRunHandler(mux *http.ServeMux) {
+	// The editor asks for the repository when a GitHub block lands in a
+	// project, so the field can be prefilled from the project's clone.
+	mux.HandleFunc("GET /api/git/repository", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Query().Get("path")
+		if !filepath.IsAbs(path) {
+			http.Error(w, "the project path must be absolute", http.StatusNotFound)
+			return
+		}
+		detected, err := gitops.DetectGitHubRepository(r.Context(), path)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(detected)
+	})
+
 	mux.HandleFunc("POST /api/runs", func(w http.ResponseWriter, r *http.Request) {
 		// Runs execute local commands, so only JSON is accepted: browsers must
 		// preflight it cross-origin, and this server never approves a preflight.

@@ -189,6 +189,131 @@ describe("graph builder workspace", () => {
     ).toBeChecked();
   });
 
+  function repositoryLookups(
+    answer: (path: string) => Response | Promise<Response>,
+  ) {
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = new URL(input, "http://localhost");
+      return answer(url.searchParams.get("path") ?? "");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  async function setSelectedPath(path: string): Promise<void> {
+    await fireEvent.input(screen.getByLabelText("Path"), {
+      target: { value: path },
+    });
+  }
+
+  test("loads the repository from the project's clone when a GitHub block is dropped into it", async () => {
+    const fetchMock = repositoryLookups(() =>
+      Response.json({ repository: "acme/api", remote: "origin" }),
+    );
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await setSelectedPath("/home/user/api");
+
+    await dropComponent("GitHub", 410, 410);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Repository")).toHaveValue("acme/api"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/git/repository?path=%2Fhome%2Fuser%2Fapi",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("loads the repository when a GitHub block moves into another project", async () => {
+    repositoryLookups((path) =>
+      path === "/home/user/web"
+        ? Response.json({ repository: "acme/web", remote: "origin" })
+        : new Response("not a Git repository", { status: 404 }),
+    );
+    render(Workspace);
+    await dropComponent("Project");
+    await dropComponent("GitHub", 100, 50);
+    const github = screen.getByRole("button", { name: "GitHub 1" });
+    await dropComponent("Project", 400, 400);
+    await setSelectedPath("/home/user/web");
+
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(github, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 430, clientY: 420 });
+    await fireEvent.click(github);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Repository")).toHaveValue("acme/web"),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("keeps a repository typed before the project's clone answers", async () => {
+    let answer: (response: Response) => void = () => {};
+    repositoryLookups(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await setSelectedPath("/home/user/api");
+    await dropComponent("GitHub", 410, 410);
+
+    await fireEvent.input(screen.getByLabelText("Repository"), {
+      target: { value: "acme/typed" },
+    });
+    answer(Response.json({ repository: "acme/api", remote: "origin" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByLabelText("Repository")).toHaveValue("acme/typed");
+    vi.unstubAllGlobals();
+  });
+
+  test("leaves the repository empty when the project is not a GitHub clone", async () => {
+    const fetchMock = repositoryLookups(
+      () => new Response("not a Git repository", { status: 404 }),
+    );
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await setSelectedPath("/home/user/notes");
+
+    await dropComponent("GitHub", 410, 410);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.getByLabelText("Repository")).toHaveValue("");
+    vi.unstubAllGlobals();
+  });
+
+  test("leaves the repository empty when the backend is unreachable", async () => {
+    const fetchMock = vi.fn(async () => Promise.reject(new Error("offline")));
+    vi.stubGlobal("fetch", fetchMock);
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await setSelectedPath("/home/user/api");
+
+    await dropComponent("GitHub", 410, 410);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.getByLabelText("Repository")).toHaveValue("");
+    vi.unstubAllGlobals();
+  });
+
+  test("does not look up a repository for a project without a path", async () => {
+    const fetchMock = repositoryLookups(() =>
+      Response.json({ repository: "acme/api", remote: "origin" }),
+    );
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+
+    await dropComponent("GitHub", 410, 410);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   async function buildRunnableFlow(): Promise<void> {
     await dropComponent("Project", 400, 400);
     await fireEvent.input(screen.getByLabelText("Path"), {
@@ -214,6 +339,7 @@ describe("graph builder workspace", () => {
             name: "GitHub 1",
             action: "fetch",
             status: "succeeded",
+            repository: "acme/api",
             remote: "origin",
             output: "From github.com:acme/api",
           },
@@ -229,6 +355,7 @@ describe("graph builder workspace", () => {
     const result = screen.getByRole("region", { name: "Run result" });
     await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
     expect(result).toHaveTextContent("GitHub 1: fetch succeeded");
+    expect(result).toHaveTextContent("Repository: acme/api");
     expect(result).toHaveTextContent("Remote: origin");
     expect(result).toHaveTextContent("From github.com:acme/api");
     const call = fetchMock.mock.calls.at(-1) as unknown as

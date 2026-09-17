@@ -9,6 +9,7 @@
     name: string;
     action: string;
     status: "succeeded" | "failed";
+    repository?: string;
     remote?: string;
     output?: string;
     error?: string;
@@ -117,6 +118,9 @@
                 {step.name}: {step.action}
                 {step.status}
               </strong>
+              {#if step.repository}
+                <span>Repository: {step.repository}</span>
+              {/if}
               {#if step.remote}
                 <span>Remote: {step.remote}</span>
               {/if}

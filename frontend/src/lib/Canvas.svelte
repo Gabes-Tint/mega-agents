@@ -184,6 +184,34 @@
     );
   }
 
+  // A GitHub block landing in a project whose folder is a clone gets its
+  // repository from the clone's GitHub remote. Only an empty field is filled,
+  // and only while the block still sits in that project, so a value typed
+  // while the lookup was in flight wins. Lookup failures leave the field for
+  // the user to fill in.
+  async function loadRepositoryFromProject(id: string): Promise<void> {
+    const node = nodeById(id);
+    const project = node?.parentId ? nodeById(node.parentId) : undefined;
+    if (node?.type !== "github" || node.repository || !project?.path) return;
+    try {
+      const response = await fetch(
+        `/api/git/repository?path=${encodeURIComponent(project.path)}`,
+      );
+      if (!response.ok) return;
+      const body = (await response.json()) as { repository?: unknown };
+      const current = nodeById(id);
+      if (
+        typeof body.repository === "string" &&
+        current &&
+        !current.repository &&
+        current.parentId === project.id
+      )
+        graph.setRepository(id, body.repository);
+    } catch {
+      // The field stays empty; a run then loads it from the project itself.
+    }
+  }
+
   function endResize() {
     resizeState = null;
   }
@@ -208,12 +236,13 @@
       const container = graph.containerAt(contentX, contentY);
       if (container && canHostChild(container.type, data)) {
         const origin = graph.absolutePosition(container);
-        graph.addNode(
+        const node = graph.addNode(
           data,
           contentX - origin.x,
           contentY - origin.y,
           container.id,
         );
+        void loadRepositoryFromProject(node.id);
         return;
       }
       // The containment matrix decides: a block whose only legal placement
@@ -247,6 +276,7 @@
             contentX - grab.dx,
             contentY - grab.dy,
           );
+          void loadRepositoryFromProject(id);
           return;
         }
         graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
@@ -275,6 +305,7 @@
           contentX - grab.dx,
           contentY - grab.dy,
         );
+        void loadRepositoryFromProject(id);
       } else if (container) {
         // An incompatible target container keeps the box in its own parent,
         // repositioned under the pointer.

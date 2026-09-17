@@ -110,10 +110,76 @@ func TestFetchReportsGitFailures(t *testing.T) {
 	}
 }
 
+func TestFetchWithoutARepositoryUsesTheProjectsGitHubRemote(t *testing.T) {
+	clone, seed := githubClone(t, "git@github.com:Acme/API.git")
+	runGit(t, seed, "commit", "--quiet", "--allow-empty", "-m", "second")
+	pushed := runGit(t, seed, "rev-parse", "HEAD")
+	runGit(t, seed, "push", "--quiet", filepath.Join(filepath.Dir(seed), "remote.git"), "HEAD:refs/heads/main")
+
+	result, err := Fetch(context.Background(), clone, "  ")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if result.Repository != "Acme/API" || result.Remote != "origin" {
+		t.Fatalf("result = %+v, want Acme/API as written in origin", result)
+	}
+	if got := runGit(t, clone, "rev-parse", "refs/remotes/origin/main"); got != pushed {
+		t.Fatalf("origin/main = %s, want %s", got, pushed)
+	}
+}
+
+func TestFetchWithoutARepositoryFailsWhenTheProjectHasNoGitHubRemote(t *testing.T) {
+	clone, _ := githubClone(t, "https://gitlab.com/acme/api.git")
+
+	_, err := Fetch(context.Background(), clone, "")
+	if err == nil || !strings.Contains(err.Error(), "no GitHub remote") {
+		t.Fatalf("err = %v, want a no-GitHub-remote error", err)
+	}
+}
+
+func TestDetectGitHubRepositoryPrefersOrigin(t *testing.T) {
+	clone, _ := githubClone(t, "https://github.com/acme/api.git")
+	runGit(t, clone, "remote", "add", "fork", "git@github.com:someone/api.git")
+
+	detected, err := DetectGitHubRepository(context.Background(), clone)
+	if err != nil || detected.Repository != "acme/api" || detected.Remote != "origin" {
+		t.Fatalf("detected = %+v, %v; want acme/api from origin", detected, err)
+	}
+}
+
+func TestDetectGitHubRepositoryUsesTheOnlyGitHubRemote(t *testing.T) {
+	clone, _ := githubClone(t, "https://gitlab.com/acme/api.git")
+	runGit(t, clone, "remote", "add", "upstream", "git@github.com:acme/api.git")
+	runGit(t, clone, "remote", "add", "mirror", "https://github.com/ACME/api")
+
+	detected, err := DetectGitHubRepository(context.Background(), clone)
+	if err != nil || detected.Repository != "ACME/api" || detected.Remote != "mirror" {
+		t.Fatalf("detected = %+v, %v; want acme/api from the first matching remote", detected, err)
+	}
+}
+
+func TestDetectGitHubRepositoryRejectsAmbiguousRemotes(t *testing.T) {
+	clone, _ := githubClone(t, "https://gitlab.com/acme/api.git")
+	runGit(t, clone, "remote", "add", "one", "git@github.com:acme/api.git")
+	runGit(t, clone, "remote", "add", "two", "git@github.com:acme/web.git")
+
+	_, err := DetectGitHubRepository(context.Background(), clone)
+	if err == nil || !strings.Contains(err.Error(), "several GitHub repositories") {
+		t.Fatalf("err = %v, want an ambiguity error", err)
+	}
+}
+
+func TestDetectGitHubRepositoryRejectsAFolderThatIsNotAClone(t *testing.T) {
+	_, err := DetectGitHubRepository(context.Background(), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "not a Git repository") {
+		t.Fatalf("err = %v, want a not-a-Git-repository error", err)
+	}
+}
+
 func TestParseGitHubRepository(t *testing.T) {
 	valid := map[string]string{
 		"acme/api":                           "acme/api",
-		" Acme/API ":                         "acme/api",
+		" Acme/API ":                         "Acme/API",
 		"github.com/acme/api":                "acme/api",
 		"https://github.com/acme/api":        "acme/api",
 		"https://github.com/acme/api.git":    "acme/api",
