@@ -54,6 +54,27 @@ type Task struct {
 	// Run does the work, writing what it does to log: the commands it runs
 	// and their output, for whoever inspects the step afterwards.
 	Run func(ctx context.Context, inputs []Input, log io.Writer) (Result, error)
+	// Loop, when set, makes the task repeat a nested plan instead of Run.
+	Loop *Loop
+}
+
+// Loop repeats Body, a plan of its own, until the body task Until names
+// takes its port, at most MaxIterations times. Body tasks may need each other
+// and the tasks the loop itself needs, whose outputs every iteration
+// receives afresh. Finish turns the outcome into the loop task's result.
+type Loop struct {
+	Body          []Task
+	MaxIterations int
+	Until         Need
+	Finish        func(inputs []Input, outcome LoopOutcome) (Result, error)
+}
+
+// LoopOutcome is how a loop ended: whether the exit port was taken, after
+// how many iterations, and the outputs of the Until task in the last one.
+type LoopOutcome struct {
+	Ended      bool
+	Iterations int
+	Outputs    map[string]any
 }
 
 type Step struct {
@@ -69,6 +90,10 @@ type Step struct {
 	// Outputs are what a succeeded step gave its dependents, kept so a retry
 	// can reuse the step instead of running it again.
 	Outputs map[string]any `json:"outputs,omitempty"`
+	// Loop is the loop a body step belongs to, and Iteration the iteration
+	// the step shows.
+	Loop      string `json:"loop,omitempty"`
+	Iteration int    `json:"iteration,omitempty"`
 }
 
 type Run struct {
@@ -89,6 +114,9 @@ type Options struct {
 	// Parallelism bounds how many tasks run at once; 0 means
 	// DefaultParallelism and 1 runs them one at a time.
 	Parallelism int
+	// Given are outputs of tasks outside the plan that its tasks may need,
+	// as a loop gives its body.
+	Given map[string]map[string]any
 }
 
 // DefaultParallelism is how many independent tasks run at once.
@@ -99,29 +127,41 @@ const DefaultParallelism = 4
 // returns an error only for a plan that cannot run; task failures are
 // recorded on their steps.
 func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
-	if _, err := schedule(tasks); err != nil {
+	if _, err := schedule(tasks, options.Given); err != nil {
 		return Run{}, err
 	}
 	limit := options.Parallelism
 	if limit <= 0 {
 		limit = DefaultParallelism
 	}
-	run := Run{Status: Running, Steps: make([]Step, len(tasks))}
+	// Each task's step, followed by the steps of a loop's body.
+	run := Run{Status: Running}
 	index := make(map[string]int, len(tasks))
 	for i, task := range tasks {
 		index[task.ID] = i
-		run.Steps[i] = Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: Pending}
+	}
+	stepOf := make([]int, len(tasks))
+	for i, task := range tasks {
+		stepOf[i] = len(run.Steps)
+		run.Steps = append(run.Steps, Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: Pending})
+		if task.Loop != nil {
+			for _, body := range task.Loop.Body {
+				run.Steps = append(run.Steps, Step{
+					TaskID: body.ID, Name: body.Name, Kind: body.Kind, Status: Pending, Loop: task.ID,
+				})
+			}
+		}
 	}
 	now := options.Now
 	if now == nil {
 		now = time.Now
 	}
 	execution := &execution{
-		ctx: ctx, tasks: tasks, options: options, run: &run, index: index, now: now,
+		ctx: ctx, tasks: tasks, options: options, run: &run, index: index, stepOf: stepOf, now: now,
 		outputs: make(map[string]map[string]any, len(tasks)),
 		logs:    make([]io.Writer, len(tasks)),
 		settled: make([]bool, len(tasks)), started: make([]bool, len(tasks)),
-		finished: make(chan int),
+		finished: make(chan int), progress: make(chan func()),
 	}
 	execution.notify()
 	running := 0
@@ -144,7 +184,7 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 		if remaining == 0 {
 			break
 		}
-		execution.complete(<-execution.finished)
+		execution.complete(execution.next())
 		running--
 		remaining--
 	}
@@ -159,13 +199,15 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 }
 
 // execution is one run in progress. Only the goroutine running Execute
-// changes the run; tasks report back through finished.
+// changes the run; tasks report back through finished, and loops send the
+// changes to their body's steps through progress.
 type execution struct {
 	ctx      context.Context
 	tasks    []Task
 	options  Options
 	run      *Run
 	index    map[string]int
+	stepOf   []int
 	now      func() time.Time
 	outputs  map[string]map[string]any
 	logs     []io.Writer
@@ -173,7 +215,20 @@ type execution struct {
 	started  []bool
 	results  sync.Map
 	finished chan int
+	progress chan func()
 	begun    []time.Time
+}
+
+// next applies loop progress until a task finishes, and returns that task.
+func (e *execution) next() int {
+	for {
+		select {
+		case apply := <-e.progress:
+			apply()
+		case i := <-e.finished:
+			return i
+		}
+	}
 }
 
 type taskResult struct {
@@ -207,7 +262,7 @@ func (e *execution) log(i int) io.Writer {
 // ready reports whether every task i needs has settled.
 func (e *execution) ready(i int) bool {
 	for _, need := range e.tasks[i].Needs {
-		if !e.settled[e.index[need.TaskID]] {
+		if j, inPlan := e.index[need.TaskID]; inPlan && !e.settled[j] {
 			return false
 		}
 	}
@@ -215,7 +270,7 @@ func (e *execution) ready(i int) bool {
 }
 
 func (e *execution) blocked(i int) string {
-	_, reason := gather(e.tasks[i], e.run.Steps, e.index, e.outputs)
+	_, reason := e.gather(e.tasks[i])
 	if reason == "" && e.ctx.Err() != nil {
 		reason = "the run was cancelled"
 	}
@@ -223,16 +278,22 @@ func (e *execution) blocked(i int) string {
 }
 
 func (e *execution) skip(i int, reason string) {
-	step := &e.run.Steps[i]
+	step := &e.run.Steps[e.stepOf[i]]
 	e.started[i], e.settled[i] = true, true
 	step.Status, step.Error = Skipped, reason
+	if loop := e.tasks[i].Loop; loop != nil {
+		for offset := range loop.Body {
+			body := &e.run.Steps[e.stepOf[i]+1+offset]
+			body.Status, body.Error = Skipped, reason
+		}
+	}
 	fmt.Fprintf(e.log(i), "%s %s skipped: %s\n", Skipped.Emoji(), labelOf(e.tasks[i]), reason)
 	e.notify()
 }
 
 func (e *execution) start(i int) {
-	task, step := e.tasks[i], &e.run.Steps[i]
-	inputs, _ := gather(task, e.run.Steps, e.index, e.outputs)
+	task, step := e.tasks[i], &e.run.Steps[e.stepOf[i]]
+	inputs, _ := e.gather(task)
 	started, startedAt := e.stamp()
 	if e.begun == nil {
 		e.begun = make([]time.Time, len(e.tasks))
@@ -243,6 +304,15 @@ func (e *execution) start(i int) {
 	log := e.log(i)
 	fmt.Fprintf(log, "%s %s started at %s\n", Running.Emoji(), labelOf(task), startedAt)
 	e.notify()
+	if task.Loop != nil {
+		runner := e.loopRunner(i, inputs, log)
+		go func() {
+			result, err := runner.run()
+			e.results.Store(i, taskResult{result: result, err: err})
+			e.finished <- i
+		}()
+		return
+	}
 	go func() {
 		result, err := task.Run(e.ctx, inputs, log)
 		e.results.Store(i, taskResult{result: result, err: err})
@@ -253,7 +323,7 @@ func (e *execution) start(i int) {
 func (e *execution) complete(i int) {
 	value, _ := e.results.LoadAndDelete(i)
 	outcome := value.(taskResult)
-	task, step := e.tasks[i], &e.run.Steps[i]
+	task, step := e.tasks[i], &e.run.Steps[e.stepOf[i]]
 	finished, finishedAt := e.stamp()
 	e.settled[i] = true
 	step.Details, step.FinishedAt = outcome.result.Details, finishedAt
@@ -272,24 +342,29 @@ func (e *execution) complete(i int) {
 }
 
 // gather collects a task's inputs, or explains why it cannot run.
-func gather(task Task, steps []Step, index map[string]int, outputs map[string]map[string]any) ([]Input, string) {
+func (e *execution) gather(task Task) ([]Input, string) {
 	var inputs []Input
 	for _, need := range task.Needs {
-		dependency := steps[index[need.TaskID]]
-		name := dependency.Name
-		if name == "" {
-			name = dependency.TaskID
-		}
-		switch dependency.Status {
-		case Failed:
-			return nil, name + " failed"
-		case Skipped:
-			return nil, name + " was skipped"
+		given, isGiven := e.options.Given[need.TaskID]
+		outputs := given
+		name := need.TaskID
+		if !isGiven {
+			dependency := e.run.Steps[e.stepOf[e.index[need.TaskID]]]
+			outputs = e.outputs[need.TaskID]
+			if dependency.Name != "" {
+				name = dependency.Name
+			}
+			switch dependency.Status {
+			case Failed:
+				return nil, name + " failed"
+			case Skipped:
+				return nil, name + " was skipped"
+			}
 		}
 		if need.Port == "" {
 			continue
 		}
-		value, ok := outputs[need.TaskID][need.Port]
+		value, ok := outputs[need.Port]
 		if !ok {
 			return nil, fmt.Sprintf("%s did not take %q", name, need.Port)
 		}
@@ -301,13 +376,13 @@ func gather(task Task, steps []Step, index map[string]int, outputs map[string]ma
 // Validate reports why a plan cannot run: no tasks, duplicate ids, unknown
 // dependencies or a cycle. Execute performs the same check.
 func Validate(tasks []Task) error {
-	_, err := schedule(tasks)
+	_, err := schedule(tasks, nil)
 	return err
 }
 
 // schedule orders tasks so every need comes first, choosing the earliest
 // declared ready task at each point.
-func schedule(tasks []Task) ([]int, error) {
+func schedule(tasks []Task, given map[string]map[string]any) ([]int, error) {
 	if len(tasks) == 0 {
 		return nil, errors.New("nothing to run")
 	}
@@ -320,9 +395,12 @@ func schedule(tasks []Task) ([]int, error) {
 	}
 	for _, task := range tasks {
 		for _, need := range task.Needs {
-			if _, ok := index[need.TaskID]; !ok {
+			if _, ok := index[need.TaskID]; !ok && given[need.TaskID] == nil {
 				return nil, fmt.Errorf("%s needs unknown task %q", task.ID, need.TaskID)
 			}
+		}
+		if err := validateLoop(task, index); err != nil {
+			return nil, err
 		}
 	}
 	done := make([]bool, len(tasks))
@@ -352,7 +430,7 @@ func schedule(tasks []Task) ([]int, error) {
 
 func ready(task Task, index map[string]int, done []bool) bool {
 	for _, need := range task.Needs {
-		if !done[index[need.TaskID]] {
+		if i, ok := index[need.TaskID]; ok && !done[i] {
 			return false
 		}
 	}
