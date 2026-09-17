@@ -411,6 +411,12 @@
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}
       onclick={() => selectOrConnect(node)}
+      onkeydown={(event) => {
+        // Delete or Backspace deletes the focused block.
+        if (event.key !== "Delete" && event.key !== "Backspace") return;
+        event.preventDefault();
+        graph.removeNode(node.id);
+      }}
     >
       <span class="node-title">
         {node.name}

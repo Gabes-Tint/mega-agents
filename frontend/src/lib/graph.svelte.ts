@@ -482,6 +482,60 @@ export class GraphStore {
     return true;
   }
 
+  // Deletes a block with everything nested inside it and every arrow that
+  // touches them. A Git action leaves its sequence joined: the action before
+  // it leads to the one after it, which starts the sequence if it was first.
+  removeNode(id: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    const removed = [id];
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const candidate of this.nodes)
+        if (
+          candidate.parentId &&
+          removed.includes(candidate.parentId) &&
+          !removed.includes(candidate.id)
+        ) {
+          removed.push(candidate.id);
+          grew = true;
+        }
+    }
+    const sibling = (nodeId: string) =>
+      this.nodes.find(
+        (candidate) =>
+          candidate.id === nodeId &&
+          candidate.type === "action" &&
+          candidate.parentId === node.parentId,
+      );
+    const previous =
+      node.type === "action"
+        ? this.edges
+            .map((edge) => edge.to === id && sibling(edge.from))
+            .find(Boolean)
+        : undefined;
+    const next =
+      node.type === "action"
+        ? this.edges
+            .map((edge) => edge.from === id && sibling(edge.to))
+            .find(Boolean)
+        : undefined;
+    this.nodes = this.nodes.filter(
+      (candidate) => !removed.includes(candidate.id),
+    );
+    this.edges = this.edges.filter(
+      (edge) => !removed.includes(edge.from) && !removed.includes(edge.to),
+    );
+    if (next && node.start) next.start = true;
+    if (previous && next) this.connect(previous.id, next.id);
+    if (this.selectedId && removed.includes(this.selectedId))
+      this.selectedId = null;
+    if (this.logNodeId && removed.includes(this.logNodeId))
+      this.logNodeId = null;
+    if (this.connectFromId && removed.includes(this.connectFromId))
+      this.cancelConnect();
+  }
+
   hasChildren(id: string): boolean {
     return this.nodes.some((candidate) => candidate.parentId === id);
   }

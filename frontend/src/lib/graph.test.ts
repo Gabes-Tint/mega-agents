@@ -1257,3 +1257,107 @@ describe("command blocks", () => {
     expect(gate.command).toBe("make verify");
   });
 });
+
+describe("deleting blocks", () => {
+  test("removes the block, its arrows and the selection", () => {
+    const graph = new GraphStore();
+    const first = graph.addNode("agent", 0, 0);
+    const second = graph.addNode("agent", 300, 0);
+    const third = graph.addNode("agent", 600, 0);
+    graph.connect(first.id, second.id);
+    graph.connect(second.id, third.id);
+    graph.connect(first.id, third.id);
+    graph.select(second.id);
+
+    graph.removeNode(second.id);
+
+    expect(graph.nodes.map((node) => node.name)).toEqual([
+      "Agent 1",
+      "Agent 3",
+    ]);
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0]).toMatchObject({ from: first.id, to: third.id });
+    expect(graph.selectedId).toBeNull();
+  });
+
+  test("removes everything nested inside a container", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const outside = graph.addNode("project", 900, 0);
+    const github = graph.addNode("github", 10, 40, project.id);
+    graph.addAction(github.id, "fetch");
+    const agent = graph.addNode("agent", 300, 40, project.id);
+    graph.connect(github.id, agent.id);
+
+    graph.removeNode(project.id);
+
+    expect(graph.nodes.map((node) => node.id)).toEqual([outside.id]);
+    expect(graph.edges).toEqual([]);
+  });
+
+  test("keeps the selection when another block is deleted", () => {
+    const graph = new GraphStore();
+    const kept = graph.addNode("agent", 0, 0);
+    const removed = graph.addNode("agent", 300, 0);
+    graph.select(kept.id);
+
+    graph.removeNode(removed.id);
+
+    expect(graph.selectedId).toBe(kept.id);
+  });
+
+  test("stops connecting from and showing the log of a deleted block", () => {
+    const graph = new GraphStore();
+    const node = graph.addNode("agent", 0, 0);
+    graph.showRun([{ nodeId: node.id, status: "failed" }], "run-1");
+    graph.openLog(node.id);
+    graph.startConnect(node.id);
+
+    graph.removeNode(node.id);
+
+    expect(graph.connecting).toBe(false);
+    expect(graph.connectFromId).toBeNull();
+    expect(graph.logNodeId).toBeNull();
+  });
+
+  test("a deleted action's neighbours in the sequence are joined", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const github = graph.addNode("github", 10, 40, project.id);
+    graph.addAction(github.id, "fetch");
+    const worktree = graph.addAction(github.id, "worktree")!;
+    graph.addAction(github.id, "rebase");
+
+    graph.removeNode(worktree.id);
+
+    expect(graph.actionSequence(github.id).map((node) => node.name)).toEqual([
+      "Fetch",
+      "Rebase",
+    ]);
+    expect(graph.edges).toHaveLength(1);
+  });
+
+  test("the next action becomes the start when the first is deleted", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const github = graph.addNode("github", 10, 40, project.id);
+    const fetch = graph.addAction(github.id, "fetch")!;
+    const worktree = graph.addAction(github.id, "worktree")!;
+
+    graph.removeNode(fetch.id);
+
+    expect(graph.nodes.find((node) => node.id === worktree.id)?.start).toBe(
+      true,
+    );
+    expect(graph.edges).toEqual([]);
+  });
+
+  test("ignores an unknown block", () => {
+    const graph = new GraphStore();
+    graph.addNode("agent", 0, 0);
+
+    graph.removeNode("missing");
+
+    expect(graph.nodes).toHaveLength(1);
+  });
+});

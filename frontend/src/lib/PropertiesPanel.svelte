@@ -545,6 +545,21 @@
           />
         </label>
       {/if}
+      <button
+        type="button"
+        class="delete"
+        onclick={() => graph.removeNode(node.id)}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5"
+          />
+        </svg>
+        Delete block
+      </button>
+      <p class="hint">
+        Delete or Backspace on a selected block deletes it too.
+      </p>
     {:else}
       <p>Select a node on the canvas to edit its properties.</p>
     {/if}
@@ -674,6 +689,27 @@
 
   button {
     width: 100%;
+  }
+
+  .delete {
+    margin-top: 0.5rem;
+    border-color: var(--fail);
+    background: transparent;
+    color: var(--fail);
+  }
+
+  .delete:hover:not(:disabled) {
+    background: var(--fail-soft);
+  }
+
+  .delete svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   button[aria-pressed="true"] {

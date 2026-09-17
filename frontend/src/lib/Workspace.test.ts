@@ -2738,3 +2738,62 @@ describe("graph builder workspace", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("deleting blocks", () => {
+  test("the properties panel deletes the selected block", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+    await fireEvent.click(screen.getByRole("button", { name: "Project 1" }));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Delete block" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Project 1" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Select a node on the canvas to edit its properties."),
+    ).toBeInTheDocument();
+  });
+
+  test("the Delete key deletes the selected block on the canvas", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+    const block = screen.getByRole("button", { name: "Project 1" });
+    await fireEvent.click(block);
+
+    await fireEvent.keyDown(block, { key: "Delete" });
+
+    expect(
+      screen.queryByRole("button", { name: "Project 1" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("Backspace deletes too", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+    const block = screen.getByRole("button", { name: "Project 1" });
+    await fireEvent.click(block);
+
+    await fireEvent.keyDown(block, { key: "Backspace" });
+
+    expect(
+      screen.queryByRole("button", { name: "Project 1" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("other keys and keys typed in fields leave the block", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+    const block = screen.getByRole("button", { name: "Project 1" });
+    await fireEvent.click(block);
+
+    await fireEvent.keyDown(block, { key: "Enter" });
+    await fireEvent.keyDown(screen.getByLabelText("Name"), {
+      key: "Backspace",
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Project 1" }),
+    ).toBeInTheDocument();
+  });
+});
