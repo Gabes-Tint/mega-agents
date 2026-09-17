@@ -139,3 +139,30 @@ export async function enlarge(
   );
   await page.mouse.up();
 }
+
+// Drops a palette block at an offset inside a container and names it.
+export async function dropInto(
+  page: Page,
+  palette: string,
+  container: Locator,
+  at: { x: number; y: number },
+  name: string,
+) {
+  const box = await container.boundingBox();
+  const from = await page
+    .getByRole("button", { name: palette, exact: true })
+    .boundingBox();
+  if (!box || !from) throw new Error("drag endpoints are not visible");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + at.x, box.y + at.y, { steps: 10 });
+  await page.mouse.up();
+  await page.getByLabel("Name").fill(name);
+  return page.getByRole("button", { name, exact: true });
+}
+
+export async function connect(page: Page, from: Locator, to: Locator) {
+  await selectBlock(from);
+  await page.getByRole("button", { name: "Connect" }).click();
+  await selectBlock(to);
+}

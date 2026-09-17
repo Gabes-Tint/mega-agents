@@ -498,6 +498,9 @@ describe("graph builder workspace", () => {
     expect(palette).toContainElement(
       screen.getByRole("button", { name: "GitLab" }),
     );
+    expect(palette).toContainElement(
+      screen.getByRole("button", { name: "JSON Schema" }),
+    );
   });
 
   test("shows repository and secret key fields only for forge boxes", async () => {
@@ -2005,6 +2008,76 @@ describe("graph builder workspace", () => {
     expect(result).toHaveTextContent("Session: session-9");
     expect(result).toHaveTextContent("Attempts: 2");
     expect(result).toHaveTextContent('{"verdict":"approve"}');
+    vi.unstubAllGlobals();
+  });
+
+  test("configures a schema block and which output each arrow takes", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("JSON Schema", 410, 410);
+    await fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Check" },
+    });
+    await fireEvent.input(screen.getByLabelText("Schema"), {
+      target: { value: '{"type": "object"}' },
+    });
+    await dropComponent("Agent", 450, 440);
+    await fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Fixer" },
+    });
+    await fireEvent.click(screen.getByText("Check"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(screen.getByText("Fixer"));
+
+    await fireEvent.click(screen.getByText("Check"));
+    expect(screen.getByLabelText("Schema")).toHaveValue('{"type": "object"}');
+    const port = screen.getByLabelText("Output to Fixer");
+    expect(port).toHaveValue("valid");
+    await fireEvent.change(port, { target: { value: "invalid" } });
+
+    expect(canvas().querySelector(".edge-port")).toHaveTextContent("invalid");
+    await fireEvent.input(screen.getByLabelText("Schema"), {
+      target: { value: "{" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The schema is not valid JSON",
+    );
+  });
+
+  test("shows a schema step's field errors", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [
+        record("failed", [
+          {
+            nodeId: "s1",
+            name: "Check",
+            action: "jsonschema",
+            status: "failed",
+            error: "the value did not satisfy the schema",
+            details: {
+              valid: false,
+              errors: [
+                {
+                  path: "$.verdict",
+                  message: "value must be one of 'approve'",
+                },
+              ],
+            },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run failed"));
+    expect(result).toHaveTextContent("Valid: false");
+    expect(result).toHaveTextContent(
+      "$.verdict: value must be one of 'approve'",
+    );
     vi.unstubAllGlobals();
   });
 });

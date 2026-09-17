@@ -66,6 +66,13 @@ record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
   repaired on the same session up to **Retries** times. An agent flagged as a
   starting point starts a run on its own.
 
+- **JSON Schema** (`output/json-schema@v1`) validates the one value connected
+  to it (usually an agent's result) against any JSON Schema. A valid value
+  leaves on its `valid` output; an invalid one leaves on `invalid` with the
+  value and field-level errors when an arrow takes that branch, and otherwise
+  fails the run. Choose each outgoing arrow's output in the block's
+  properties.
+
 | Backend | CLI | Schema | Verified live |
 | --- | --- | --- | --- |
 | `claude` | `claude --print --output-format stream-json` | `--json-schema` | ✅ haiku |

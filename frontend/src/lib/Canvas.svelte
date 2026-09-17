@@ -385,6 +385,14 @@
           y2={end.y}
           marker-end="url(#edge-arrowhead)"
         ></line>
+        {#if graph.portOf(edge)}
+          <text
+            class="edge-port"
+            x={(start.x + end.x) / 2}
+            y={(start.y + end.y) / 2 - 4}
+            text-anchor="middle">{graph.portOf(edge)}</text
+          >
+        {/if}
       {/if}
     {/each}
   </svg>
@@ -453,6 +461,11 @@
   .edge-line {
     stroke: #5b7a71;
     stroke-width: 2;
+  }
+
+  .edge-port {
+    fill: #5b7a71;
+    font-size: 0.7rem;
   }
 
   .hint {

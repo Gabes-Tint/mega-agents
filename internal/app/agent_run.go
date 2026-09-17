@@ -80,15 +80,19 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput, included map[string]
 			continue
 		}
 		source := planner.nodeByID[edge.From]
-		need := engine.Need{TaskID: edge.From}
-		switch {
-		case producesWorkspace(source):
+		port, err := planner.sourcePort(edge)
+		if err != nil {
+			return engine.Task{}, err
+		}
+		need := engine.Need{TaskID: edge.From, Port: port}
+		switch port {
+		case "":
+		case workspacePort:
 			if receivesWorkspace {
 				return fail("receives more than one workspace; connect only one")
 			}
-			need.Port, receivesWorkspace = workspacePort, true
-		case source.Type == "agent":
-			need.Port = resultPort
+			receivesWorkspace = true
+		default:
 			resultFrom[newIdentifierSet().slugIdentifier(source.Name)] = source.ID
 		}
 		needs = append(needs, need)

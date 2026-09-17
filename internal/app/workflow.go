@@ -18,6 +18,9 @@ type WorkflowEdgeInput struct {
 	ID   string `json:"id"`
 	From string `json:"from"`
 	To   string `json:"to"`
+	// FromPort names which output of a block with several the arrow
+	// carries, such as the invalid branch of a schema block.
+	FromPort string `json:"fromPort,omitempty"`
 }
 
 type WorkflowNodeInput struct {
@@ -50,6 +53,8 @@ type WorkflowNodeInput struct {
 	OutputSchema   string   `json:"outputSchema,omitempty"`
 	Retries        *int     `json:"retries,omitempty"`
 	TimeoutMinutes *float64 `json:"timeoutMinutes,omitempty"`
+	// JSON Schema blocks.
+	Schema string `json:"schema,omitempty"`
 }
 
 type WorkflowRequest struct {
@@ -59,12 +64,13 @@ type WorkflowRequest struct {
 }
 
 var knownComponentTypes = map[string]bool{
-	"agent":     true,
-	"project":   true,
-	"github":    true,
-	"gitlab":    true,
-	"githubapp": true,
-	"action":    true,
+	"agent":      true,
+	"project":    true,
+	"github":     true,
+	"gitlab":     true,
+	"githubapp":  true,
+	"action":     true,
+	"jsonschema": true,
 }
 
 // containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
@@ -72,12 +78,13 @@ var knownComponentTypes = map[string]bool{
 // Any placement outside these lists is rejected so the exported YAML always
 // matches what the builder validates while dragging.
 var containmentMatrix = map[string]map[string]bool{
-	"agent":     {"project": true, "agent": true},
-	"project":   {"root": true, "project": true},
-	"github":    {"project": true},
-	"gitlab":    {"project": true},
-	"githubapp": {"github": true},
-	"action":    {"github": true},
+	"agent":      {"project": true, "agent": true},
+	"project":    {"root": true, "project": true},
+	"github":     {"project": true},
+	"gitlab":     {"project": true},
+	"githubapp":  {"github": true},
+	"action":     {"github": true},
+	"jsonschema": {"project": true, "agent": true},
 }
 
 func containmentAllows(target string, childType string) bool {
@@ -183,7 +190,13 @@ func (emitter *workflowEmitter) emitNode(
 	var needs []string
 	for _, edge := range emitter.request.Edges {
 		if edge.To == node.ID {
-			needs = append(needs, emitter.identifierByNode[edge.From])
+			need := emitter.identifierByNode[edge.From]
+			if edge.FromPort != "" {
+				// Identifiers never contain dots, so identifier.port is
+				// unambiguous.
+				need += "." + edge.FromPort
+			}
+			needs = append(needs, need)
 		}
 	}
 	if len(needs) > 0 {
@@ -207,7 +220,7 @@ func (emitter *workflowEmitter) emitNode(
 	for _, field := range []struct{ key, value string }{
 		{"branch", node.Branch}, {"base", node.Base}, {"worktreePath", node.WorktreePath}, {"onto", node.Onto},
 		{"backend", node.Backend}, {"model", node.Model}, {"effort", node.Effort}, {"prompt", node.Prompt},
-		{"outputSchema", node.OutputSchema},
+		{"outputSchema", node.OutputSchema}, {"schema", node.Schema},
 	} {
 		if field.value != "" {
 			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))

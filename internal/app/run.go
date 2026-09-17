@@ -164,9 +164,12 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 			continue
 		}
 		var task engine.Task
-		if node.Type == "agent" {
+		switch node.Type {
+		case "agent":
 			task, err = planner.agentTask(node, included)
-		} else {
+		case "jsonschema":
+			task, err = planner.schemaTask(node, included)
+		default:
 			task, err = planner.actionTask(node, included)
 		}
 		if err != nil {
@@ -197,7 +200,7 @@ func (planner runPlanner) startingAction(github WorkflowNodeInput) (WorkflowNode
 }
 
 // executableTypes are the blocks a run executes when a start reaches them.
-var executableTypes = map[string]bool{"action": true, "agent": true}
+var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true}
 
 // include marks the node and every executable node its arrows reach.
 func (planner runPlanner) include(id string, included map[string]bool) {
@@ -223,8 +226,12 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput, included map[string
 		if edge.To != node.ID || !included[edge.From] {
 			continue
 		}
+		port, err := planner.sourcePort(edge)
+		if err != nil {
+			return engine.Task{}, err
+		}
 		need := engine.Need{TaskID: edge.From}
-		if producesWorkspace(planner.nodeByID[edge.From]) && node.Action == "rebase" {
+		if port == workspacePort && node.Action == "rebase" {
 			need.Port = workspacePort
 			receivesWorkspace = true
 		}
@@ -261,6 +268,27 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput, included map[string
 			}))
 		},
 	}, nil
+}
+
+// sourcePort names the output an arrow carries from its source block, or
+// returns "" for an arrow that only orders the two blocks.
+func (planner runPlanner) sourcePort(edge WorkflowEdgeInput) (string, error) {
+	source := planner.nodeByID[edge.From]
+	switch {
+	case producesWorkspace(source):
+		return workspacePort, nil
+	case source.Type == "agent":
+		return resultPort, nil
+	case source.Type == "jsonschema":
+		switch edge.FromPort {
+		case "":
+			return validPort, nil
+		case validPort, invalidPort:
+			return edge.FromPort, nil
+		}
+		return "", fmt.Errorf("%s has no output %q; use %s or %s", source.Name, edge.FromPort, validPort, invalidPort)
+	}
+	return "", nil
 }
 
 func producesWorkspace(node WorkflowNodeInput) bool {

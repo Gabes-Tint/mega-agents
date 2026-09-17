@@ -22,8 +22,13 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 				Backend: "opencode", Model: "opencode-go/glm-5.3-flash", Effort: "high",
 				Prompt: "Implement {{workspace.branch}}\nwith \"care\"", OutputSchema: `{"type":"object"}`,
 				Retries: &retries, TimeoutMinutes: &timeout},
+			{ID: "s1", Type: "jsonschema", Name: "Check", X: 5, Y: 6, W: 7, H: 8, ParentID: "p1", Schema: `{"type":"object"}`},
+			{ID: "f1", Type: "agent", Name: "Fixer", X: 9, Y: 10, W: 11, H: 12, ParentID: "p1", Backend: "claude", Prompt: "Fix"},
 		},
-		Edges: []WorkflowEdgeInput{{ID: "e1", From: "a1", To: "a2"}, {ID: "e2", From: "a1", To: "g2"}},
+		Edges: []WorkflowEdgeInput{
+			{ID: "e1", From: "a1", To: "a2"}, {ID: "e2", From: "a1", To: "g2"},
+			{ID: "e3", From: "g2", To: "s1"}, {ID: "e4", From: "s1", To: "f1", FromPort: "invalid"},
+		},
 	}
 	yaml, err := BuildWorkflowYAML(request)
 	if err != nil {
@@ -39,7 +44,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 		t.Errorf("name = %q", imported.Name)
 	}
 	// Identifiers replace editor ids, so compare with the ids exported.
-	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "x1": "app", "g2": "agent-1"}
+	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer"}
 	var want []WorkflowNodeInput
 	for _, node := range request.Nodes {
 		node.ID = rename[node.ID]
@@ -51,9 +56,10 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 	}
 	edges := map[string]bool{}
 	for _, edge := range imported.Edges {
-		edges[edge.From+">"+edge.To] = true
+		edges[edge.From+">"+edge.To+":"+edge.FromPort] = true
 	}
-	if len(imported.Edges) != 2 || !edges["create-worktree>rebase"] || !edges["create-worktree>agent-1"] {
+	if len(imported.Edges) != 4 || !edges["create-worktree>rebase:"] || !edges["create-worktree>agent-1:"] ||
+		!edges["agent-1>check:"] || !edges["check>fixer:invalid"] {
 		t.Errorf("edges = %+v", imported.Edges)
 	}
 }

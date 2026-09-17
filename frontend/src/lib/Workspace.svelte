@@ -36,6 +36,15 @@
     ["attempts", "Attempts"],
   ];
 
+  function fieldErrors(details: Record<string, unknown> | undefined): string[] {
+    const errors = details?.errors;
+    if (!Array.isArray(errors)) return [];
+    return errors.map(
+      (entry: { path?: string; message?: string }) =>
+        `${entry.path ?? "$"}: ${entry.message ?? ""}`,
+    );
+  }
+
   const graph = new GraphStore();
   let yamlError = $state("");
   let running = $state(false);
@@ -206,6 +215,9 @@
                   Logs
                 </button>
               {/if}
+              {#if step.details && "valid" in step.details}
+                <span>Valid: {String(step.details.valid)}</span>
+              {/if}
               {#each DETAIL_LABELS as [key, label] (key)}
                 {#if step.details?.[key]}
                   <span>{label}: {step.details[key]}</span>
@@ -216,6 +228,9 @@
               {:else if step.details?.output}
                 <pre>{step.details.output}</pre>
               {/if}
+              {#each fieldErrors(step.details) as fieldError (fieldError)}
+                <pre class="failed">{fieldError}</pre>
+              {/each}
               {#if step.details?.reply}
                 <pre>{step.details.reply}</pre>
               {/if}

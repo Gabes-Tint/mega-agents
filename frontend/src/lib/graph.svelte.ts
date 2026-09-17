@@ -1,5 +1,11 @@
 export type NodeType =
-  "agent" | "project" | "github" | "gitlab" | "githubapp" | "action";
+  | "agent"
+  | "project"
+  | "github"
+  | "gitlab"
+  | "githubapp"
+  | "action"
+  | "jsonschema";
 
 export type GitAction = "fetch" | "worktree" | "rebase";
 
@@ -39,6 +45,8 @@ export interface GraphEdge {
   id: string;
   from: string;
   to: string;
+  // Which output of a block with several the arrow takes.
+  fromPort?: string;
 }
 
 export interface PaletteItem {
@@ -76,6 +84,7 @@ export interface GraphNode {
   outputSchema?: string;
   retries?: number;
   timeoutMinutes?: number;
+  schema?: string;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -95,6 +104,7 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "github", label: "GitHub" },
   { type: "gitlab", label: "GitLab" },
   { type: "githubapp", label: "GitHub App" },
+  { type: "jsonschema", label: "JSON Schema" },
 ];
 
 // Single source of truth for where a block may go, agreed with the product
@@ -108,12 +118,21 @@ export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
   gitlab: ["project"],
   githubapp: ["github"],
   action: ["github"],
+  jsonschema: ["project", "agent"],
 };
 
 // Boxes that can host children: every target that appears as a parent in
 // the containment matrix.
 export const CONTAINER_TYPES: readonly NodeType[] = (
-  ["agent", "project", "github", "gitlab", "githubapp", "action"] as NodeType[]
+  [
+    "agent",
+    "project",
+    "github",
+    "gitlab",
+    "githubapp",
+    "action",
+    "jsonschema",
+  ] as NodeType[]
 ).filter((type) =>
   Object.values(CONTAINMENT_MATRIX).some((targets) => targets.includes(type)),
 );
@@ -162,6 +181,7 @@ const TARGET_LABELS: Record<NodeType, string> = {
   gitlab: "GitLab",
   githubapp: "GitHub App",
   action: "Git action",
+  jsonschema: "JSON Schema",
 };
 
 // Human-readable list of the targets a block may be dropped into, used to
@@ -529,6 +549,32 @@ export class GraphStore {
       node = parent;
       parent = this.nodes.find((candidate) => candidate.id === node.parentId);
     }
+  }
+
+  // Named outputs a block chooses between; empty for blocks with one output.
+  outputPorts(id: string): string[] {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node?.type === "jsonschema") return ["valid", "invalid"];
+    return [];
+  }
+
+  // The output an arrow takes: its own choice, or its source's first port.
+  portOf(edge: GraphEdge): string | undefined {
+    return edge.fromPort ?? this.outputPorts(edge.from)[0];
+  }
+
+  outgoingEdges(id: string): GraphEdge[] {
+    return this.edges.filter((edge) => edge.from === id);
+  }
+
+  setEdgePort(edgeId: string, port: string): void {
+    const edge = this.edges.find((candidate) => candidate.id === edgeId);
+    if (edge) edge.fromPort = port;
+  }
+
+  setSchema(id: string, schema: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.schema = schema;
   }
 
   setAgentField(id: string, field: AgentField, value: string): void {

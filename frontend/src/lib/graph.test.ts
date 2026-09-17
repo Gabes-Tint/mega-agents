@@ -801,6 +801,7 @@ describe("PALETTE", () => {
       { type: "github", label: "GitHub" },
       { type: "gitlab", label: "GitLab" },
       { type: "githubapp", label: "GitHub App" },
+      { type: "jsonschema", label: "JSON Schema" },
     ]);
   });
 });
@@ -826,6 +827,7 @@ describe("canHostChild", () => {
     ["gitlab", { root: false, project: true, github: false, agent: false }],
     ["githubapp", { root: false, project: false, github: true, agent: false }],
     ["action", { root: false, project: false, github: true, agent: false }],
+    ["jsonschema", { root: false, project: true, github: false, agent: true }],
   ] as const;
 
   for (const [childType, targets] of matrix) {
@@ -1068,5 +1070,44 @@ describe("agent configuration", () => {
     expect(agent.prompt).toBe("Review");
     expect(agent.retries).toBe(3);
     expect(agent.timeoutMinutes).toBeUndefined();
+  });
+});
+
+describe("output ports", () => {
+  test("a schema block has valid and invalid outputs; other blocks have one", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const check = graph.addNode("jsonschema", 10, 10, project.id);
+    const agent = graph.addNode("agent", 10, 10, project.id);
+
+    expect(graph.outputPorts(check.id)).toEqual(["valid", "invalid"]);
+    expect(graph.outputPorts(agent.id)).toEqual([]);
+    expect(graph.outputPorts("missing")).toEqual([]);
+  });
+
+  test("an arrow from a block with ports can take any of its outputs", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const check = graph.addNode("jsonschema", 10, 10, project.id);
+    const fixer = graph.addNode("agent", 200, 10, project.id);
+    graph.connect(check.id, fixer.id);
+    const edge = graph.edges[0]!;
+
+    expect(graph.portOf(edge)).toBe("valid");
+    graph.setEdgePort(edge.id, "invalid");
+    expect(graph.portOf(graph.edges[0]!)).toBe("invalid");
+    graph.setEdgePort("missing", "valid");
+    expect(graph.outgoingEdges(check.id)).toHaveLength(1);
+  });
+
+  test("sets a schema block's schema text", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const check = graph.addNode("jsonschema", 10, 10, project.id);
+
+    graph.setSchema(check.id, '{"type":"object"}');
+    graph.setSchema("missing", "ignored");
+
+    expect(check.schema).toBe('{"type":"object"}');
   });
 });

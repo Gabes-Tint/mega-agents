@@ -98,7 +98,8 @@ func (importer *yamlImporter) nodes(mapping *yaml.Node, parentID string) error {
 		}
 		importer.request.Nodes = append(importer.request.Nodes, node)
 		for _, need := range entry.Needs {
-			importer.needs = append(importer.needs, WorkflowEdgeInput{From: need, To: identifier})
+			from, port, _ := strings.Cut(need, ".")
+			importer.needs = append(importer.needs, WorkflowEdgeInput{From: from, To: identifier, FromPort: port})
 		}
 		if err := importer.nodes(&entry.Children, identifier); err != nil {
 			return err
@@ -129,7 +130,7 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		"appId": &node.AppID, "privateKeyPath": &node.PrivateKeyPath, "branch": &node.Branch,
 		"base": &node.Base, "worktreePath": &node.WorktreePath, "onto": &node.Onto,
 		"backend": &node.Backend, "model": &node.Model, "effort": &node.Effort, "prompt": &node.Prompt,
-		"outputSchema": &node.OutputSchema,
+		"outputSchema": &node.OutputSchema, "schema": &node.Schema,
 	}
 	for key, value := range entry.With {
 		switch key {

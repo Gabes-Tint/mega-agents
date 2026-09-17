@@ -350,6 +350,40 @@
           />
         </label>
       {/if}
+      {#if node.type === "jsonschema"}
+        <label>
+          Schema
+          <textarea
+            rows="8"
+            placeholder="JSON Schema the value must satisfy"
+            value={node.schema ?? ""}
+            oninput={(event) =>
+              graph.setSchema(node.id, event.currentTarget.value)}
+          ></textarea>
+        </label>
+        {#if !schemaIsJSON(node.schema)}
+          <p class="error" role="alert">The schema is not valid JSON</p>
+        {/if}
+      {/if}
+      {#if graph.outputPorts(node.id).length > 0}
+        {#each graph.outgoingEdges(node.id) as edge (edge.id)}
+          {@const target = graph.nodes.find(
+            (candidate) => candidate.id === edge.to,
+          )}
+          <label>
+            Output to {target?.name}
+            <select
+              value={graph.portOf(edge)}
+              onchange={(event) =>
+                graph.setEdgePort(edge.id, event.currentTarget.value)}
+            >
+              {#each graph.outputPorts(node.id) as port (port)}
+                <option value={port}>{port}</option>
+              {/each}
+            </select>
+          </label>
+        {/each}
+      {/if}
       {#if node.type === "githubapp"}
         <label>
           App ID
@@ -459,6 +493,11 @@
   textarea {
     resize: vertical;
     font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+  }
+
+  .error {
+    color: #a03030;
     font-size: 0.8rem;
   }
 
