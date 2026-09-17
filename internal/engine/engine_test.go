@@ -405,3 +405,45 @@ func TestAFailureSkipsOnlyItsOwnBranchWhileTheOtherRuns(t *testing.T) {
 		t.Fatalf("statuses = %v", got)
 	}
 }
+
+func TestATaskWaitingForAnyRunsOnWhicheverBranchArrives(t *testing.T) {
+	r := &recorder{}
+	tasks := []Task{
+		r.task("route", nil, emits("builder", "brief")),
+		r.task("mechanic", []Need{{TaskID: "route", Port: "mechanic"}}, emits("done", "by mechanic")),
+		r.task("builder", []Need{{TaskID: "route", Port: "builder"}}, emits("done", "by builder")),
+		{ID: "deliver", WaitForAny: true, Needs: []Need{{TaskID: "mechanic", Port: "done"}, {TaskID: "builder", Port: "done"}},
+			Run: func(_ context.Context, inputs []Input, _ io.Writer) (Result, error) {
+				return Result{Details: map[string]any{"inputs": inputs}}, nil
+			}},
+	}
+
+	run, err := Execute(context.Background(), tasks, Options{})
+
+	if err != nil || run.Status != Succeeded {
+		t.Fatalf("run = %+v, err = %v", run, err)
+	}
+	deliver := run.Steps[3]
+	want := []Input{{TaskID: "builder", Port: "done", Value: "by builder"}}
+	if deliver.Status != Succeeded || !reflect.DeepEqual(deliver.Details["inputs"], want) {
+		t.Fatalf("deliver = %+v", deliver)
+	}
+}
+
+func TestATaskWaitingForAnyIsSkippedWhenNothingArrives(t *testing.T) {
+	r := &recorder{}
+	tasks := []Task{
+		r.task("route", nil, emits("solver", "brief")),
+		r.task("mechanic", []Need{{TaskID: "route", Port: "mechanic"}}, emits("done", "x")),
+		r.task("builder", []Need{{TaskID: "route", Port: "builder"}}, emits("done", "y")),
+		r.task("deliver", nil, emits("", nil)),
+	}
+	tasks[3].WaitForAny = true
+	tasks[3].Needs = []Need{{TaskID: "mechanic", Port: "done"}, {TaskID: "builder", Port: "done"}}
+
+	run, _ := Execute(context.Background(), tasks, Options{})
+
+	if step := run.Steps[3]; step.Status != Skipped || step.Error != "nothing arrived from mechanic or builder" {
+		t.Fatalf("deliver = %+v", step)
+	}
+}

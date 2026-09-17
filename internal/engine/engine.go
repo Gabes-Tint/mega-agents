@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,9 @@ type Task struct {
 	Run func(ctx context.Context, inputs []Input, log io.Writer) (Result, error)
 	// Loop, when set, makes the task repeat a nested plan instead of Run.
 	Loop *Loop
+	// WaitForAny runs the task once its needs settle if any of them arrived,
+	// with the inputs that did, as where exclusive branches join again.
+	WaitForAny bool
 }
 
 // Loop repeats Body, a plan of its own, until the body task Until names
@@ -353,10 +357,12 @@ func (e *execution) complete(i int) {
 // gather collects a task's inputs, or explains why it cannot run.
 func (e *execution) gather(task Task) ([]Input, string) {
 	var inputs []Input
+	var missing []string
 	for _, need := range task.Needs {
 		given, isGiven := e.options.Given[need.TaskID]
 		outputs := given
 		name := need.TaskID
+		reason := ""
 		if !isGiven {
 			dependency := e.run.Steps[e.stepOf[e.index[need.TaskID]]]
 			outputs = e.outputs[need.TaskID]
@@ -365,21 +371,38 @@ func (e *execution) gather(task Task) ([]Input, string) {
 			}
 			switch dependency.Status {
 			case Failed:
-				return nil, name + " failed"
+				reason = name + " failed"
 			case Skipped:
-				return nil, name + " was skipped"
+				reason = name + " was skipped"
 			}
 		}
-		if need.Port == "" {
-			continue
-		}
 		value, ok := outputs[need.Port]
-		if !ok {
-			return nil, fmt.Sprintf("%s did not take %q", name, need.Port)
+		if reason == "" && need.Port != "" && !ok {
+			reason = fmt.Sprintf("%s did not take %q", name, need.Port)
 		}
-		inputs = append(inputs, Input{TaskID: need.TaskID, Port: need.Port, Value: value})
+		switch {
+		case reason != "" && !task.WaitForAny:
+			return nil, reason
+		case reason != "":
+			if !slices.Contains(missing, name) {
+				missing = append(missing, name)
+			}
+		case need.Port != "":
+			inputs = append(inputs, Input{TaskID: need.TaskID, Port: need.Port, Value: value})
+		}
+	}
+	if task.WaitForAny && len(inputs) == 0 && len(missing) > 0 {
+		return nil, "nothing arrived from " + joinNames(missing)
 	}
 	return inputs, ""
+}
+
+// joinNames spells a list as "a, b or c".
+func joinNames(names []string) string {
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
 
 // Validate reports why a plan cannot run: no tasks, duplicate ids, unknown

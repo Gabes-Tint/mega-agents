@@ -1537,3 +1537,19 @@ describe("loop blocks", () => {
     expect(graph.iterationOf(loop.id)).toBeUndefined();
   });
 });
+
+describe("waiting for any arrow", () => {
+  test("agents, commands and loops can run on whichever arrow arrives", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const agent = graph.addNode("agent", 10, 40, project.id);
+    const router = graph.addNode("router", 10, 140, project.id);
+
+    expect(graph.canWaitForAny(agent.id)).toBe(true);
+    expect(graph.canWaitForAny(router.id)).toBe(false);
+    graph.setWaitForAny(agent.id, true);
+    expect(agent.waitForAny).toBe(true);
+    graph.setWaitForAny(agent.id, false);
+    expect(agent.waitForAny).toBeUndefined();
+  });
+});

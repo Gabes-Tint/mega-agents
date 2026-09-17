@@ -78,7 +78,7 @@ func (planner runPlanner) loopTask(node WorkflowNodeInput, failures *[]planFailu
 		}
 	}
 	return engine.Task{
-		ID: node.ID, Name: node.Name, Kind: "loop", Needs: needs,
+		ID: node.ID, Name: node.Name, Kind: "loop", Needs: needs, WaitForAny: node.WaitForAny,
 		Loop: &engine.Loop{
 			Body: body, MaxIterations: iterations, Until: engine.Need{TaskID: until.ID, Port: node.UntilPort},
 			Finish: func(inputs []engine.Input, outcome engine.LoopOutcome) (engine.Result, error) {

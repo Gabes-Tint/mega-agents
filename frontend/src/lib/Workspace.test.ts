@@ -3041,3 +3041,23 @@ describe("loop properties", () => {
     });
   });
 });
+
+describe("waiting for any arrow in the panel", () => {
+  test("a command can be set to run when any arrow arrives", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+    await dropComponent("Command", 60, 50);
+    await fireEvent.click(screen.getByRole("button", { name: "Command 1" }));
+
+    await fireEvent.click(screen.getByLabelText("Run when any arrow arrives"));
+
+    await waitFor(() => {
+      const draft = JSON.parse(
+        localStorage.getItem("mega-agents:draft") ?? "{}",
+      ) as { nodes: { type: string; waitForAny?: boolean }[] };
+      expect(
+        draft.nodes.find((node) => node.type === "command")?.waitForAny,
+      ).toBe(true);
+    });
+  });
+});

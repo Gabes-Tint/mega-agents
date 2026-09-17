@@ -152,7 +152,7 @@ func TestLoopsSurviveExportAndImport(t *testing.T) {
 	iterations := 5
 	request := WorkflowRequest{Name: "loop", Nodes: []WorkflowNodeInput{
 		{ID: "p1", Type: "project", Name: "api", Path: "/work"},
-		{ID: "l1", Type: "loop", Name: "Until green", ParentID: "p1", MaxIterations: &iterations, UntilNode: "c1", UntilPort: "passed"},
+		{ID: "l1", Type: "loop", Name: "Until green", ParentID: "p1", MaxIterations: &iterations, UntilNode: "c1", UntilPort: "passed", WaitForAny: true},
 		{ID: "c1", Type: "command", Name: "Gate", ParentID: "l1", Command: "make verify"},
 	}}
 
@@ -166,7 +166,7 @@ func TestLoopsSurviveExportAndImport(t *testing.T) {
 	}
 
 	want := WorkflowNodeInput{ID: "until-green", Type: "loop", Name: "Until green", ParentID: "api",
-		MaxIterations: &iterations, UntilNode: "gate", UntilPort: "passed"}
+		MaxIterations: &iterations, UntilNode: "gate", UntilPort: "passed", WaitForAny: true}
 	if !reflect.DeepEqual(imported.Nodes[1], want) {
 		t.Fatalf("loop = %+v\nwant %+v\n%s", imported.Nodes[1], want, document)
 	}

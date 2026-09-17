@@ -143,6 +143,9 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		case "continueSession":
 			node.ContinueSession = value == true
 			continue
+		case "waitForAny":
+			node.WaitForAny = value == true
+			continue
 		case "cases":
 			cases, err := importedCases(value)
 			if err != nil {

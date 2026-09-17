@@ -27,6 +27,9 @@ var workspaceFields = map[string]func(gitops.Workspace) string{
 type templateSources struct {
 	workspace  bool
 	resultFrom map[string]string
+	// anyOne is set for a block that runs on whichever connected block
+	// arrives, whose {{result}} is that block's.
+	anyOne bool
 }
 
 // sourcesOf reads a block's incoming needs.
@@ -60,7 +63,7 @@ func checkTemplate(text string, sources templateSources) error {
 				return fmt.Errorf("{{%s}} names no block connected to this one", name)
 			}
 		case name == "result":
-			if len(sources.resultFrom) != 1 {
+			if len(sources.resultFrom) != 1 && !(sources.anyOne && len(sources.resultFrom) > 0) {
 				return fmt.Errorf("{{result}} needs exactly one block connected to this one; name one with {{results.<block>}}")
 			}
 		default:
@@ -90,7 +93,9 @@ func renderTemplate(text string, inputs []engine.Input, sources templateSources)
 			source = sources.resultFrom[blockName]
 		} else {
 			for _, id := range sources.resultFrom {
-				source = id
+				if _, arrived := results[id]; arrived {
+					source = id
+				}
 			}
 		}
 		encoded, _ := json.Marshal(results[source])

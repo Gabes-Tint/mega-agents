@@ -506,6 +506,17 @@
           Add case
         </button>
       {/if}
+      {#if graph.canWaitForAny(node.id)}
+        <label>
+          <input
+            type="checkbox"
+            checked={node.waitForAny ?? false}
+            onchange={(event) =>
+              graph.setWaitForAny(node.id, event.currentTarget.checked)}
+          />
+          Run when any arrow arrives
+        </label>
+      {/if}
       {#if node.type === "loop"}
         {@const exits = graph.loopExits(node.id)}
         <label>

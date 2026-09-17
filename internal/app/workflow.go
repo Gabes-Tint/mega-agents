@@ -69,6 +69,9 @@ type WorkflowNodeInput struct {
 	MaxIterations *int   `json:"maxIterations,omitempty"`
 	UntilNode     string `json:"untilNode,omitempty"`
 	UntilPort     string `json:"untilPort,omitempty"`
+	// WaitForAny runs an agent, command or loop when any of the arrows into
+	// it arrives, where exclusive branches join again.
+	WaitForAny bool `json:"waitForAny,omitempty"`
 	// Delivery actions: a commit message, a pull request's title and body,
 	// and the issue to read.
 	Message string `json:"message,omitempty"`
@@ -283,6 +286,9 @@ func (emitter *workflowEmitter) emitNode(
 	}
 	if node.ContinueSession {
 		with = append(with, fmt.Sprintf("%s    continueSession: true", indent))
+	}
+	if node.WaitForAny {
+		with = append(with, fmt.Sprintf("%s    waitForAny: true", indent))
 	}
 	if node.MaxCostUSD != nil {
 		with = append(with, fmt.Sprintf("%s    maxCostUsd: %g", indent, *node.MaxCostUSD))

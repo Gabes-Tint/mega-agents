@@ -69,6 +69,7 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 		return engine.Task{}, err
 	}
 	sources := planner.sourcesOf(needs)
+	sources.anyOne = planner.waitsForAny(node)
 	if err := checkTemplate(node.Prompt, sources); err != nil {
 		return fail("%v", err)
 	}
@@ -88,7 +89,7 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 		needs = append(needs, engine.Need{TaskID: agentsBefore[0].ID, Port: sessionPort})
 	}
 	return engine.Task{
-		ID: node.ID, Name: node.Name, Kind: "agent", Needs: needs,
+		ID: node.ID, Name: node.Name, Kind: "agent", Needs: needs, WaitForAny: sources.anyOne,
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			details := map[string]any{"backend": node.Backend, "model": node.Model, "effort": node.Effort}
 			workspace, hasWorkspace := workspaceIn(inputs)
@@ -159,6 +160,25 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 			return engine.Result{Outputs: outputs, Details: details}, nil
 		},
 	}, nil
+}
+
+// waitsForAny reports whether a block runs on any arrow into it: its own
+// setting, or, for a block inside a loop that takes the loop's arrows, the
+// loop's.
+func (planner runPlanner) waitsForAny(node WorkflowNodeInput) bool {
+	if node.WaitForAny {
+		return true
+	}
+	loop := planner.loopOf(node)
+	if loop.ID == "" || !loop.WaitForAny {
+		return false
+	}
+	for _, edge := range planner.request.Edges {
+		if edge.To == node.ID {
+			return false
+		}
+	}
+	return true
 }
 
 // agentsInto are the executed agents with arrows into a block.

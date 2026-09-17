@@ -146,6 +146,8 @@ export interface GraphNode {
   maxIterations?: number;
   untilNode?: string;
   untilPort?: string;
+  // Runs when any arrow into the block arrives rather than all of them.
+  waitForAny?: boolean;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -931,6 +933,17 @@ export class GraphStore {
     const separator = value.lastIndexOf(":");
     node.untilNode = separator > 0 ? value.slice(0, separator) : undefined;
     node.untilPort = separator > 0 ? value.slice(separator + 1) : undefined;
+  }
+
+  // Agents, commands and loops can run where exclusive branches join.
+  canWaitForAny(id: string): boolean {
+    const type = this.nodes.find((node) => node.id === id)?.type;
+    return type === "agent" || type === "command" || type === "loop";
+  }
+
+  setWaitForAny(id: string, waitForAny: boolean): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.waitForAny = waitForAny || undefined;
   }
 
   setMaxIterations(id: string, value: string): void {

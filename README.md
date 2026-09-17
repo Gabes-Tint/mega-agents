@@ -128,6 +128,10 @@ refs.
   agent feeding the loop's on the first repeat and its own afterwards. The
   canvas shows which repeat a running loop is on, and each block's log marks
   every repeat.
+- **Run when any arrow arrives** (agents, commands and loops) joins
+  exclusive branches again: the block runs as soon as its incoming blocks
+  have settled if any of them arrived, with `{{result}}` naming the one that
+  did, instead of being skipped because a branch was not taken.
 - **Router** sends the one value connected to it down the first case whose
   CEL condition over `value` holds (for example `value.verdict == "approve"`),
   or down `default`, as `{"case": ..., "value": ...}`. Expressions are

@@ -62,7 +62,7 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput) (engine.Task, erro
 	handlesFailure = handlesFailure || planner.loopOf(node).UntilNode == node.ID
 	limit := time.Duration(timeout * float64(time.Minute))
 	return engine.Task{
-		ID: node.ID, Name: node.Name, Kind: "command", Needs: needs,
+		ID: node.ID, Name: node.Name, Kind: "command", Needs: needs, WaitForAny: planner.waitsForAny(node),
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			environment := gitops.CleanEnvironment(os.Environ())
 			workspace, hasWorkspace := workspaceIn(inputs)
