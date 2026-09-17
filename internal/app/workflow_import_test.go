@@ -24,6 +24,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 			{ID: "i2", Type: "action", Action: "issue", Name: "Cleared", X: 12, Y: 304, W: 160, H: 64, ParentID: "g1",
 				Issue: 8, IgnoreLabels: &[]string{}},
 			{ID: "i3", Type: "action", Action: "issue", Name: "Old", X: 12, Y: 392, W: 160, H: 64, ParentID: "g1", Issue: 9},
+			{ID: "i4", Type: "action", Action: "issue", Name: "Next", X: 12, Y: 480, W: 160, H: 64, ParentID: "g1"},
 			{ID: "x1", Type: "githubapp", Name: "App", X: 1, Y: 2, W: 3, H: 4, ParentID: "g1", AppID: "42", PrivateKeyPath: "/k.pem"},
 			{ID: "g2", Type: "agent", Name: "Agent 1", X: 240, Y: 10, W: 160, H: 64, ParentID: "p1",
 				Backend: "opencode", Model: "opencode-go/glm-5.3-flash", Effort: "high",
@@ -55,7 +56,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 		t.Errorf("name = %q", imported.Name)
 	}
 	// Identifiers replace editor ids, so compare with the ids exported.
-	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "i1": "read-issue", "i2": "cleared", "i3": "old", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
+	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "i1": "read-issue", "i2": "cleared", "i3": "old", "i4": "next", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
 	var want []WorkflowNodeInput
 	for _, node := range request.Nodes {
 		node.ID = rename[node.ID]
@@ -72,6 +73,35 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 	if len(imported.Edges) != 4 || !edges["create-worktree>rebase:"] || !edges["create-worktree>agent-1:"] ||
 		!edges["check>route:"] || !edges["check>fixer:invalid"] {
 		t.Errorf("edges = %+v", imported.Edges)
+	}
+}
+
+func TestReadIssueWithZeroOrNoIssueNumberRoundTrips(t *testing.T) {
+	document := func(with string) string {
+		return "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nmetadata:\n  name: next\nnodes:\n" +
+			"  api:\n    uses: project@v1\n    children:\n      github:\n        uses: github@v1\n        children:\n" +
+			"          read-issue:\n            uses: git/issue@v1\n            name: \"Read issue\"\n" + with
+	}
+	for _, with := range []string{"", "            with:\n              issue: 0\n"} {
+		imported, err := ParseWorkflowYAML([]byte(document(with)))
+		if err != nil {
+			t.Fatalf("import %q: %v", with, err)
+		}
+		if issue := imported.Nodes[2]; issue.Action != "issue" || issue.Issue != 0 {
+			t.Fatalf("import %q: nodes = %+v", with, imported.Nodes)
+		}
+
+		exported, err := BuildWorkflowYAML(imported)
+		if err != nil {
+			t.Fatalf("export %q: %v", with, err)
+		}
+		if !strings.Contains(exported, "            with:\n              issue: 0\n") {
+			t.Fatalf("export %q:\n%s", with, exported)
+		}
+		again, err := ParseWorkflowYAML([]byte(exported))
+		if err != nil || !reflect.DeepEqual(again.Nodes, imported.Nodes) {
+			t.Fatalf("round trip %q: %v\n%+v\nwant\n%+v", with, err, again.Nodes, imported.Nodes)
+		}
 	}
 }
 

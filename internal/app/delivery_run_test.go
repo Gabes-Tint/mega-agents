@@ -12,8 +12,10 @@ import (
 )
 
 // fakeGH puts a gh first on PATH that records each call's arguments and
-// answers issue views with issue #7 (issue #8 is labeled "Paused") and pull
-// request creation with #42.
+// answers issue views with issue #7 (issue #8 is labeled "Paused", issue #9
+// has no labels, issue #6 is assigned to hubot), lists the open issues #9, #8
+// and #6, answers that the current user is octocat, and answers pull request
+// creation with #42.
 func fakeGHCLI(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
@@ -22,8 +24,15 @@ here="$(dirname "$0")"
 printf '%s\n' "$@" >> "$here/calls"
 echo "--" >> "$here/calls"
 case "$1 $2" in
+  "api user") echo octocat ;;
+  "issue list")
+    echo '[{"number":9,"labels":[],"assignees":[]},{"number":8,"labels":[{"name":"Paused"}],"assignees":[]},{"number":6,"labels":[],"assignees":[{"login":"hubot"}]}]' ;;
   "issue view")
-    if [ "$3" = 8 ]; then
+    if [ "$3" = 6 ]; then
+      echo '{"number":6,"title":"Taken","body":"","url":"https://github.com/acme/api/issues/6","labels":[],"assignees":[{"login":"hubot"}],"comments":[]}'
+    elif [ "$3" = 9 ]; then
+      echo '{"number":9,"title":"Write docs","body":"","url":"https://github.com/acme/api/issues/9","labels":[],"comments":[]}'
+    elif [ "$3" = 8 ]; then
       echo '{"number":8,"title":"Later","body":"","url":"https://github.com/acme/api/issues/8","labels":[{"name":"Paused"}],"comments":[]}'
     else
       echo '{"number":7,"title":"Add a changelog","body":"Write CHANGELOG.md","url":"https://github.com/acme/api/issues/7","labels":[],"comments":[]}'
@@ -121,6 +130,60 @@ func TestReadIssueFailsOnAnIssueWithALabelToIgnore(t *testing.T) {
 	}
 }
 
+func TestReadIssueWithoutANumberReadsTheNextAvailableIssue(t *testing.T) {
+	gh := fakeGHCLI(t)
+	clone, _ := projectClone(t)
+	// 0 and a missing number, as in workflows saved before 0 had a meaning,
+	// both read the next available issue.
+	for _, number := range []string{`, "issue": 0`, ""} {
+		body := fmt.Sprintf(`{"nodes": [
+			{"id": "p1", "type": "project", "name": "api", "path": %q},
+			{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true, "repository": "acme/api"},
+			{"id": "i1", "type": "action", "action": "issue", "name": "Read issue", "parentId": "g1", "start": true%s}
+		], "edges": []}`, clone, number)
+
+		record, handler := finishedRun(t, body)
+
+		if record.Status != engine.Succeeded {
+			t.Fatalf("with %q: record = %+v", number, record)
+		}
+		issue, _ := record.Steps[0].Details["issue"].(map[string]any)
+		if issue["number"] != 9.0 || issue["title"] != "Write docs" {
+			t.Fatalf("with %q: issue = %+v", number, issue)
+		}
+		log := get(t, handler, "/api/runs/"+record.ID+"/logs/i1").Body.String()
+		if !strings.Contains(log, "📌 Picked the next available issue #9\n") ||
+			!strings.Contains(log, `Skipped issue #8, labeled "Paused"`) ||
+			!strings.Contains(log, "Skipped issue #6, assigned to @hubot\n") {
+			t.Fatalf("with %q: log =\n%s", number, log)
+		}
+	}
+	calls, _ := os.ReadFile(filepath.Join(gh, "calls"))
+	if !strings.Contains(string(calls), "issue\nview\n9\n--repo\nacme/api\n") {
+		t.Fatalf("gh calls =\n%s", calls)
+	}
+}
+
+func TestReadIssueWithAFixedNumberReadsAnIssueAssignedToSomebodyElse(t *testing.T) {
+	gh := fakeGHCLI(t)
+	clone, _ := projectClone(t)
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true, "repository": "acme/api"},
+		{"id": "i1", "type": "action", "action": "issue", "name": "Read issue", "parentId": "g1", "start": true, "issue": 6}
+	], "edges": []}`, clone)
+
+	record := finishedRunOnly(t, body)
+
+	if record.Status != engine.Succeeded || record.Steps[0].Details["issue"].(map[string]any)["number"] != 6.0 {
+		t.Fatalf("record = %+v", record)
+	}
+	calls, _ := os.ReadFile(filepath.Join(gh, "calls"))
+	if string(calls) != "issue\nview\n6\n--repo\nacme/api\n--json\nnumber,title,body,url,labels,comments\n--\n" {
+		t.Fatalf("gh calls =\n%s", calls)
+	}
+}
+
 func TestAnAgentPassesItsWorkspaceOn(t *testing.T) {
 	fakeClaude(t)
 	clone, _ := projectClone(t)
@@ -164,9 +227,9 @@ func TestDeliveryPlansAreCheckedBeforeRunning(t *testing.T) {
 			body: flow(`{"id": "k1", "type": "action", "action": "commit", "name": "Commit", "parentId": "g1", "start": true, "message": "x"}`, ""),
 			want: "Commit needs a workspace; connect a Create worktree action before it",
 		},
-		"issue without a number": {
-			body: flow(`{"id": "i1", "type": "action", "action": "issue", "name": "Read issue", "parentId": "g1", "start": true}`, ""),
-			want: "Read issue: set the issue number",
+		"issue with a negative number": {
+			body: flow(`{"id": "i1", "type": "action", "action": "issue", "name": "Read issue", "parentId": "g1", "start": true, "issue": -1}`, ""),
+			want: "Read issue: the issue number must be 0 for the next available issue, or a positive number",
 		},
 		"unknown placeholder in a title": {
 			body: flow(`{"id": "w1", "type": "action", "action": "worktree", "name": "Create worktree", "parentId": "g1", "start": true, "branch": "x"},

@@ -288,7 +288,9 @@ func (emitter *workflowEmitter) emitNode(
 	if node.UntilPort != "" {
 		with = append(with, fmt.Sprintf("%s    untilPort: %s", indent, yamlString(node.UntilPort)))
 	}
-	if node.Issue != 0 {
+	// Read issue always writes its number so a file shows that 0 reads the
+	// next available issue.
+	if node.Issue != 0 || node.Action == "issue" {
 		with = append(with, fmt.Sprintf("%s    issue: %d", indent, node.Issue))
 	}
 	if node.IgnoreLabels != nil {

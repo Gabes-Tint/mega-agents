@@ -161,6 +161,7 @@ export interface GraphNode {
   message?: string;
   title?: string;
   body?: string;
+  // Read issue reads this issue, or the next available one when it is 0.
   issue?: number;
   // Labels that stop Read issue from reading an issue; without them the
   // defaults apply, and an empty list ignores none.
@@ -947,6 +948,8 @@ export class GraphStore {
       h: DEFAULT_NODE_HEIGHT,
       parentId: githubId,
       start: previous === undefined,
+      // Read issue starts on 0, the next available issue.
+      ...(action === "issue" ? { issue: 0 } : {}),
     };
     this.nodes.push(node);
     const added = this.nodes.at(-1) ?? node;
@@ -1078,9 +1081,10 @@ export class GraphStore {
     if (node) node[field] = value === "" ? undefined : Number(value);
   }
 
+  // An empty field means 0, the next available issue.
   setActionIssue(id: string, value: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
-    if (node) node.issue = value === "" ? undefined : Number(value);
+    if (node) node.issue = value === "" ? 0 : Number(value);
   }
 
   // Keeps blank entries while typing; the backend skips them.

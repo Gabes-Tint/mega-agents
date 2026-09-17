@@ -276,12 +276,16 @@
             Issue number
             <input
               type="number"
-              min="1"
-              value={node.issue ?? ""}
+              min="0"
+              value={node.issue ?? 0}
               oninput={(event) =>
                 graph.setActionIssue(node.id, event.currentTarget.value)}
             />
           </label>
+          <p class="hint">
+            0 reads the next available issue: the oldest open one without a
+            label to ignore and not assigned to somebody else.
+          </p>
           <label>
             Labels to ignore
             <input

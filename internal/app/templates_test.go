@@ -58,6 +58,26 @@ func TestTemplatesAreServedToTheEditor(t *testing.T) {
 	}
 }
 
+func TestTheIssueToPullRequestTemplateReadsTheNextAvailableIssue(t *testing.T) {
+	request, err := LoadTemplate("issue-to-pull-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	read := 0
+	for _, node := range request.Nodes {
+		if node.Action == "issue" {
+			read++
+			if node.Issue != 0 {
+				t.Errorf("%s reads issue #%d, want 0 for the next available issue", node.Name, node.Issue)
+			}
+		}
+	}
+	if read != 1 {
+		t.Fatalf("the template has %d Read issue actions, want 1", read)
+	}
+}
+
 func TestTheFitDevelopmentFlowTemplateHasNoErrors(t *testing.T) {
 	request, err := LoadTemplate("fit-development-flow")
 	if err != nil {

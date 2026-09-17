@@ -1,19 +1,31 @@
 #!/usr/bin/env bun
 // A stand-in for the GitHub CLI in browser tests: issue #7 exists, issue #8
-// is labeled "paused", and a pull request opens as #42.
+// is labeled "paused", issue #6 is assigned to hubot, the open issues are #6,
+// #8 and #9 (without labels or assignees), the current user is octocat, and a
+// pull request opens as #42.
 const [command, subcommand, number] = process.argv.slice(2);
 if (command === "issue" && subcommand === "view") {
-  const paused = number === "8";
+  const shown = number === "8" || number === "9" ? Number(number) : 7;
   console.log(
     JSON.stringify({
-      number: paused ? 8 : 7,
-      title: "Add a changelog",
+      number: shown,
+      title: shown === 9 ? "Write the docs" : "Add a changelog",
       body: "Write CHANGELOG.md",
-      url: `https://github.com/acme/api/issues/${paused ? 8 : 7}`,
-      labels: paused ? [{ name: "paused" }] : [],
+      url: `https://github.com/acme/api/issues/${shown}`,
+      labels: shown === 8 ? [{ name: "paused" }] : [],
       comments: [],
     }),
   );
+} else if (command === "issue" && subcommand === "list") {
+  console.log(
+    JSON.stringify([
+      { number: 9, labels: [], assignees: [] },
+      { number: 8, labels: [{ name: "paused" }], assignees: [] },
+      { number: 6, labels: [], assignees: [{ login: "hubot" }] },
+    ]),
+  );
+} else if (command === "api" && subcommand === "user") {
+  console.log("octocat");
 } else if (command === "pr" && subcommand === "create") {
   console.log("https://github.com/acme/api/pull/42");
 } else {

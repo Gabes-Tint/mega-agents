@@ -18,6 +18,13 @@ test.describe("Templates", () => {
       await expect(
         page.getByRole("status", { name: "Workflow file" }),
       ).toHaveText(`Started from template ${title}`);
+      if (title === "Issue to pull request") {
+        // It reads the next available issue.
+        await page
+          .getByRole("button", { name: "Read issue", exact: true })
+          .click();
+        await expect(page.getByLabel("Issue number")).toHaveValue("0");
+      }
     }
     // Arrows between nested blocks are drawn above their container. Hit
     // testing skips pointer-transparent layers, so let it see the arrows
