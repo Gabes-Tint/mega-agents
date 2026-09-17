@@ -90,8 +90,11 @@ refs.
   `{{workspace.base}}`, `{{workspace.repository}}`, and the results of
   connected agents as `{{result}}` or `{{results.<agent>}}`. With an
   **Output schema** (JSON Schema, strict subset) the reply is validated and
-  repaired on the same session up to **Retries** times. An agent flagged as a
-  starting point starts a run on its own.
+  repaired on the same session up to **Retries** times, unless its
+  **Max cost (USD)** is already spent. Each agent step reports the tokens it
+  used and, where the CLI prices it, its cost; run results and
+  `mega-agents runs show` add them up. An agent flagged as a starting point
+  starts a run on its own.
 
 - **JSON Schema** (`output/json-schema@v1`) validates the one value connected
   to it (usually an agent's result) against any JSON Schema. A valid value

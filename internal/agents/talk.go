@@ -20,6 +20,8 @@ type Result struct {
 	Reply    Reply
 	Value    map[string]any
 	Attempts int
+	// Usage adds up every attempt of the conversation.
+	Usage Usage
 }
 
 // InvalidReplyError is a conversation whose replies never satisfied the
@@ -53,7 +55,7 @@ func Talk(ctx context.Context, runner Runner, backend Backend, turn Turn, retrie
 func talk(ctx context.Context, backend Backend, turn Turn, retries int, run turnFunc, log io.Writer) (Result, error) {
 	if turn.Schema == nil {
 		reply, err := run(ctx, turn)
-		return Result{Reply: reply, Attempts: 1}, err
+		return Result{Reply: reply, Attempts: 1, Usage: reply.Usage}, err
 	}
 	instruction := schemaInstruction
 	if !backend.EnforcesSchema() {
@@ -63,20 +65,27 @@ func talk(ctx context.Context, backend Backend, turn Turn, retries int, run turn
 	}
 	attempt := turn
 	attempt.Prompt = turn.Prompt + "\n\n" + instruction
+	var usage Usage
 	for number := 1; ; number++ {
 		fmt.Fprintf(log, "Attempt %d\n", number)
 		reply, err := run(ctx, attempt)
+		usage = usage.Add(reply.Usage)
 		if err != nil {
-			return Result{Reply: reply, Attempts: number}, err
+			return Result{Reply: reply, Attempts: number, Usage: usage}, err
 		}
 		value, errs := validate(turn.Schema, reply)
 		if len(errs) == 0 {
-			return Result{Reply: reply, Value: value, Attempts: number}, nil
+			return Result{Reply: reply, Value: value, Attempts: number, Usage: usage}, nil
 		}
 		correction := errs[0].String()
 		fmt.Fprintf(log, "attempt %d did not satisfy the schema: %s\n", number, correction)
+		invalid := &InvalidReplyError{Attempts: number, Errors: errs}
 		if number > retries {
-			return Result{Reply: reply, Attempts: number}, &InvalidReplyError{Attempts: number, Errors: errs}
+			return Result{Reply: reply, Attempts: number, Usage: usage}, invalid
+		}
+		if turn.MaxCostUSD > 0 && usage.CostKnown && usage.CostUSD > turn.MaxCostUSD {
+			fmt.Fprintf(log, "the conversation has cost $%.4f, over its $%.4f budget; not retrying\n", usage.CostUSD, turn.MaxCostUSD)
+			return Result{Reply: reply, Attempts: number, Usage: usage}, &BudgetError{Spent: usage.CostUSD, Budget: turn.MaxCostUSD, Reason: invalid}
 		}
 		if reply.SessionID != "" {
 			attempt.SessionID = reply.SessionID

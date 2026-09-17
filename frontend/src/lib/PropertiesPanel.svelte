@@ -370,6 +370,22 @@
           />
         </label>
         <label>
+          Max cost (USD)
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="no budget"
+            value={node.maxCostUsd ?? ""}
+            oninput={(event) =>
+              graph.setAgentNumber(
+                node.id,
+                "maxCostUsd",
+                event.currentTarget.value,
+              )}
+          />
+        </label>
+        <label>
           Timeout (minutes)
           <input
             type="number"

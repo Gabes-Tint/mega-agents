@@ -9,7 +9,7 @@ import (
 )
 
 func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
-	retries, timeout := 0, 12.5
+	retries, timeout, budget := 0, 12.5, 0.75
 	request := WorkflowRequest{
 		Name: "Issue to PR",
 		Nodes: []WorkflowNodeInput{
@@ -23,7 +23,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 			{ID: "g2", Type: "agent", Name: "Agent 1", X: 240, Y: 10, W: 160, H: 64, ParentID: "p1",
 				Backend: "opencode", Model: "opencode-go/glm-5.3-flash", Effort: "high",
 				Prompt: "Implement {{workspace.branch}}\nwith \"care\"", OutputSchema: `{"type":"object"}`,
-				Retries: &retries, TimeoutMinutes: &timeout},
+				Retries: &retries, TimeoutMinutes: &timeout, MaxCostUSD: &budget},
 			{ID: "s1", Type: "jsonschema", Name: "Check", X: 5, Y: 6, W: 7, H: 8, ParentID: "p1", Schema: `{"type":"object"}`},
 			{ID: "r1", Type: "router", Name: "Route", X: 1, Y: 1, W: 1, H: 1, ParentID: "p1", Cases: []router.Case{
 				{Name: "approved", Expression: `value.verdict == "approve"`}, {Name: "blocked", Expression: "size(value.findings) > 0"},

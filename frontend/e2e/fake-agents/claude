@@ -17,6 +17,8 @@ const envelope = {
   type: "result",
   session_id: `fake-${process.pid}`,
   result: reply,
+  total_cost_usd: 0.01,
+  usage: { input_tokens: 1200, output_tokens: 30 },
   ...(schemaIndex >= 0 ? { structured_output: { verdict: "approve" } } : {}),
 };
 console.log(

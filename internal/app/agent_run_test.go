@@ -263,3 +263,32 @@ func TestIndependentAgentsWorkAtTheSameTime(t *testing.T) {
 		t.Fatalf("two one-second agents took %s; they did not run at the same time", elapsed)
 	}
 }
+
+func TestAnAgentStepReportsWhatItCost(t *testing.T) {
+	bin := fakeClaude(t)
+	writeReply(t, bin, 1, `{"type":"result","session_id":"s1","result":"done","total_cost_usd":0.25,"usage":{"input_tokens":100,"cache_read_input_tokens":50,"output_tokens":20}}`)
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a1", "type": "agent", "name": "Planner", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Plan", "maxCostUsd": 1.5}
+	]}`, t.TempDir())
+
+	record := finishedRunOnly(t, body)
+
+	usage, _ := record.Steps[0].Details["usage"].(map[string]any)
+	if record.Status != engine.Succeeded || usage["costUsd"] != 0.25 || usage["inputTokens"] != 150.0 || usage["outputTokens"] != 20.0 {
+		t.Fatalf("details = %+v", record.Steps[0].Details)
+	}
+}
+
+func TestAnAgentCostBudgetMustBePositive(t *testing.T) {
+	body := `{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": "/tmp"},
+		{"id": "a1", "type": "agent", "name": "Planner", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Plan", "maxCostUsd": -1}
+	]}`
+
+	response, _ := postRun(t, body)
+
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "Planner: the cost budget must be more than 0 dollars") {
+		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+	}
+}

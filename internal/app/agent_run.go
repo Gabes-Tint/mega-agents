@@ -51,6 +51,12 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 	if timeout <= 0 || timeout > maxAgentTimeout {
 		return fail("the timeout must be more than 0 and at most %g minutes", maxAgentTimeout)
 	}
+	maxCost := 0.0
+	if node.MaxCostUSD != nil {
+		if maxCost = *node.MaxCostUSD; maxCost <= 0 {
+			return fail("the cost budget must be more than 0 dollars")
+		}
+	}
 	var outputSchema *schema.Schema
 	if strings.TrimSpace(node.OutputSchema) != "" {
 		if outputSchema, err = schema.CompileStrict(node.OutputSchema); err != nil {
@@ -87,8 +93,10 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 			fmt.Fprintf(log, "Working in %s\nPrompt:\n%s\n", dir, prompt)
 			conversation, err := agents.Talk(ctx, agents.Runner{}, backend, agents.Turn{
 				Prompt: prompt, Dir: dir, Model: node.Model, Effort: node.Effort, Schema: outputSchema,
+				MaxCostUSD: maxCost,
 			}, retries, log)
 			details["attempts"] = conversation.Attempts
+			details["usage"] = conversation.Usage
 			if conversation.Reply.SessionID != "" {
 				details["sessionId"] = conversation.Reply.SessionID
 			}

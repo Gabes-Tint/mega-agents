@@ -146,7 +146,7 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 			}
 			node.Cases = cases
 			continue
-		case "retries", "timeoutMinutes", "issue":
+		case "retries", "timeoutMinutes", "issue", "maxCostUsd":
 			number, ok := value.(int)
 			decimal, isFloat := value.(float64)
 			if !ok && !isFloat {
@@ -161,6 +161,8 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 			case "retries":
 				retries := int(decimal)
 				node.Retries = &retries
+			case "maxCostUsd":
+				node.MaxCostUSD = &decimal
 			default:
 				node.TimeoutMinutes = &decimal
 			}

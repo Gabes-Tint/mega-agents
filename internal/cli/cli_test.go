@@ -423,3 +423,25 @@ func TestTemplatesAreListedAndStartSavedWorkflows(t *testing.T) {
 		}
 	}
 }
+
+func TestRunsShowAddsUpWhatTheAgentsCost(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	bin := t.TempDir()
+	envelope := `{"type":"result","session_id":"s","result":"done","total_cost_usd":0.125,"usage":{"input_tokens":100,"output_tokens":10}}`
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\necho '"+envelope+"'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path := writeWorkflow(t, "two.json", fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a1", "type": "agent", "name": "One", "parentId": "p1", "start": true, "backend": "claude", "prompt": "1"},
+		{"id": "a2", "type": "agent", "name": "Two", "parentId": "p1", "backend": "claude", "prompt": "2"}
+	], "edges": [{"id": "e1", "from": "a1", "to": "a2"}]}`, t.TempDir()))
+	id := runID.FindStringSubmatch(run(t, "run", path).stdout)[1]
+
+	got := run(t, "runs", "show", id)
+
+	if !strings.Contains(got.stdout, "Agents cost $0.2500 · 200 input tokens · 20 output tokens") {
+		t.Fatalf("stdout:\n%s", got.stdout)
+	}
+}

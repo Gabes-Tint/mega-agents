@@ -27,6 +27,9 @@ type Turn struct {
 	Schema    *schema.Schema
 	// SchemaPath is Schema written to a file, for CLIs that read one.
 	SchemaPath string
+	// MaxCostUSD stops repair turns once the conversation has cost more;
+	// zero means no budget.
+	MaxCostUSD float64
 }
 
 // Command is how to start the CLI: Args[0] is the executable name.
@@ -49,6 +52,7 @@ type Reply struct {
 	SessionID  string
 	Text       string
 	Structured map[string]any
+	Usage      Usage
 }
 
 type Backend interface {
@@ -247,7 +251,7 @@ func (claude) Parse(output Output, turn Turn) (Reply, error) {
 		return Reply{}, fmt.Errorf("claude did not report a session_id\nstdout: %s", excerpt(output.Stdout))
 	}
 	text := stringField(envelope, "result")
-	return Reply{SessionID: session, Text: text, Structured: structured(turn, text, envelope["structured_output"])}, nil
+	return Reply{SessionID: session, Text: text, Structured: structured(turn, text, envelope["structured_output"]), Usage: claudeUsage(envelope)}, nil
 }
 
 func (claude) Describe(line string) string {
@@ -348,7 +352,7 @@ func (codex) Parse(output Output, turn Turn) (Reply, error) {
 			answer = last
 		}
 	}
-	return Reply{SessionID: session, Text: text, Structured: structured(turn, text, answer)}, nil
+	return Reply{SessionID: session, Text: text, Structured: structured(turn, text, answer), Usage: codexUsage(events)}, nil
 }
 
 // apiMessage unwraps an API error Codex relays as a JSON string.
@@ -530,7 +534,7 @@ func (opencode) Parse(output Output, turn Turn) (Reply, error) {
 	if object, ok := schema.ExtractObject(text); ok {
 		embedded = object
 	}
-	return Reply{SessionID: session, Text: text, Structured: structured(turn, text, embedded)}, nil
+	return Reply{SessionID: session, Text: text, Structured: structured(turn, text, embedded), Usage: opencodeUsage(events)}, nil
 }
 
 func (opencode) Describe(line string) string {

@@ -98,6 +98,7 @@ test.describe("Agent blocks", () => {
       `worked in ${worktreePath}: Implement login on feature/agent`,
     );
     await expect(result).toContainText("Backend: claude");
+    await expect(result).toContainText("Cost: $0.0100 · 1200 in / 30 out");
     await expect(agent).toHaveClass(/status-succeeded/);
     await page.getByRole("button", { name: "Logs of Implementer" }).click();
     const log = page.getByRole("dialog", { name: "Logs: Implementer" });

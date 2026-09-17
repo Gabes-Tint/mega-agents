@@ -30,7 +30,7 @@ export const GIT_ACTIONS: readonly { action: GitAction; label: string }[] = [
 export type AgentField =
   "backend" | "model" | "effort" | "prompt" | "outputSchema";
 
-export type AgentNumber = "retries" | "timeoutMinutes";
+export type AgentNumber = "retries" | "timeoutMinutes" | "maxCostUsd";
 
 // Coding-agent CLIs an Agent block can run, as the backend names them.
 export const AGENT_BACKENDS: readonly { backend: string; label: string }[] = [
@@ -114,6 +114,7 @@ export interface GraphNode {
   outputSchema?: string;
   retries?: number;
   timeoutMinutes?: number;
+  maxCostUsd?: number;
   schema?: string;
   cases?: RouteCase[];
   command?: string;

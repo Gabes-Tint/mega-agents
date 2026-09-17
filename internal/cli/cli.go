@@ -270,7 +270,11 @@ func showRun(store *runs.Store, id string, env Env) int {
 	if record.FinishedAt != "" {
 		fmt.Fprintf(env.Stdout, "  finished %s", record.FinishedAt)
 	}
-	fmt.Fprint(env.Stdout, "\n\n")
+	fmt.Fprint(env.Stdout, "\n")
+	if line := usageLine(record); line != "" {
+		fmt.Fprintln(env.Stdout, line)
+	}
+	fmt.Fprint(env.Stdout, "\n")
 	for _, step := range record.Steps {
 		fmt.Fprintf(env.Stdout, "%s  %s  %s  %s\n", step.TaskID, step.Name, step.Kind, step.Status)
 		if step.Error != "" {
@@ -394,4 +398,28 @@ func initWorkflow(args []string, env Env) int {
 	fmt.Fprintf(env.Stdout, "Saved %s from template %s at %s; set its project path, then: mega-agents run %s\n",
 		name, args[0], store.Path(name), name)
 	return 0
+}
+
+// usageLine adds up what a run's agent steps reported they used.
+func usageLine(record runs.Record) string {
+	var cost float64
+	var input, output int
+	seen := false
+	for _, step := range record.Steps {
+		usage, ok := step.Details["usage"].(map[string]any)
+		if !ok {
+			continue
+		}
+		seen = true
+		value, _ := usage["costUsd"].(float64)
+		cost += value
+		tokens, _ := usage["inputTokens"].(float64)
+		input += int(tokens)
+		tokens, _ = usage["outputTokens"].(float64)
+		output += int(tokens)
+	}
+	if !seen {
+		return ""
+	}
+	return fmt.Sprintf("Agents cost $%.4f · %d input tokens · %d output tokens", cost, input, output)
 }

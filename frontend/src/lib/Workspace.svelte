@@ -45,6 +45,34 @@
     ["reusedFrom", "Reused from"],
   ];
 
+  interface Usage {
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  }
+
+  function usageOf(step: RunStep): Usage | undefined {
+    const usage = step.details?.usage;
+    return usage && typeof usage === "object" ? (usage as Usage) : undefined;
+  }
+
+  // What the run's agents reported they used, added up.
+  function runUsage(result: RunResult): string {
+    const usages = result.steps
+      .map(usageOf)
+      .filter((usage): usage is Usage => usage !== undefined);
+    if (usages.length === 0) return "";
+    const total = usages.reduce(
+      (sum, usage) => ({
+        inputTokens: sum.inputTokens + usage.inputTokens,
+        outputTokens: sum.outputTokens + usage.outputTokens,
+        costUsd: sum.costUsd + usage.costUsd,
+      }),
+      { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    );
+    return `Agents cost $${total.costUsd.toFixed(4)} · ${total.inputTokens} input tokens · ${total.outputTokens} output tokens`;
+  }
+
   function fieldErrors(details: Record<string, unknown> | undefined): string[] {
     const errors = details?.errors;
     if (!Array.isArray(errors)) return [];
@@ -470,6 +498,9 @@
           {#if runResult.retryOf}
             <span>Retry of {runResult.retryOf}</span>
           {/if}
+          {#if runUsage(runResult)}
+            <span>{runUsage(runResult)}</span>
+          {/if}
         </p>
         {#if runResult.id && !running && ["failed", "cancelled", "interrupted"].includes(runResult.status)}
           <button type="button" onclick={() => void retryRun()}>
@@ -492,6 +523,13 @@
                 >
                   Logs
                 </button>
+              {/if}
+              {#if usageOf(step)}
+                {@const usage = usageOf(step)!}
+                <span
+                  >Cost: ${usage.costUsd.toFixed(4)} · {usage.inputTokens} in / {usage.outputTokens}
+                  out</span
+                >
               {/if}
               {#if step.details && "valid" in step.details}
                 <span>Valid: {String(step.details.valid)}</span>

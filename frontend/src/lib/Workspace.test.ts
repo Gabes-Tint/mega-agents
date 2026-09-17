@@ -2652,4 +2652,61 @@ describe("graph builder workspace", () => {
     ).toHaveTextContent("Started from template Gate and fix");
     vi.unstubAllGlobals();
   });
+
+  test("shows what each agent cost and what the run cost", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    const usage = (cost: number) => ({
+      inputTokens: 1000,
+      cachedInputTokens: 0,
+      outputTokens: 50,
+      costUsd: cost,
+      costKnown: true,
+    });
+    fakeBackend({
+      "POST /api/runs": [
+        record("succeeded", [
+          {
+            nodeId: "a1",
+            name: "Coder",
+            action: "agent",
+            status: "succeeded",
+            details: { usage: usage(0.02) },
+          },
+          {
+            nodeId: "a2",
+            name: "Reviewer",
+            action: "agent",
+            status: "succeeded",
+            details: { usage: usage(0.0125) },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() =>
+      expect(result).toHaveTextContent(
+        "Agents cost $0.0325 · 2000 input tokens · 100 output tokens",
+      ),
+    );
+    expect(result).toHaveTextContent("Cost: $0.0200 · 1000 in / 50 out");
+    vi.unstubAllGlobals();
+  });
+
+  test("sets an agent's cost budget", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Agent", 410, 410);
+
+    await fireEvent.input(screen.getByLabelText("Max cost (USD)"), {
+      target: { value: "0.5" },
+    });
+    await fireEvent.click(screen.getByText("Project 1"));
+    await fireEvent.click(screen.getByText("Agent 1"));
+
+    expect(screen.getByLabelText("Max cost (USD)")).toHaveValue(0.5);
+  });
 });
