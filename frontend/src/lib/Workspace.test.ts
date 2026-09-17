@@ -9,7 +9,10 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 import Workspace from "./Workspace.svelte";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 interface FakeDataTransfer {
   setData(type: string, value: string): void;
@@ -2139,5 +2142,173 @@ describe("graph builder workspace", () => {
     const result = screen.getByRole("region", { name: "Run result" });
     await waitFor(() => expect(result).toHaveTextContent("Route: approved"));
     vi.unstubAllGlobals();
+  });
+
+  test("saves the workflow under its name", async () => {
+    const calls = fakeBackend({
+      "PUT /api/workflows/issue-to-pr": [
+        () => Response.json({ name: "issue-to-pr", updatedAt: "now" }),
+      ],
+    });
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await fireEvent.input(screen.getByLabelText("Workflow name"), {
+      target: { value: "Issue to PR" },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: "Workflow file" }),
+      ).toHaveTextContent("Saved as issue-to-pr"),
+    );
+    expect(calls).toContain("PUT /api/workflows/issue-to-pr");
+    vi.unstubAllGlobals();
+  });
+
+  test("explains a save the backend refuses", async () => {
+    fakeBackend({
+      "PUT /api/workflows/workflow": [
+        () =>
+          new Response("agent cannot be placed inside root", { status: 400 }),
+      ],
+    });
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: "Workflow file" }),
+      ).toHaveTextContent("agent cannot be placed inside root"),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("opens a saved workflow", async () => {
+    fakeBackend({
+      "GET /api/workflows": [
+        () =>
+          Response.json([
+            { name: "nightly", updatedAt: "2026-09-17T01:00:00Z" },
+          ]),
+      ],
+      "GET /api/workflows/nightly": [
+        () =>
+          Response.json({
+            name: "nightly",
+            nodes: [
+              {
+                id: "api",
+                type: "project",
+                name: "api",
+                x: 10,
+                y: 10,
+                w: 300,
+                h: 200,
+              },
+              {
+                id: "planner",
+                type: "agent",
+                name: "Planner",
+                x: 20,
+                y: 40,
+                w: 160,
+                h: 64,
+                parentId: "api",
+              },
+            ],
+            edges: [],
+          }),
+      ],
+    });
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "nightly" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Planner" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Project 1" })).toBeNull();
+    expect(screen.getByLabelText("Workflow name")).toHaveValue("nightly");
+    vi.unstubAllGlobals();
+  });
+
+  test("shows when there is nothing to open", async () => {
+    fakeBackend({ "GET /api/workflows": [() => Response.json([])] });
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+
+    expect(
+      await screen.findByText("No saved workflows yet."),
+    ).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("imports a workflow YAML file", async () => {
+    let body = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        body = String(init?.body);
+        return Response.json({
+          name: "imported",
+          nodes: [
+            {
+              id: "api",
+              type: "project",
+              name: "Imported",
+              x: 0,
+              y: 0,
+              w: 200,
+              h: 100,
+            },
+          ],
+          edges: [],
+        });
+      }),
+    );
+    render(Workspace);
+    const file = new File(["kind: Workflow"], "flow.yaml", {
+      type: "application/yaml",
+    });
+
+    await fireEvent.change(screen.getByLabelText("Import YAML"), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Imported" }),
+      ).toBeInTheDocument(),
+    );
+    expect(body).toBe("kind: Workflow");
+    vi.unstubAllGlobals();
+  });
+
+  test("keeps the graph across reloads of the page", async () => {
+    const first = render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await fireEvent.input(screen.getByLabelText("Workflow name"), {
+      target: { value: "draft" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    first.unmount();
+
+    render(Workspace);
+
+    expect(
+      screen.getByRole("button", { name: "Project 1" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Workflow name")).toHaveValue("draft");
+    localStorage.clear();
   });
 });

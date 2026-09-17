@@ -30,12 +30,18 @@ func NewHandler(assets fs.FS) http.Handler {
 		store = &runs.Store{Root: filepath.Join(os.TempDir(), "mega-agents-runs-unavailable")}
 		log.Printf("recording runs under %s: %v", store.Root, err)
 	}
-	return NewHandlerWithRuns(assets, Runs{Store: store})
+	workflows, err := DefaultWorkflowStore()
+	if err != nil {
+		workflows = WorkflowStore{Root: filepath.Join(os.TempDir(), "mega-agents-workflows-unavailable")}
+		log.Printf("saving workflows under %s: %v", workflows.Root, err)
+	}
+	return NewHandlerWithRuns(assets, Runs{Store: store}, workflows)
 }
 
-func NewHandlerWithRuns(assets fs.FS, service Runs) http.Handler {
+func NewHandlerWithRuns(assets fs.FS, service Runs, workflows WorkflowStore) http.Handler {
 	mux := http.NewServeMux()
 	registerWorkflowYAMLHandler(mux)
+	registerWorkflowStoreHandler(mux, workflows)
 	registerRunHandler(mux, service)
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

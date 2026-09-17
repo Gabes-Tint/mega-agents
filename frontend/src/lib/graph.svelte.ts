@@ -38,6 +38,23 @@ export interface RouteCase {
   expression: string;
 }
 
+// The graph as the backend takes it: runs, exports and saved workflows.
+export interface WorkflowGraph {
+  name?: string;
+  nodes: GraphNode[];
+  edges?: GraphEdge[];
+}
+
+// File name a workflow is saved under: its name in lowercase words joined
+// with dashes.
+export function workflowSlug(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "workflow";
+}
+
 export interface RunStepStatus {
   nodeId: string;
   status: string;
@@ -253,7 +270,23 @@ export class GraphStore {
   // The run whose statuses the canvas shows, and the block whose log of that
   // run is open.
   runId = $state<string | null>(null);
+  workflowName = $state("workflow");
   logNodeId = $state<string | null>(null);
+
+  // Replaces the whole graph, as when a saved workflow is opened.
+  load(workflow: WorkflowGraph): void {
+    this.nodes = workflow.nodes;
+    this.edges = workflow.edges ?? [];
+    this.workflowName = workflow.name ?? "workflow";
+    this.selectedId = null;
+    this.cancelConnect();
+    this.showRun([]);
+    this.logNodeId = null;
+  }
+
+  toRequest(): Required<WorkflowGraph> {
+    return { name: this.workflowName, nodes: this.nodes, edges: this.edges };
+  }
 
   get selected(): GraphNode | undefined {
     return this.nodes.find((node) => node.id === this.selectedId);

@@ -43,7 +43,7 @@ test.describe("Agent blocks", () => {
       : { x: box.x + box.width - 40, y: box.y + box.height - 30 };
     await page.mouse.move(target.x, target.y, { steps: 10 });
     await page.mouse.up();
-    await page.getByLabel("Name").fill(name);
+    await page.getByLabel("Name", { exact: true }).fill(name);
     return page.getByRole("button", { name, exact: true });
   }
 

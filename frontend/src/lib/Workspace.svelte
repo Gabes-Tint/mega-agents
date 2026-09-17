@@ -1,6 +1,10 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import { GraphStore } from "./graph.svelte.js";
+  import {
+    GraphStore,
+    workflowSlug,
+    type WorkflowGraph,
+  } from "./graph.svelte.js";
   import Palette from "./Palette.svelte";
   import Canvas from "./Canvas.svelte";
   import PropertiesPanel from "./PropertiesPanel.svelte";
@@ -46,7 +50,99 @@
     );
   }
 
+  // The graph in progress survives reloads of the page in this browser.
+  const DRAFT_KEY = "mega-agents:draft";
+
   const graph = new GraphStore();
+  try {
+    const draft = localStorage.getItem(DRAFT_KEY);
+    if (draft) graph.load(JSON.parse(draft) as WorkflowGraph);
+  } catch {
+    // A missing or unreadable draft starts an empty graph.
+  }
+  $effect(() => {
+    const draft = JSON.stringify(graph.toRequest());
+    try {
+      localStorage.setItem(DRAFT_KEY, draft);
+    } catch {
+      // Storage may be unavailable; the graph still works for this page.
+    }
+  });
+
+  interface WorkflowSummary {
+    name: string;
+    updatedAt: string;
+  }
+
+  let fileStatus = $state("");
+  let openDialog = $state(false);
+  let savedWorkflows = $state<WorkflowSummary[] | null>(null);
+
+  async function saveWorkflow(): Promise<void> {
+    const name = workflowSlug(graph.workflowName);
+    fileStatus = "Saving…";
+    try {
+      const response = await fetch(`/api/workflows/${name}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(graph.toRequest()),
+      });
+      fileStatus = response.ok
+        ? `Saved as ${name}`
+        : (await response.text()).trim();
+    } catch {
+      fileStatus = "Cannot reach the backend";
+    }
+  }
+
+  async function listWorkflows(): Promise<void> {
+    savedWorkflows = null;
+    try {
+      const response = await fetch("/api/workflows");
+      savedWorkflows = response.ok
+        ? ((await response.json()) as WorkflowSummary[])
+        : [];
+    } catch {
+      savedWorkflows = [];
+      fileStatus = "Cannot reach the backend";
+    }
+  }
+
+  async function openWorkflow(name: string): Promise<void> {
+    openDialog = false;
+    try {
+      const response = await fetch(`/api/workflows/${name}`);
+      if (!response.ok) {
+        fileStatus = (await response.text()).trim();
+        return;
+      }
+      graph.load((await response.json()) as WorkflowGraph);
+      runResult = null;
+      fileStatus = `Opened ${name}`;
+    } catch {
+      fileStatus = "Cannot reach the backend";
+    }
+  }
+
+  async function importWorkflow(file: File | undefined): Promise<void> {
+    if (!file) return;
+    try {
+      const response = await fetch("/api/workflows/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/yaml" },
+        body: await file.text(),
+      });
+      if (!response.ok) {
+        fileStatus = (await response.text()).trim();
+        return;
+      }
+      graph.load((await response.json()) as WorkflowGraph);
+      runResult = null;
+      fileStatus = `Imported ${file.name}`;
+    } catch {
+      fileStatus = "Cannot reach the backend";
+    }
+  }
   let yamlError = $state("");
   let running = $state(false);
   let runResult = $state<RunResult | null>(null);
@@ -121,10 +217,7 @@
       const response = await fetch("/api/workflows/yaml", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nodes: graph.nodes,
-          edges: graph.edges,
-        }),
+        body: JSON.stringify(graph.toRequest()),
       });
       if (!response.ok) {
         yamlError = await response.text();
@@ -154,10 +247,7 @@
       const response = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nodes: graph.nodes,
-          edges: graph.edges,
-        }),
+        body: JSON.stringify(graph.toRequest()),
       });
       if (!response.ok) {
         runError = (await response.text()).trim();
@@ -188,6 +278,34 @@
       <button type="button" onclick={() => void downloadYaml()}>
         Download YAML
       </button>
+      <label class="workflow-name">
+        Workflow name
+        <input type="text" bind:value={graph.workflowName} />
+      </label>
+      <button type="button" onclick={() => void saveWorkflow()}>Save</button>
+      <button
+        type="button"
+        onclick={() => {
+          openDialog = true;
+          void listWorkflows();
+        }}
+      >
+        Open…
+      </button>
+      <label class="import">
+        Import YAML
+        <input
+          type="file"
+          accept=".yaml,.yml"
+          onchange={(event) => {
+            void importWorkflow(event.currentTarget.files?.[0]);
+            event.currentTarget.value = "";
+          }}
+        />
+      </label>
+      <span class="file-status" role="status" aria-label="Workflow file"
+        >{fileStatus}</span
+      >
     </div>
     {#if yamlError}
       <p class="yaml-error">{yamlError}</p>
@@ -258,6 +376,33 @@
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>
+  <Dialog.Root bind:open={openDialog}>
+    <Dialog.Portal>
+      <Dialog.Overlay class="backdrop" />
+      <Dialog.Content class="log-viewer">
+        <Dialog.Title class="dialog-title">Open workflow</Dialog.Title>
+        {#if savedWorkflows === null}
+          <p>Loading…</p>
+        {:else if savedWorkflows.length === 0}
+          <p>No saved workflows yet.</p>
+        {:else}
+          <ul class="saved-workflows">
+            {#each savedWorkflows as workflow (workflow.name)}
+              <li>
+                <button
+                  type="button"
+                  onclick={() => void openWorkflow(workflow.name)}
+                  >{workflow.name}</button
+                >
+                <span>{workflow.updatedAt}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <Dialog.Close class="close-button">Close</Dialog.Close>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
   <Palette {graph} />
   <Canvas {graph} />
   <PropertiesPanel {graph} />
@@ -290,7 +435,49 @@
 
   .actions {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
+  }
+
+  .workflow-name,
+  .import {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: #5b7a71;
+  }
+
+  .workflow-name input {
+    padding: 0.3rem 0.4rem;
+    border: 1px solid #b8ccc4;
+    border-radius: 0.375rem;
+    font: inherit;
+  }
+
+  .import input {
+    max-width: 12rem;
+    font-size: 0.75rem;
+  }
+
+  .file-status {
+    font-size: 0.8rem;
+    color: #5b7a71;
+  }
+
+  .saved-workflows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .saved-workflows span {
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+    color: #5b7a71;
   }
 
   .toolbar button:disabled {

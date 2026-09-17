@@ -14,6 +14,7 @@ import {
   rejectedDropHint,
   shortNodeId,
   GIT_ACTIONS,
+  workflowSlug,
   type NodeType,
 } from "./graph.svelte.js";
 
@@ -1159,5 +1160,54 @@ describe("router cases", () => {
     graph.addCase("missing");
     graph.setCase("missing", 0, "name", "x");
     graph.removeCase("missing", 0);
+  });
+});
+
+describe("whole workflows", () => {
+  test("loads a workflow in place of the current graph", () => {
+    const graph = new GraphStore();
+    const old = graph.addNode("project", 0, 0);
+    graph.showRun([{ nodeId: old.id, status: "failed" }], "run-1");
+
+    graph.load({
+      name: "issue-to-pr",
+      nodes: [
+        { id: "api", type: "project", name: "api", x: 0, y: 0, w: 400, h: 300 },
+      ],
+      edges: [{ id: "e1", from: "api", to: "api" }],
+    });
+
+    expect(graph.workflowName).toBe("issue-to-pr");
+    expect(graph.nodes.map((node) => node.id)).toEqual(["api"]);
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.selectedId).toBeNull();
+    expect(graph.runId).toBeNull();
+    expect(graph.statusOf(old.id)).toBeUndefined();
+  });
+
+  test("loads a workflow without edges or a name", () => {
+    const graph = new GraphStore();
+
+    graph.load({ nodes: [] });
+
+    expect(graph.workflowName).toBe("workflow");
+    expect(graph.edges).toEqual([]);
+  });
+
+  test("describes the graph as the request the backend takes", () => {
+    const graph = new GraphStore();
+    graph.workflowName = "Nightly Sync";
+    graph.addNode("project", 1, 2);
+
+    const request = graph.toRequest();
+
+    expect(request.name).toBe("Nightly Sync");
+    expect(request.nodes).toHaveLength(1);
+    expect(request.edges).toEqual([]);
+  });
+
+  test("names the saved file after the workflow", () => {
+    expect(workflowSlug("Issue to PR!")).toBe("issue-to-pr");
+    expect(workflowSlug("  ")).toBe("workflow");
   });
 });

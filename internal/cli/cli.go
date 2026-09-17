@@ -31,7 +31,9 @@ const usage = `Usage: mega-agents [command]
 
 Commands:
   serve                        serve the editor (the default)
-  run <workflow.yaml|.json>    run a workflow and record the run
+  run <workflow.yaml|.json>    run a workflow file and record the run
+  run <name>                   run a workflow saved from the editor
+  workflows                    list workflows saved from the editor
   runs                         list recorded runs, newest first
   runs show <run-id>           show a run and each of its steps
   logs <run-id> [step]         print a run's logs, or one step's by id or name
@@ -56,6 +58,8 @@ func Main(args []string, env Env) int {
 		return runWorkflow(args[1:], env)
 	case "runs":
 		return listOrShow(args[1:], env)
+	case "workflows":
+		return listWorkflows(env)
 	case "logs":
 		return printLogs(args[1:], env)
 	case "help", "-h", "--help":
@@ -131,6 +135,17 @@ func stepLine(step engine.Step) string {
 // readWorkflow accepts the YAML the editor exports and the JSON graph the
 // editor posts.
 func readWorkflow(path string) (app.WorkflowRequest, error) {
+	if _, err := os.Stat(path); err != nil && filepath.Ext(path) == "" {
+		store, storeErr := app.DefaultWorkflowStore()
+		if storeErr != nil {
+			return app.WorkflowRequest{}, storeErr
+		}
+		request, loadErr := store.Load(path)
+		if loadErr != nil {
+			return app.WorkflowRequest{}, fmt.Errorf("no workflow file or saved workflow named %s: %w", path, loadErr)
+		}
+		return request, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return app.WorkflowRequest{}, fmt.Errorf("cannot read %s: %w", path, err)
@@ -265,5 +280,29 @@ func printLogs(args []string, env Env) int {
 		}
 		fmt.Fprint(env.Stdout, text)
 	}
+	return 0
+}
+
+func listWorkflows(env Env) int {
+	store, err := app.DefaultWorkflowStore()
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return 2
+	}
+	workflows, err := store.List()
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return 1
+	}
+	if len(workflows) == 0 {
+		fmt.Fprintln(env.Stdout, "No workflows saved yet.")
+		return 0
+	}
+	table := tabwriter.NewWriter(env.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "WORKFLOW\tUPDATED\tFILE")
+	for _, workflow := range workflows {
+		fmt.Fprintf(table, "%s\t%s\t%s\n", workflow.Name, workflow.UpdatedAt, store.Path(workflow.Name))
+	}
+	_ = table.Flush()
 	return 0
 }

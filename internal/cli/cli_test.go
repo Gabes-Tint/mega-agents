@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Gabes-Tint/mega-agents/internal/app"
 	"github.com/Gabes-Tint/mega-agents/internal/gitops"
 )
 
@@ -283,7 +284,7 @@ func TestInspectionCommandsExplainMistakes(t *testing.T) {
 func TestHelpListsTheCommands(t *testing.T) {
 	got := run(t, "help")
 
-	for _, want := range []string{"serve", "run <workflow", "runs", "runs show <run-id>", "logs <run-id> [step]"} {
+	for _, want := range []string{"serve", "run <workflow", "workflows", "runs", "runs show <run-id>", "logs <run-id> [step]"} {
 		if got.code != 0 || !strings.Contains(got.stdout, want) {
 			t.Fatalf("help lacks %q:\n%s", want, got.stdout)
 		}
@@ -305,5 +306,38 @@ func TestNoArgumentsServesTheEditor(t *testing.T) {
 		return errors.New("port in use")
 	}}); code != 1 || !strings.Contains(stderr.String(), "port in use") {
 		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+}
+
+func TestRunExecutesASavedWorkflowByName(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	request, err := app.ParseWorkflowYAML([]byte(fetchWorkflowYAML(projectClone(t))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, _ := app.DefaultWorkflowStore()
+	if err := store.Save("nightly-sync", request); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := run(t, "workflows")
+	got := run(t, "run", "nightly-sync")
+
+	if listed.code != 0 || !strings.Contains(listed.stdout, "nightly-sync") {
+		t.Fatalf("workflows: %d %q", listed.code, listed.stdout)
+	}
+	if !strings.Contains(got.stdout, "started nightly-sync") || !strings.Contains(got.stdout, "✔ Fetch succeeded") {
+		t.Fatalf("run: %d\n%s\n%s", got.code, got.stdout, got.stderr)
+	}
+	if missing := run(t, "run", "nope"); missing.code != 2 || !strings.Contains(missing.stderr, "no workflow file or saved workflow named nope") {
+		t.Fatalf("missing: %d %q", missing.code, missing.stderr)
+	}
+}
+
+func TestWorkflowsWithNothingSaved(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+
+	if got := run(t, "workflows"); got.code != 0 || !strings.Contains(got.stdout, "No workflows saved yet") {
+		t.Fatalf("got %d %q", got.code, got.stdout)
 	}
 }

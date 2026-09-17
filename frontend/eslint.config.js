@@ -33,6 +33,7 @@ export default tseslint.config(
         PointerEvent: "readonly",
         setTimeout: "readonly",
         URL: "readonly",
+        localStorage: "readonly",
         Window: "readonly",
       },
     },

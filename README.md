@@ -42,10 +42,17 @@ The same binary runs workflows headless and inspects recorded runs:
 ```sh
 ./bin/mega-agents run workflow.yaml     # a workflow exported from the editor
 ./bin/mega-agents run graph.json        # or the editor's JSON graph
+./bin/mega-agents workflows             # workflows saved from the editor
+./bin/mega-agents run <name>            # run a saved workflow by name
 ./bin/mega-agents runs                  # recorded runs, newest first
 ./bin/mega-agents runs show <run-id>    # each step's status, error and details
 ./bin/mega-agents logs <run-id> [step]  # every step's log, or one by id or name
 ```
+
+The editor's **Save** writes the workflow as YAML to
+`$MEGA_AGENTS_HOME/workflows/<name>.yaml`; **Open…** loads one back and
+**Import YAML** loads any exported file. The graph in progress is also kept in
+the browser, so reloading the page does not lose it.
 
 Every run, whether started from the editor or the command line, keeps its
 record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
