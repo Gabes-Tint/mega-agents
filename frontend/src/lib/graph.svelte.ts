@@ -214,7 +214,7 @@ export const PALETTE: readonly PaletteItem[] = [
     type: "jsonschema",
     label: "JSON Schema",
     description:
-      "Checks the connected value, usually an agent's reply, against a JSON Schema and sends it down valid or invalid.",
+      "Sits inside an agent and checks its reply against a JSON Schema, sending it down valid or invalid to the blocks beside the agent.",
   },
   {
     type: "router",
@@ -263,7 +263,7 @@ export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
   gitlab: ["project"],
   githubapp: ["github"],
   action: ["github"],
-  jsonschema: ["project", "agent", "loop"],
+  jsonschema: ["agent"],
   router: ["project", "agent", "loop"],
   command: ["project", "agent", "loop"],
   loop: ["project"],
@@ -345,7 +345,7 @@ export function allowedTargetsLabel(type: NodeType): string {
     .filter((target): target is NodeType => target !== "root")
     .map((target) => {
       if (target === type) return `another ${TARGET_LABELS[type]}`;
-      return `a ${TARGET_LABELS[target]} box`;
+      return `${article(TARGET_LABELS[target])} ${TARGET_LABELS[target]} box`;
     });
   if (labels.length === 0) return "nothing";
   if (labels.length === 1) return labels[0] ?? "nothing";
@@ -555,11 +555,14 @@ export class GraphStore {
   connect(fromId: string, toId: string): boolean {
     const from = this.nodes.find((candidate) => candidate.id === fromId);
     const to = this.nodes.find((candidate) => candidate.id === toId);
-    if (!from || !to || fromId === toId) return false;
+    // A schema check takes the reply of the agent it sits in, never an arrow.
+    if (!from || !to || fromId === toId || to.type === "jsonschema")
+      return false;
     // A Git action's output also leaves its GitHub block toward the blocks
-    // beside that GitHub block, such as an agent that takes the workspace.
+    // beside that GitHub block, such as an agent that takes the workspace,
+    // and a schema check's output leaves its agent the same way.
     const provider =
-      from.type === "action"
+      from.type === "action" || from.type === "jsonschema"
         ? this.nodes.find((candidate) => candidate.id === from.parentId)
         : undefined;
     const sameLevel = (from.parentId ?? null) === (to.parentId ?? null);
@@ -958,17 +961,22 @@ export class GraphStore {
     return this.runIterations[id];
   }
 
-  // Every block inside the loop with outputs to choose from, and each output.
+  // Every block inside the loop with outputs to choose from, and each output,
+  // including the schema checks inside its agents.
   loopExits(id: string): LoopExit[] {
-    return this.nodes
-      .filter((node) => node.parentId === id)
-      .flatMap((node) =>
-        this.outputPorts(node.id).map((port) => ({
-          nodeId: node.id,
-          port,
-          label: `${node.name} takes ${port}`,
-        })),
-      );
+    const inside = (node: GraphNode) =>
+      node.parentId === id ||
+      (node.type === "jsonschema" &&
+        this.nodes.some(
+          (agent) => agent.id === node.parentId && agent.parentId === id,
+        ));
+    return this.nodes.filter(inside).flatMap((node) =>
+      this.outputPorts(node.id).map((port) => ({
+        nodeId: node.id,
+        port,
+        label: `${node.name} takes ${port}`,
+      })),
+    );
   }
 
   // Sets the exit from "<block id>:<output>", or clears it with "".

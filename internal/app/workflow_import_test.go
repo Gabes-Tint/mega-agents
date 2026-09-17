@@ -24,7 +24,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 				Backend: "opencode", Model: "opencode-go/glm-5.3-flash", Effort: "high",
 				Prompt: "Implement {{workspace.branch}}\nwith \"care\"", OutputSchema: `{"type":"object"}`,
 				Retries: &retries, TimeoutMinutes: &timeout, MaxCostUSD: &budget, ContinueSession: true},
-			{ID: "s1", Type: "jsonschema", Name: "Check", X: 5, Y: 6, W: 7, H: 8, ParentID: "p1", Schema: `{"type":"object"}`},
+			{ID: "s1", Type: "jsonschema", Name: "Check", X: 5, Y: 6, W: 7, H: 8, ParentID: "g2", Schema: `{"type":"object"}`},
 			{ID: "r1", Type: "router", Name: "Route", X: 1, Y: 1, W: 1, H: 1, ParentID: "p1", Cases: []router.Case{
 				{Name: "approved", Expression: `value.verdict == "approve"`}, {Name: "blocked", Expression: "size(value.findings) > 0"},
 			}},
@@ -32,7 +32,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 		},
 		Edges: []WorkflowEdgeInput{
 			{ID: "e1", From: "a1", To: "a2"}, {ID: "e2", From: "a1", To: "g2"},
-			{ID: "e3", From: "g2", To: "s1"}, {ID: "e4", From: "s1", To: "f1", FromPort: "invalid"},
+			{ID: "e4", From: "s1", To: "f1", FromPort: "invalid"},
 			{ID: "e5", From: "s1", To: "r1"},
 		},
 	}
@@ -64,8 +64,8 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 	for _, edge := range imported.Edges {
 		edges[edge.From+">"+edge.To+":"+edge.FromPort] = true
 	}
-	if len(imported.Edges) != 5 || !edges["create-worktree>rebase:"] || !edges["create-worktree>agent-1:"] ||
-		!edges["agent-1>check:"] || !edges["check>fixer:invalid"] {
+	if len(imported.Edges) != 4 || !edges["create-worktree>rebase:"] || !edges["create-worktree>agent-1:"] ||
+		!edges["check>route:"] || !edges["check>fixer:invalid"] {
 		t.Errorf("edges = %+v", imported.Edges)
 	}
 }

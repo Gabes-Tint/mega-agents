@@ -129,11 +129,10 @@ func TestRouterAndSchemaLogsMarkTheirOutcome(t *testing.T) {
 		{ID: "p1", Type: "project", Name: "api", Path: "/work/api"},
 		{ID: "a1", Type: "agent", Name: "Reviewer", ParentID: "p1", Start: true, Backend: "claude", Prompt: "Review"},
 		{ID: "x1", Type: "router", Name: "Route", ParentID: "p1", Cases: []router.Case{{Name: "approved", Expression: "value.ok"}}},
-		{ID: "s1", Type: "jsonschema", Name: "Check", ParentID: "p1", Schema: `{"type":"object","required":["ok"]}`},
+		{ID: "s1", Type: "jsonschema", Name: "Check", ParentID: "a1", Schema: `{"type":"object","required":["ok"]}`},
 		{ID: "fix", Type: "agent", Name: "Fix", ParentID: "p1", Backend: "claude", Prompt: "Fix {{result}}"},
 	}, Edges: []WorkflowEdgeInput{
 		{ID: "e1", From: "a1", To: "x1"},
-		{ID: "e2", From: "a1", To: "s1"},
 		{ID: "e3", From: "s1", To: "fix", FromPort: "invalid"},
 	}})
 	if len(failures) > 0 {

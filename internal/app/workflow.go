@@ -110,7 +110,7 @@ var containmentMatrix = map[string]map[string]bool{
 	"gitlab":     {"project": true},
 	"githubapp":  {"github": true},
 	"action":     {"github": true},
-	"jsonschema": {"project": true, "agent": true, "loop": true},
+	"jsonschema": {"agent": true},
 	"router":     {"project": true, "agent": true, "loop": true},
 	"command":    {"project": true, "agent": true, "loop": true},
 	"loop":       {"project": true},

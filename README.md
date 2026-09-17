@@ -110,20 +110,20 @@ refs.
   fixer keeps everything the coder learned. An agent flagged as a starting point
   starts a run on its own.
 
-- **JSON Schema** (`output/json-schema@v1`) validates the one value connected
-  to it (usually an agent's result) against any JSON Schema. A valid value
-  leaves on its `valid` output; an invalid one leaves on `invalid` with the
-  value and field-level errors when an arrow takes that branch, and otherwise
-  fails the run. Choose each outgoing arrow's output in the block's
-  properties.
+- **JSON Schema** (`output/json-schema@v1`) sits inside an agent and validates
+  that agent's reply against any JSON Schema, with no arrow into it. A valid
+  value leaves on its `valid` output; an invalid one leaves on `invalid` with
+  the value and field-level errors when an arrow takes that branch, and
+  otherwise fails the run. Its arrows lead to the blocks beside the agent;
+  choose each arrow's output in the block's properties.
 
 - **Command** runs a shell command (a test suite, a linter, `make verify`) in
   the workspace connected to it or its project's folder, with
   `MEGA_AGENTS_WORKSPACE_PATH|BRANCH|BASE|REPOSITORY` set. Exit 0 leaves on
   `passed`; anything else leaves on `failed` with `{exitCode, output}` when an
   arrow takes it (for example to a fixer agent), and otherwise fails the run.
-- **Loop** repeats the blocks inside it (agents, commands, schema checks,
-  routers) until the block chosen under **Ends when** takes the chosen
+- **Loop** repeats the blocks inside it (agents with their schema checks,
+  commands, routers) until the block chosen under **Ends when** takes the chosen
   output, at most **Repeat at most** times (3 by default, up to 20). The
   blocks inside that no block inside feeds receive the arrows into the loop
   on every repeat, so a loop holding *Gate* → `failed` → *Fixer* ends when

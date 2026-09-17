@@ -840,7 +840,7 @@ describe("canHostChild", () => {
     ["gitlab", { root: false, project: true, github: false, agent: false }],
     ["githubapp", { root: false, project: false, github: true, agent: false }],
     ["action", { root: false, project: false, github: true, agent: false }],
-    ["jsonschema", { root: false, project: true, github: false, agent: true }],
+    ["jsonschema", { root: false, project: false, github: false, agent: true }],
     ["router", { root: false, project: true, github: false, agent: true }],
     ["command", { root: false, project: true, github: false, agent: true }],
   ] as const;
@@ -881,6 +881,9 @@ describe("root-level and hint rules", () => {
     );
     expect(rejectedDropHint("github")).toBe(
       "A GitHub can only be dropped inside a project box.",
+    );
+    expect(rejectedDropHint("jsonschema")).toBe(
+      "A JSON Schema can only be dropped inside an agent box.",
     );
   });
 
@@ -1122,8 +1125,8 @@ describe("output ports", () => {
   test("a schema block has valid and invalid outputs; other blocks have one", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 0, 0);
-    const check = graph.addNode("jsonschema", 10, 10, project.id);
     const agent = graph.addNode("agent", 10, 10, project.id);
+    const check = graph.addNode("jsonschema", 10, 40, agent.id);
 
     expect(graph.outputPorts(check.id)).toEqual(["valid", "invalid"]);
     expect(graph.outputPorts(agent.id)).toEqual([]);
@@ -1133,7 +1136,8 @@ describe("output ports", () => {
   test("an arrow from a block with ports can take any of its outputs", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 0, 0);
-    const check = graph.addNode("jsonschema", 10, 10, project.id);
+    const writer = graph.addNode("agent", 10, 10, project.id);
+    const check = graph.addNode("jsonschema", 10, 40, writer.id);
     const fixer = graph.addNode("agent", 200, 10, project.id);
     graph.connect(check.id, fixer.id);
     const edge = graph.edges[0]!;
@@ -1148,7 +1152,8 @@ describe("output ports", () => {
   test("sets a schema block's schema text", () => {
     const graph = new GraphStore();
     const project = graph.addNode("project", 0, 0);
-    const check = graph.addNode("jsonschema", 10, 10, project.id);
+    const agent = graph.addNode("agent", 10, 10, project.id);
+    const check = graph.addNode("jsonschema", 10, 40, agent.id);
 
     graph.setSchema(check.id, '{"type":"object"}');
     graph.setSchema("missing", "ignored");
@@ -1454,7 +1459,7 @@ describe("loop blocks", () => {
 
     expect(canHostChild("loop", "command")).toBe(true);
     expect(canHostChild("loop", "router")).toBe(true);
-    expect(canHostChild("loop", "jsonschema")).toBe(true);
+    expect(canHostChild("loop", "jsonschema")).toBe(false);
     expect(canHostChild("loop", "loop")).toBe(false);
     expect(canHostChild("loop", "github")).toBe(false);
     expect(loop.maxIterations).toBe(3);
@@ -1477,6 +1482,17 @@ describe("loop blocks", () => {
       { nodeId: route.id, port: "approved", label: "Router 1 takes approved" },
       { nodeId: route.id, port: "default", label: "Router 1 takes default" },
     ]);
+  });
+
+  test("a schema check inside an agent of the loop can end it", () => {
+    const { graph, loop, fixer } = loopWithGate();
+    const check = graph.addNode("jsonschema", 10, 40, fixer.id);
+
+    expect(graph.loopExits(loop.id)).toContainEqual({
+      nodeId: check.id,
+      port: "valid",
+      label: "JSON Schema 1 takes valid",
+    });
   });
 
   test("sets how the loop ends and how often it may repeat", () => {
@@ -1656,5 +1672,33 @@ describe("where a dragged block lands", () => {
     // 20 + 472 + 12 wide and 40 + 326 + 12 tall.
     expect([github.w, github.h]).toEqual([472, 326]);
     expect([project.w, project.h]).toEqual([504, 378]);
+  });
+});
+
+describe("schema checks inside an agent", () => {
+  function writerWithCheck() {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const writer = graph.addNode("agent", 10, 40, project.id);
+    const check = graph.addNode("jsonschema", 10, 40, writer.id);
+    const fixer = graph.addNode("agent", 300, 40, project.id);
+    return { graph, project, writer, check, fixer };
+  }
+
+  test("a check sends its outputs to the blocks beside its agent", () => {
+    const { graph, check, fixer } = writerWithCheck();
+
+    expect(graph.connect(check.id, fixer.id)).toBe(true);
+    expect(graph.edges[0]).toMatchObject({ fromPort: "valid" });
+  });
+
+  test("nothing draws an arrow into a check: it takes its agent's reply", () => {
+    const { graph, writer, check, fixer } = writerWithCheck();
+    const other = graph.addNode("jsonschema", 10, 120, writer.id);
+
+    expect(graph.connect(writer.id, check.id)).toBe(false);
+    expect(graph.connect(fixer.id, check.id)).toBe(false);
+    expect(graph.connect(other.id, check.id)).toBe(false);
+    expect(graph.edges).toEqual([]);
   });
 });

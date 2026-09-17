@@ -17,13 +17,21 @@ const (
 )
 
 // schemaTask plans a JSON Schema block (output/json-schema@v1): it checks
-// the one value it receives against its schema. A valid value leaves on
+// the reply of the agent it sits in against its schema. A valid value leaves on
 // the valid output. An invalid one leaves on the invalid output, carrying
 // the value and its field errors, when an arrow takes that branch;
 // otherwise the block fails, so an unhandled invalid value stops the run.
 func (planner runPlanner) schemaTask(node WorkflowNodeInput) (engine.Task, error) {
 	fail := func(format string, args ...any) (engine.Task, error) {
 		return engine.Task{}, fmt.Errorf("%s: %s", node.Name, fmt.Sprintf(format, args...))
+	}
+	for _, edge := range planner.request.Edges {
+		if edge.To == node.ID {
+			return engine.Task{}, fmt.Errorf(
+				"%s checks the reply of %s, the agent it sits in; remove the arrows into it",
+				node.Name, planner.checkedAgent(node).Name,
+			)
+		}
 	}
 	if strings.TrimSpace(node.Schema) == "" {
 		return fail("write the JSON Schema the value must satisfy")

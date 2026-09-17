@@ -2158,14 +2158,17 @@ describe("graph builder workspace", () => {
   test("configures a schema block and which output each arrow takes", async () => {
     render(Workspace);
     await dropComponent("Project", 400, 400);
-    await dropComponent("JSON Schema", 410, 410);
+    await dropComponent("Agent", 410, 410);
+    // The check lands inside the agent, which grows to 410..592 × 410..496
+    // and grows the project to 400..604 × 400..508.
+    await dropComponent("JSON Schema", 420, 420);
     await fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Check" },
     });
     await fireEvent.input(screen.getByLabelText("Schema"), {
       target: { value: '{"type": "object"}' },
     });
-    await dropComponent("Agent", 450, 440);
+    await dropComponent("Agent", 596, 500);
     await fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Fixer" },
     });
@@ -3148,7 +3151,7 @@ describe("loop properties", () => {
     expect(screen.getByLabelText("Ends when")).toBeDisabled();
     expect(
       screen.getByText(
-        "Put a command, schema check or router inside the loop to end it.",
+        "Put a command or router inside the loop, or a schema check inside one of its agents, to end it.",
       ),
     ).toBeInTheDocument();
 

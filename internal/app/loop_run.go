@@ -24,12 +24,7 @@ func (planner runPlanner) loopTask(node WorkflowNodeInput, failures *[]planFailu
 	fail := func(format string, args ...any) (engine.Task, error) {
 		return engine.Task{}, fmt.Errorf("%s: %s", node.Name, fmt.Sprintf(format, args...))
 	}
-	var children []WorkflowNodeInput
-	for _, child := range planner.childrenOf[node.ID] {
-		if executableTypes[child.Type] {
-			children = append(children, child)
-		}
-	}
+	children := planner.loopBody(node.ID)
 	if len(children) == 0 {
 		return fail("put the blocks to repeat inside the loop")
 	}
@@ -41,7 +36,7 @@ func (planner runPlanner) loopTask(node WorkflowNodeInput, failures *[]planFailu
 		return fail("repeat between 1 and %d times", maxLoopIterations)
 	}
 	until := planner.nodeByID[node.UntilNode]
-	if until.ParentID != node.ID || node.UntilPort == "" {
+	if planner.loopOf(until).ID != node.ID || node.UntilPort == "" {
 		return fail("choose the block and output that end the loop")
 	}
 	if ports := outputPortsOf(until); !slices.Contains(ports, node.UntilPort) {

@@ -51,11 +51,13 @@ test.describe("JSON Schema blocks", () => {
     );
     await page.getByLabel("Starting point").check();
     await page.getByLabel("Prompt").fill("Write the summary");
+    // The check goes inside the writer and takes its reply with no arrow;
+    // the writer grows to hold it.
     const check = await dropInto(
       page,
       "JSON Schema",
-      project,
-      { x: 20, y: 170 },
+      writer,
+      { x: 20, y: 45 },
       "Check",
     );
     await page
@@ -63,9 +65,45 @@ test.describe("JSON Schema blocks", () => {
       .fill(
         `{"type":"object","required":["text"],"properties":{"text":{"type":"string","pattern":"${pattern}"}}}`,
       );
-    await connect(page, writer, check);
     return { project, check };
   }
+
+  test("a check goes only inside an agent", async ({ page }) => {
+    const project = page.getByRole("button", { name: "Project 1" });
+    const box = await project.boundingBox();
+    const palette = await page
+      .getByRole("button", { name: "JSON Schema", exact: true })
+      .boundingBox();
+    if (!box || !palette) throw new Error("drag endpoints are not visible");
+    await page.mouse.move(palette.x + 10, palette.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 200, box.y + 150, { steps: 10 });
+
+    await expect(canvas(page).locator(".drop-preview")).toHaveClass(/invalid/);
+    await expect(project).toHaveClass(/drop-no/);
+    await page.mouse.up();
+    await expect(
+      page.getByRole("button", { name: "JSON Schema 1" }),
+    ).toHaveCount(0);
+
+    const { check } = await writerChecked(page, "^x$");
+    const writer = page.getByRole("button", { name: "Writer", exact: true });
+    // The writer eases into its new size.
+    await expect
+      .poll(async () => {
+        const [inner, outer] = await Promise.all([
+          check.boundingBox(),
+          writer.boundingBox(),
+        ]);
+        return (
+          !!inner &&
+          !!outer &&
+          inner.x >= outer.x &&
+          inner.y + inner.height <= outer.y + outer.height
+        );
+      })
+      .toBe(true);
+  });
 
   test("an invalid result takes the invalid branch to a fixer", async ({
     page,
@@ -75,7 +113,7 @@ test.describe("JSON Schema blocks", () => {
       page,
       "Agent",
       project,
-      { x: 250, y: 170 },
+      { x: 290, y: 60 },
       "Fixer",
     );
     await page.getByLabel("Prompt").fill("Fix {{result}}");

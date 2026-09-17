@@ -351,9 +351,16 @@ func (planner runPlanner) include(id string, included map[string]bool) {
 		return
 	}
 	included[id] = true
-	for _, child := range planner.childrenOf[id] {
-		if planner.nodeByID[id].Type == "loop" && executableTypes[child.Type] {
+	switch planner.nodeByID[id].Type {
+	case "loop":
+		for _, child := range planner.loopBody(id) {
 			included[child.ID] = true
+		}
+	case "agent":
+		for _, child := range planner.childrenOf[id] {
+			if child.Type == "jsonschema" {
+				planner.include(child.ID, included)
+			}
 		}
 	}
 	for _, edge := range planner.request.Edges {
@@ -363,8 +370,41 @@ func (planner runPlanner) include(id string, included map[string]bool) {
 	}
 }
 
-// loopOf is the loop a block sits directly inside, or no block.
+// loopBody are the blocks a loop repeats: the blocks directly inside it and
+// the schema checks inside its agents.
+func (planner runPlanner) loopBody(id string) []WorkflowNodeInput {
+	var body []WorkflowNodeInput
+	for _, child := range planner.childrenOf[id] {
+		if !executableTypes[child.Type] {
+			continue
+		}
+		body = append(body, child)
+		if child.Type == "agent" {
+			for _, check := range planner.childrenOf[child.ID] {
+				if check.Type == "jsonschema" {
+					body = append(body, check)
+				}
+			}
+		}
+	}
+	return body
+}
+
+// checkedAgent is the agent whose reply a schema block inside it checks, or
+// no block.
+func (planner runPlanner) checkedAgent(node WorkflowNodeInput) WorkflowNodeInput {
+	if parent := planner.nodeByID[node.ParentID]; node.Type == "jsonschema" && parent.Type == "agent" {
+		return parent
+	}
+	return WorkflowNodeInput{}
+}
+
+// loopOf is the loop a block sits directly inside, or no block. A schema
+// block belongs to the loop of the agent it checks.
 func (planner runPlanner) loopOf(node WorkflowNodeInput) WorkflowNodeInput {
+	if agent := planner.checkedAgent(node); agent.ID != "" {
+		node = agent
+	}
 	if parent := planner.nodeByID[node.ParentID]; parent.Type == "loop" {
 		return parent
 	}
@@ -375,6 +415,9 @@ func (planner runPlanner) loopOf(node WorkflowNodeInput) WorkflowNodeInput {
 // block beside it feeds starts each iteration, and receives the arrows into
 // the loop.
 func (planner runPlanner) arrowsInto(node WorkflowNodeInput) []WorkflowEdgeInput {
+	if agent := planner.checkedAgent(node); agent.ID != "" {
+		return []WorkflowEdgeInput{{From: agent.ID, To: node.ID}}
+	}
 	var arrows []WorkflowEdgeInput
 	for _, edge := range planner.request.Edges {
 		if edge.To == node.ID {

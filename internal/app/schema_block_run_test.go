@@ -12,15 +12,16 @@ import (
 const replySchema = `{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\",\"pattern\":\"^done$\"}}}`
 
 // validationFlow is an agent answering "done" (the fake CLI's default),
-// checked by a schema block, with whatever blocks and edges follow it.
+// with a schema block inside it checking that reply, and whatever blocks and
+// edges follow it.
 func validationFlow(t *testing.T, schemaText string, more string, edges string) string {
 	t.Helper()
 	return fmt.Sprintf(`{"nodes": [
 		{"id": "p1", "type": "project", "name": "api", "path": %q},
 		{"id": "a1", "type": "agent", "name": "Writer", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Write"},
-		{"id": "s1", "type": "jsonschema", "name": "Check reply", "parentId": "p1", "schema": "%s"}
+		{"id": "s1", "type": "jsonschema", "name": "Check reply", "parentId": "a1", "schema": "%s"}
 		%s
-	], "edges": [{"id": "e1", "from": "a1", "to": "s1"} %s]}`, t.TempDir(), schemaText, more, edges)
+	], "edges": [%s]}`, t.TempDir(), schemaText, more, strings.TrimPrefix(edges, ","))
 }
 
 func TestASchemaBlockPassesAValidValueOn(t *testing.T) {
@@ -93,41 +94,31 @@ func TestSchemaBlockPlansAreCheckedBeforeRunning(t *testing.T) {
 		return fmt.Sprintf(`{"nodes": [
 			{"id": "p1", "type": "project", "name": "api", "path": "/tmp"},
 			{"id": "a1", "type": "agent", "name": "Writer", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Write"},
-			{"id": "s1", "type": "jsonschema", "name": "Check", "parentId": "p1", "schema": "%s"}
+			{"id": "s1", "type": "jsonschema", "name": "Check", "parentId": "a1", "schema": "%s"}
 			%s
 		], "edges": [%s]}`, schemaText, extraNodes, edges)
 	}
-	link := `{"id": "e1", "from": "a1", "to": "s1"}`
 	cases := map[string]struct {
 		body string
 		want string
 	}{
 		"invalid schema": {
-			body: flow(`{\"type\": 3}`, "", link),
+			body: flow(`{\"type\": 3}`, "", ""),
 			want: "Check: the schema is not a valid JSON Schema",
 		},
 		"no schema": {
-			body: flow(``, "", link),
+			body: flow(``, "", ""),
 			want: "Check: write the JSON Schema the value must satisfy",
 		},
-		"two inputs": {
+		"an arrow into it": {
 			body: flow(replySchema, `, {"id": "a2", "type": "agent", "name": "Other", "parentId": "p1", "start": false, "backend": "claude", "prompt": "x"}`,
-				link+`, {"id": "e0", "from": "a1", "to": "a2"}, {"id": "e2", "from": "a2", "to": "s1"}`),
-			want: "Check: validates one value; connect exactly one block to it",
+				`{"id": "e0", "from": "a1", "to": "a2"}, {"id": "e2", "from": "a2", "to": "s1"}`),
+			want: "Check checks the reply of Writer, the agent it sits in; remove the arrows into it",
 		},
 		"unknown port": {
 			body: flow(replySchema, `, {"id": "n1", "type": "agent", "name": "Next", "parentId": "p1", "backend": "claude", "prompt": "x"}`,
-				link+`, {"id": "e2", "from": "s1", "to": "n1", "fromPort": "maybe"}`),
+				`{"id": "e2", "from": "s1", "to": "n1", "fromPort": "maybe"}`),
 			want: `Check has no output "maybe"; use valid or invalid`,
-		},
-		"workspace input": {
-			body: fmt.Sprintf(`{"nodes": [
-				{"id": "p1", "type": "project", "name": "api", "path": "/tmp"},
-				{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true},
-				{"id": "w1", "type": "action", "action": "worktree", "name": "Create worktree", "parentId": "g1", "start": true, "branch": "x"},
-				{"id": "s1", "type": "jsonschema", "name": "Check", "parentId": "p1", "schema": "%s"}
-			], "edges": [{"id": "e1", "from": "w1", "to": "s1"}]}`, replySchema),
-			want: "Check: validates one value; connect exactly one block to it",
 		},
 	}
 	for name, testCase := range cases {
@@ -141,12 +132,61 @@ func TestSchemaBlockPlansAreCheckedBeforeRunning(t *testing.T) {
 	}
 }
 
-func TestSchemaBlocksLiveInsideProjectsAndAgents(t *testing.T) {
-	body := fmt.Sprintf(`{"nodes": [{"id": "s1", "type": "jsonschema", "name": "Check", "schema": "%s"}]}`, replySchema)
+func TestSchemaBlocksLiveOnlyInsideAgents(t *testing.T) {
+	for _, parent := range []string{"root", "project", "loop"} {
+		t.Run(parent, func(t *testing.T) {
+			body := fmt.Sprintf(`{"nodes": [
+				{"id": "p1", "type": "project", "name": "api", "path": "/tmp"},
+				{"id": "loop", "type": "loop", "name": "Loop", "parentId": "p1"},
+				{"id": "s1", "type": "jsonschema", "name": "Check", "parentId": %q, "schema": "%s"}
+			]}`, map[string]string{"root": "", "project": "p1", "loop": "loop"}[parent], replySchema)
 
-	response, _ := postRun(t, body)
+			response, _ := postRun(t, body)
 
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "jsonschema cannot be placed inside root") {
-		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "jsonschema cannot be placed inside "+parent) {
+				t.Fatalf("response = %d %q", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestASchemaBlockInsideAnAgentInALoopCanEndTheLoop(t *testing.T) {
+	bin := fakeClaude(t)
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a0", "type": "agent", "name": "Planner", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Plan"},
+		{"id": "l1", "type": "loop", "name": "Until valid", "parentId": "p1", "maxIterations": 2, "untilNode": "s1", "untilPort": "valid"},
+		{"id": "w1", "type": "agent", "name": "Writer", "parentId": "l1", "backend": "claude", "prompt": "Write"},
+		{"id": "s1", "type": "jsonschema", "name": "Check", "parentId": "w1", "schema": "%s"},
+		{"id": "n1", "type": "agent", "name": "Ship", "parentId": "p1", "backend": "claude", "prompt": "Ship {{result}}"}
+	], "edges": [
+		{"id": "e1", "from": "a0", "to": "l1"},
+		{"id": "e2", "from": "l1", "to": "n1", "fromPort": "done"}
+	]}`, t.TempDir(), replySchema)
+
+	record := finishedRunOnly(t, body)
+
+	if record.Status != engine.Succeeded {
+		t.Fatalf("record = %+v", record)
+	}
+	for _, step := range record.Steps {
+		if step.TaskID == "s1" && (step.Loop != "l1" || step.Status != engine.Succeeded) {
+			t.Fatalf("check = %+v", step)
+		}
+	}
+	if got := recorded(t, bin, "prompt-3"); got != `Ship {"text":"done"}` {
+		t.Fatalf("ship prompt = %q", got)
+	}
+}
+
+func TestASchemaBlockInsideAReachedAgentRuns(t *testing.T) {
+	problems := CheckWorkflow(WorkflowRequest{Nodes: []WorkflowNodeInput{
+		{ID: "p1", Type: "project", Name: "api", Path: "/work/api"},
+		{ID: "a1", Type: "agent", Name: "Writer", ParentID: "p1", Start: true, Backend: "claude", Prompt: "Write"},
+		{ID: "s1", Type: "jsonschema", Name: "Check", ParentID: "a1", Schema: `{"type":"object"}`},
+	}})
+
+	if len(problems) != 0 {
+		t.Fatalf("problems = %+v", problems)
 	}
 }

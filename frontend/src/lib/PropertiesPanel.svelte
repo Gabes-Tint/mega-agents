@@ -549,7 +549,8 @@
         </label>
         {#if exits.length === 0}
           <p class="hint">
-            Put a command, schema check or router inside the loop to end it.
+            Put a command or router inside the loop, or a schema check inside
+            one of its agents, to end it.
           </p>
         {:else}
           <p class="hint">
