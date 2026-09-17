@@ -161,8 +161,81 @@ export async function dropInto(
   return page.getByRole("button", { name, exact: true });
 }
 
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export async function boxOf(locator: Locator): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("not visible");
+  return box;
+}
+
+export function center(box: Box) {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+// Presses on the element and moves the real mouse to the point, leaving the
+// button down so the drag can be inspected before it is released.
+export async function pressAndMove(
+  page: Page,
+  element: Locator,
+  to: { x: number; y: number },
+) {
+  const from = center(await boxOf(element));
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+}
+
+// Selects the block and drags from its arrow handle on the side to the
+// point, leaving the button down.
+export async function dragFromHandle(
+  page: Page,
+  block: Locator,
+  to: { x: number; y: number },
+  side = "right",
+) {
+  await selectBlock(block);
+  await pressAndMove(
+    page,
+    canvas(page).locator(`.link-handle[data-side="${side}"]`),
+    to,
+  );
+}
+
+// The side of the block whose handle faces the point, so the drag starts on
+// the near side rather than reaching around the block.
+function sideToward(box: Box, to: { x: number; y: number }) {
+  const from = center(box);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+  return dy >= 0 ? "bottom" : "top";
+}
+
+// Draws an arrow between two blocks the way a user does: press the source's
+// handle on the side facing the target and release the pointer over it. A
+// source with several outputs asks which one the arrow takes, and it takes
+// the first.
 export async function connect(page: Page, from: Locator, to: Locator) {
-  await selectBlock(from);
-  await page.getByRole("button", { name: "Connect" }).click();
-  await selectBlock(to);
+  const edges = canvas(page).locator(".edge-line");
+  const drawn = await edges.count();
+  // The arrow lands on the block under the pointer, and a container's body
+  // is covered by the blocks nested inside it, so aim at its header.
+  const target = center(await boxOf(to.locator(".node-title")));
+  const side = sideToward(await boxOf(from), target);
+  await dragFromHandle(page, from, target, side);
+  await page.mouse.up();
+
+  const menu = page.getByRole("menu", { name: "Output" });
+  await expect
+    .poll(async () => (await menu.count()) > 0 || (await edges.count()) > drawn)
+    .toBe(true);
+  if ((await menu.count()) > 0)
+    await menu.getByRole("menuitem").first().click();
+  await expect(edges).toHaveCount(drawn + 1);
 }

@@ -175,16 +175,6 @@
         />
         Starting point
       </label>
-      <button
-        type="button"
-        aria-pressed={graph.connecting}
-        onclick={() =>
-          graph.connecting
-            ? graph.cancelConnect()
-            : graph.startConnect(node.id)}
-      >
-        Connect
-      </button>
       {#if graph.hasLog(node.id)}
         <button type="button" onclick={() => graph.openLog(node.id)}>
           Show logs
@@ -837,11 +827,6 @@
     stroke-width: 1.4;
     stroke-linecap: round;
     stroke-linejoin: round;
-  }
-
-  button[aria-pressed="true"] {
-    border-color: var(--accent);
-    background: var(--focus);
   }
 
   .path {
