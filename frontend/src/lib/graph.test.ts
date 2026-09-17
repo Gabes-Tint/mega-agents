@@ -1553,3 +1553,108 @@ describe("waiting for any arrow", () => {
     expect(agent.waitForAny).toBeUndefined();
   });
 });
+
+describe("where a dragged block lands", () => {
+  // Project 1 spans (100..500, 100..400); GitHub 1 sits inside it at
+  // (120..280, 140..204).
+  function projectWithGitHub() {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 100, 100);
+    graph.resizeNode(project.id, 400, 300);
+    const github = graph.addNode("github", 20, 40, project.id);
+    return { graph, project, github };
+  }
+
+  test("a palette block lands inside a container that takes it", () => {
+    const { graph, project } = projectWithGitHub();
+
+    expect(graph.landingOf("agent", 400, 300)).toEqual({
+      valid: true,
+      parentId: project.id,
+    });
+  });
+
+  test("a palette block the container refuses lands on the canvas when it may", () => {
+    const { graph } = projectWithGitHub();
+
+    expect(graph.landingOf("project", 150, 150)).toEqual({ valid: true });
+  });
+
+  test("a palette block with nowhere to go is refused", () => {
+    const { graph, github } = projectWithGitHub();
+
+    expect(graph.landingOf("agent", 150, 150)).toEqual({
+      valid: false,
+      refusedBy: github.id,
+    });
+    expect(graph.landingOf("agent", 900, 900)).toEqual({ valid: false });
+  });
+
+  test("a moved block stays in its parent over a container that refuses it", () => {
+    const { graph, project, github } = projectWithGitHub();
+    const agent = graph.addNode("agent", 200, 200, project.id);
+
+    expect(graph.landingOf("agent", 150, 150, agent.id)).toEqual({
+      valid: true,
+      parentId: project.id,
+    });
+    expect(graph.landingOf("agent", 900, 900, agent.id)).toEqual({
+      valid: true,
+      parentId: project.id,
+    });
+    expect(graph.landingOf("github", 900, 900, github.id)).toEqual({
+      valid: true,
+      parentId: project.id,
+    });
+  });
+
+  test("a moved top-level block nests only when it holds no blocks", () => {
+    const { graph, project } = projectWithGitHub();
+    const other = graph.addNode("project", 700, 700);
+
+    expect(graph.landingOf("project", 400, 300, other.id)).toEqual({
+      valid: true,
+      parentId: project.id,
+    });
+    expect(graph.landingOf("project", 750, 750, project.id)).toEqual({
+      valid: true,
+    });
+    graph.addNode("agent", 10, 40, other.id);
+    expect(graph.landingOf("project", 400, 300, other.id)).toEqual({
+      valid: true,
+    });
+  });
+
+  test("a container grows to fit a block placed past its edges", () => {
+    const { graph, project } = projectWithGitHub();
+    const agent = graph.addNode("agent", 330, 280, project.id);
+
+    graph.fitInParent(agent.id);
+
+    // 330 + 160 + 12 and 280 + 64 + 12.
+    expect(project.w).toBe(502);
+    expect(project.h).toBe(356);
+  });
+
+  test("a block placed above or left of its container moves inside it", () => {
+    const { graph, project } = projectWithGitHub();
+    const agent = graph.addNode("agent", -30, -10, project.id);
+
+    graph.fitInParent(agent.id);
+
+    expect([agent.x, agent.y]).toEqual([0, 0]);
+    expect([project.w, project.h]).toEqual([400, 300]);
+  });
+
+  test("growing a nested container grows the containers around it", () => {
+    const { graph, project, github } = projectWithGitHub();
+    const action = graph.addNode("action", 300, 250, github.id);
+
+    graph.fitInParent(action.id);
+
+    // GitHub 1 grows to 472 × 326 from (20, 40), so Project 1 must reach
+    // 20 + 472 + 12 wide and 40 + 326 + 12 tall.
+    expect([github.w, github.h]).toEqual([472, 326]);
+    expect([project.w, project.h]).toEqual([504, 378]);
+  });
+});

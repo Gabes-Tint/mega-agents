@@ -1373,8 +1373,12 @@ describe("graph builder workspace", () => {
     await dispatchDrop(canvas(), { dataTransfer, clientX: 720, clientY: 320 });
 
     // Project 2 spans (700..860, 300..364); the GitHub App must not nest
-    // into it — it stays a child of GitHub 1 and renders at the pointer.
-    expect(app).toHaveStyle({ left: "720px", top: "320px" });
+    // into it. It stays a child of GitHub 1, under the pointer but moved
+    // down inside GitHub 1's top edge at 410, and GitHub 1 grows to hold it.
+    expect(app).toHaveStyle({ left: "720px", top: "410px" });
+    expect(screen.getByRole("button", { name: "GitHub 1" })).toHaveStyle({
+      width: "482px",
+    });
   });
 
   test("highlights the target container while a palette drag is in flight", async () => {
@@ -1492,6 +1496,67 @@ describe("graph builder workspace", () => {
       height: "64px",
     });
     expect(project).toHaveClass("dragging");
+  });
+
+  test("highlights the preview and the container a block will land in", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    // GitHub 1 renders at (100, 50) inside Project 1.
+    await dropComponent("GitHub", 100, 50);
+    const dataTransfer = makeDataTransfer();
+    await fireEvent.dragStart(screen.getByRole("button", { name: "Project" }), {
+      dataTransfer,
+    });
+
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 40,
+      clientY: 30,
+    });
+    expect(canvas().querySelector(".drop-preview")).toHaveClass("nesting");
+    expect(screen.getByRole("button", { name: "Project 1" })).toHaveClass(
+      "drop-ok",
+    );
+
+    // A GitHub box refuses a project, which then lands on the canvas: nothing
+    // is highlighted as its container.
+    await dispatchDragOver(canvas(), {
+      dataTransfer,
+      clientX: 140,
+      clientY: 70,
+    });
+    expect(canvas().querySelector(".drop-preview")).not.toHaveClass("nesting");
+    expect(canvas().querySelector(".drop-ok, .drop-no")).toBeNull();
+  });
+
+  test("grows a container to fit a block dropped near its edge", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+
+    await dropComponent("Agent", 150, 70);
+
+    // The agent sits at (120, 50) in the 160 × 64 project, which grows to
+    // 120 + 160 + 12 wide and 50 + 64 + 12 tall.
+    expect(screen.getByRole("button", { name: "Project 1" })).toHaveStyle({
+      width: "292px",
+      height: "126px",
+    });
+  });
+
+  test("grows a container to fit a block moved inside it", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Agent", 40, 30);
+    const agent = screen.getByRole("button", { name: "Agent 1" });
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(agent, { dataTransfer, clientX: 0, clientY: 0 });
+
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 180, clientY: 80 });
+
+    expect(screen.getByRole("button", { name: "Project 1" })).toHaveStyle({
+      width: "322px",
+      height: "136px",
+    });
   });
 
   test("nests a GitHub App inside a GitHub box that sits in a project", async () => {

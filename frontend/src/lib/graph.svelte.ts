@@ -85,6 +85,14 @@ export interface LoopExit {
   label: string;
 }
 
+// Where a dragged block would end up: inside a container, on the canvas
+// itself, or nowhere because the container under it refuses it.
+export interface Landing {
+  valid: boolean;
+  parentId?: string;
+  refusedBy?: string;
+}
+
 // The canvas root as a pseudo target so the containment matrix covers
 // top-level drops in the same table as nested drops.
 export type DropTarget = NodeType | "root";
@@ -673,6 +681,41 @@ export class GraphStore {
       }
     }
     return best;
+  }
+
+  // Where a block of the type dropped at the content point lands: from the
+  // palette, or moved when movingId names it. A moved block always lands
+  // somewhere: a container that refuses it keeps it in its own parent.
+  landingOf(type: NodeType, x: number, y: number, movingId?: string): Landing {
+    const container = this.containerAt(x, y, movingId);
+    const moving = this.nodes.find((candidate) => candidate.id === movingId);
+    const hosts = container !== undefined && canHostChild(container.type, type);
+    if (!moving) {
+      if (hosts) return { valid: true, parentId: container.id };
+      if (canExistTopLevel(type)) return { valid: true };
+      return container
+        ? { valid: false, refusedBy: container.id }
+        : { valid: false };
+    }
+    if (moving.parentId === undefined)
+      return hosts && !this.hasChildren(moving.id)
+        ? { valid: true, parentId: container.id }
+        : { valid: true };
+    if (hosts || container?.id === moving.parentId)
+      return { valid: true, parentId: container?.id };
+    if (!container && canExistTopLevel(type)) return { valid: true };
+    return { valid: true, parentId: moving.parentId };
+  }
+
+  // Keeps a block inside its container: a block past the top or left edge
+  // moves in, and the container, with every container around it, grows to
+  // fit a block past its right or bottom edge.
+  fitInParent(id: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node?.parentId) return;
+    node.x = Math.max(0, node.x);
+    node.y = Math.max(0, node.y);
+    this.growToFit(node);
   }
 
   private nodeDepth(node: GraphNode): number {

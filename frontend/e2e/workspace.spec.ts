@@ -30,13 +30,9 @@ test.describe("graph builder workspace", () => {
   test("moves an existing node when dragged across the canvas", async ({
     page,
   }) => {
+    // A block inside a project stays inside it, so the project itself moves.
     await seedProject(page);
-    await mouseDrag(
-      page,
-      page.getByRole("button", { name: "Agent" }),
-      page.getByRole("button", { name: "Project 1" }),
-    );
-    const node = page.getByRole("button", { name: "Agent 1" });
+    const node = page.getByRole("button", { name: "Project 1" });
     const before = await node.boundingBox();
 
     const target = canvas(page);

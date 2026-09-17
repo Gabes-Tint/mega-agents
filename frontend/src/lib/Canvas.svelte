@@ -1,8 +1,6 @@
 <script lang="ts">
   import {
     BLOCK_HUES,
-    canExistTopLevel,
-    canHostChild,
     defaultSize,
     GraphStore,
     labelFor,
@@ -24,11 +22,12 @@
   // it is transient drag bookkeeping rather than rendered state.
   let dragState: { id: string; dx: number; dy: number } | null = null;
 
-  // Live drop preview for the dragover handler: the container currently
-  // under the pointer and whether it accepts the dragged block. The palette
-  // component being dragged travels through graph.draggingType because
-  // dataTransfer.getData is protected while a drag is in flight.
-  let previewTargetId = $state<string | null>(null);
+  // Live drop preview for the dragover handler: the container the dragged
+  // block would land in, or the one refusing it, and whether it can land.
+  // The palette component being dragged travels through graph.draggingType
+  // because dataTransfer.getData is protected while a drag is in flight.
+  let nestId = $state<string | null>(null);
+  let refusedId = $state<string | null>(null);
   let previewValid = $state(false);
   let previewing = $state(false);
   // Where the dragged block would land, drawn in place of the browser's
@@ -42,6 +41,7 @@
     h: number;
   } | null>(null);
   let movingId = $state<string | null>(null);
+  let resizing = $state(false);
 
   // Starting pointer position and box size of an active resize gesture.
   let resizeState: {
@@ -120,14 +120,11 @@
     const rect = target.getBoundingClientRect();
     const contentX = event.clientX - rect.left + target.scrollLeft;
     const contentY = event.clientY - rect.top + target.scrollTop;
-    const container = graph.containerAt(contentX, contentY, dragState?.id);
-    // Mirrors the drop logic: a valid container accepts the block, otherwise
-    // a root-permitted block may still land at the top level.
-    const valid = container
-      ? canHostChild(container.type, type) || canExistTopLevel(type)
-      : canExistTopLevel(type);
+    const where = graph.landingOf(type, contentX, contentY, dragState?.id);
+    const valid = where.valid;
     previewing = true;
-    previewTargetId = container?.id ?? null;
+    nestId = where.parentId ?? null;
+    refusedId = where.refusedBy ?? null;
     previewValid = valid;
     const moved = dragState ? nodeById(dragState.id) : undefined;
     landing = moved
@@ -166,7 +163,8 @@
       if (target.contains(event.relatedTarget as globalThis.Node)) return;
     }
     previewing = false;
-    previewTargetId = null;
+    nestId = null;
+    refusedId = null;
     landing = null;
   }
 
@@ -204,6 +202,7 @@
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     graph.select(node.id);
+    resizing = true;
     resizeState = {
       id: node.id,
       startX: event.clientX,
@@ -255,6 +254,7 @@
 
   function endResize() {
     resizeState = null;
+    resizing = false;
   }
 
   function drop(
@@ -265,116 +265,67 @@
     const rect = target.getBoundingClientRect();
     // Node coordinates are content-space; pointer coordinates are viewport
     // space, so scrolled canvases need the scroll offset added back.
-    const scrollLeft = target.scrollLeft;
-    const scrollTop = target.scrollTop;
-    const contentX = event.clientX - rect.left + scrollLeft;
-    const contentY = event.clientY - rect.top + scrollTop;
+    const contentX = event.clientX - rect.left + target.scrollLeft;
+    const contentY = event.clientY - rect.top + target.scrollTop;
     const data = event.dataTransfer?.getData("text/plain") ?? "";
     dropHint = "";
     clearPreview();
     graph.draggingType = null;
     if (isComponentType(data)) {
-      const container = graph.containerAt(contentX, contentY);
-      if (container && canHostChild(container.type, data)) {
-        const origin = graph.absolutePosition(container);
-        const node = graph.addNode(
-          data,
-          contentX - origin.x,
-          contentY - origin.y,
-          container.id,
-        );
-        void loadRepositoryFromProject(node.id);
+      const landing = graph.landingOf(data, contentX, contentY);
+      if (!landing.valid) {
+        const refusing = landing.refusedBy
+          ? nodeById(landing.refusedBy)
+          : undefined;
+        dropHint = rejectedDropHint(data, refusing?.type);
         return;
       }
-      // The containment matrix decides: a block whose only legal placement
-      // is inside a container falls back to the top level when the canvas
-      // root accepts it, and is rejected with an explanation otherwise.
-      if (canExistTopLevel(data)) {
-        graph.addNode(data, contentX, contentY);
-        return;
-      }
-      dropHint = rejectedDropHint(data, container?.type);
+      const parent = landing.parentId ? nodeById(landing.parentId) : undefined;
+      const origin = parent ? graph.absolutePosition(parent) : { x: 0, y: 0 };
+      const node = graph.addNode(
+        data,
+        contentX - origin.x,
+        contentY - origin.y,
+        parent?.id,
+      );
+      graph.fitInParent(node.id);
+      void loadRepositoryFromProject(node.id);
       return;
     }
-    if (data.startsWith("node:")) {
-      const id = data.slice("node:".length);
-      const node = nodeById(id);
-      const grab = dragState;
-      dragState = null;
-      movingId = null;
-      if (!node || !grab || grab.id !== id) return;
-      // The dragged box never resolves as its own drop container.
-      const container = graph.containerAt(contentX, contentY, id);
-      if (node.parentId === undefined) {
-        if (
-          container &&
-          container.id !== id &&
-          !graph.hasChildren(id) &&
-          canHostChild(container.type, node.type)
-        ) {
-          graph.attachToContainer(
-            id,
-            container.id,
-            contentX - grab.dx,
-            contentY - grab.dy,
-          );
-          void loadRepositoryFromProject(id);
-          return;
-        }
-        graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
-        return;
-      }
-      const parent = nodeById(node.parentId);
-      if (!parent) {
-        graph.moveNode(id, contentX - grab.dx, contentY - grab.dy);
-        return;
-      }
+    if (!data.startsWith("node:")) return;
+    const id = data.slice("node:".length);
+    const node = nodeById(id);
+    const grab = dragState;
+    dragState = null;
+    movingId = null;
+    if (!node || !grab || grab.id !== id) return;
+    const x = contentX - grab.dx;
+    const y = contentY - grab.dy;
+    const landing = graph.landingOf(node.type, contentX, contentY, id);
+    const parent = landing.parentId ? nodeById(landing.parentId) : undefined;
+    if (!parent) {
+      if (node.parentId === undefined) graph.moveNode(id, x, y);
+      else graph.detachNode(id, x, y);
+      return;
+    }
+    if (parent.id === node.parentId) {
       // Children live in their parent's coordinate space, and the parent may
       // itself be nested, so the pointer converts through the parent's
       // absolute origin.
-      const parentOrigin = graph.absolutePosition(parent);
-      if (container && container.id === parent.id) {
-        graph.moveNode(
-          id,
-          contentX - grab.dx - parentOrigin.x,
-          contentY - grab.dy - parentOrigin.y,
-        );
-      } else if (container && canHostChild(container.type, node.type)) {
-        // Re-parenting to a compatible container keeps the block nested.
-        graph.attachToContainer(
-          id,
-          container.id,
-          contentX - grab.dx,
-          contentY - grab.dy,
-        );
-        void loadRepositoryFromProject(id);
-      } else if (container) {
-        // An incompatible target container keeps the box in its own parent,
-        // repositioned under the pointer.
-        graph.moveNode(
-          id,
-          contentX - grab.dx - parentOrigin.x,
-          contentY - grab.dy - parentOrigin.y,
-        );
-      } else if (canExistTopLevel(node.type)) {
-        graph.detachNode(id, contentX - grab.dx, contentY - grab.dy);
-      } else {
-        // The matrix forbids this block at the root, so it stays inside its
-        // own parent, repositioned under the pointer.
-        graph.moveNode(
-          id,
-          contentX - grab.dx - parentOrigin.x,
-          contentY - grab.dy - parentOrigin.y,
-        );
-      }
-      return;
+      const origin = graph.absolutePosition(parent);
+      graph.moveNode(id, x - origin.x, y - origin.y);
+    } else {
+      graph.attachToContainer(id, parent.id, x, y);
+      void loadRepositoryFromProject(id);
     }
+    graph.fitInParent(id);
   }
 </script>
 
 <div
   class="canvas"
   class:preview-invalid={previewing && !previewValid}
+  class:resizing
   role="region"
   aria-label="Graph canvas"
   ondragover={previewDrop}
@@ -445,8 +396,8 @@
       class:selected={node.id === graph.selectedId}
       class:problem-error={graph.severityOf(node.id) === "error"}
       class:problem-warning={graph.severityOf(node.id) === "warning"}
-      class:drop-ok={previewing && previewTargetId === node.id && previewValid}
-      class:drop-no={previewing && previewTargetId === node.id && !previewValid}
+      class:drop-ok={previewing && nestId === node.id}
+      class:drop-no={previewing && refusedId === node.id}
       class:dragging={node.id === movingId}
       aria-pressed={node.id === graph.selectedId}
       draggable="true"
@@ -503,6 +454,7 @@
     <div
       class="drop-preview block-{landing.type}"
       class:invalid={!previewValid}
+      class:nesting={nestId !== null}
       aria-hidden="true"
       style:--block-hue={BLOCK_HUES[landing.type]}
       style:left="{landing.x}px"
@@ -767,9 +719,40 @@
     opacity: 0.55;
   }
 
-  .node.drop-ok {
+  /* The container a dragged block will land in, and the preview of that
+     block, share one highlight so the pairing reads at a glance. */
+  .node.drop-ok,
+  .drop-preview.nesting {
     border-color: var(--ok);
-    box-shadow: 0 0 0 3px var(--ok-soft);
+    box-shadow:
+      0 0 0 3px var(--ok-soft),
+      var(--shadow);
+  }
+
+  .node.drop-ok {
+    background: color-mix(in oklch, var(--ok-soft) 45%, var(--block-body));
+  }
+
+  .drop-preview.nesting {
+    border-style: solid;
+  }
+
+  /* A container growing to fit a new block eases into its size; a resize
+     follows the pointer directly. */
+  .node {
+    transition:
+      width 140ms ease-out,
+      height 140ms ease-out;
+  }
+
+  .canvas.resizing .node {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .node {
+      transition: none;
+    }
   }
 
   .node.drop-no {

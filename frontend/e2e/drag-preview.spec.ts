@@ -14,6 +14,11 @@ async function dragTo(
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(box.x + x, box.y + y, { steps: 10 });
+  // Chromium paces dragover events, so the last step may not have reached
+  // the page yet; one more move at the spot settles the preview there.
+  await page.waitForTimeout(60);
+  await page.mouse.move(box.x + x, box.y + y + 1);
+  await page.mouse.move(box.x + x, box.y + y);
   return { x: box.x + x, y: box.y + y };
 }
 
@@ -83,5 +88,71 @@ test.describe("drag preview", () => {
 
     await expect(canvas(page).locator(".drop-preview")).toHaveClass(/invalid/);
     await page.mouse.up();
+  });
+});
+
+test.describe("dropping a block inside another", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+  });
+
+  test("highlights the block and the container it will land in", async ({
+    page,
+  }) => {
+    const project = page.getByRole("button", { name: "Project 1" });
+    const box = await project.boundingBox();
+    const canvasBox = await canvas(page).boundingBox();
+    if (!box || !canvasBox) throw new Error("project is not visible");
+
+    await dragTo(
+      page,
+      await centerOf(page, "Agent"),
+      box.x - canvasBox.x + 20,
+      box.y - canvasBox.y + 40,
+    );
+
+    await expect(canvas(page).locator(".drop-preview")).toHaveClass(/nesting/);
+    await expect(project).toHaveClass(/drop-ok/);
+    await page.mouse.up();
+    await expect(project).not.toHaveClass(/drop-ok/);
+  });
+
+  test("grows the container to fit the block dropped into it", async ({
+    page,
+  }) => {
+    const project = page.getByRole("button", { name: "Project 1" });
+    const before = await project.boundingBox();
+    const canvasBox = await canvas(page).boundingBox();
+    if (!before || !canvasBox) throw new Error("project is not visible");
+
+    await dragTo(
+      page,
+      await centerOf(page, "Agent"),
+      before.x - canvasBox.x + before.width - 20,
+      before.y - canvasBox.y + before.height - 10,
+    );
+    await page.mouse.up();
+
+    const agent = page.getByRole("button", { name: "Agent 1" });
+    await expect(agent).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [inner, outer] = await Promise.all([
+          agent.boundingBox(),
+          project.boundingBox(),
+        ]);
+        return (
+          !!inner &&
+          !!outer &&
+          inner.x + inner.width < outer.x + outer.width &&
+          inner.y + inner.height < outer.y + outer.height
+        );
+      })
+      .toBe(true);
   });
 });
