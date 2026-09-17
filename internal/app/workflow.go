@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"unicode"
+
+	"github.com/Gabes-Tint/mega-agents/internal/router"
 )
 
 const workflowAPIVersion = "megaagents.dev/v1alpha1"
@@ -55,6 +57,8 @@ type WorkflowNodeInput struct {
 	TimeoutMinutes *float64 `json:"timeoutMinutes,omitempty"`
 	// JSON Schema blocks.
 	Schema string `json:"schema,omitempty"`
+	// Router blocks.
+	Cases []router.Case `json:"cases,omitempty"`
 }
 
 type WorkflowRequest struct {
@@ -71,6 +75,7 @@ var knownComponentTypes = map[string]bool{
 	"githubapp":  true,
 	"action":     true,
 	"jsonschema": true,
+	"router":     true,
 }
 
 // containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
@@ -85,6 +90,7 @@ var containmentMatrix = map[string]map[string]bool{
 	"githubapp":  {"github": true},
 	"action":     {"github": true},
 	"jsonschema": {"project": true, "agent": true},
+	"router":     {"project": true, "agent": true},
 }
 
 func containmentAllows(target string, childType string) bool {
@@ -224,6 +230,15 @@ func (emitter *workflowEmitter) emitNode(
 	} {
 		if field.value != "" {
 			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))
+		}
+	}
+	if len(node.Cases) > 0 {
+		with = append(with, fmt.Sprintf("%s    cases:", indent))
+		for _, routeCase := range node.Cases {
+			with = append(with,
+				fmt.Sprintf("%s      - name: %s", indent, yamlString(routeCase.Name)),
+				fmt.Sprintf("%s        expression: %s", indent, yamlString(routeCase.Expression)),
+			)
 		}
 	}
 	if node.Retries != nil {

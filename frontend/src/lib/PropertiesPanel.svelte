@@ -365,6 +365,53 @@
           <p class="error" role="alert">The schema is not valid JSON</p>
         {/if}
       {/if}
+      {#if node.type === "router"}
+        <h3>Cases</h3>
+        <p class="hint">
+          CEL conditions over value, checked in order; the first that holds
+          wins, otherwise the value takes default. Example: value.verdict ==
+          "approve".
+        </p>
+        {#each node.cases ?? [] as routeCase, index (index)}
+          <label>
+            Case {index + 1} name
+            <input
+              type="text"
+              value={routeCase.name}
+              oninput={(event) =>
+                graph.setCase(
+                  node.id,
+                  index,
+                  "name",
+                  event.currentTarget.value,
+                )}
+            />
+          </label>
+          <label>
+            Case {index + 1} expression
+            <input
+              type="text"
+              value={routeCase.expression}
+              oninput={(event) =>
+                graph.setCase(
+                  node.id,
+                  index,
+                  "expression",
+                  event.currentTarget.value,
+                )}
+            />
+          </label>
+          <button
+            type="button"
+            onclick={() => graph.removeCase(node.id, index)}
+          >
+            Remove case {index + 1}
+          </button>
+        {/each}
+        <button type="button" onclick={() => graph.addCase(node.id)}>
+          Add case
+        </button>
+      {/if}
       {#if graph.outputPorts(node.id).length > 0}
         {#each graph.outgoingEdges(node.id) as edge (edge.id)}
           {@const target = graph.nodes.find(

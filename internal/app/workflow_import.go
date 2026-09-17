@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Gabes-Tint/mega-agents/internal/router"
 	"gopkg.in/yaml.v3"
 )
 
@@ -137,6 +138,13 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		case "authenticated":
 			node.Authenticated = value == true
 			continue
+		case "cases":
+			cases, err := importedCases(value)
+			if err != nil {
+				return WorkflowNodeInput{}, fmt.Errorf("%s setting %q must be a list of name and expression", identifier, key)
+			}
+			node.Cases = cases
+			continue
 		case "retries", "timeoutMinutes":
 			number, ok := value.(int)
 			decimal, isFloat := value.(float64)
@@ -161,4 +169,22 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		*target = fmt.Sprint(value)
 	}
 	return node, nil
+}
+
+func importedCases(value any) ([]router.Case, error) {
+	entries, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("not a list")
+	}
+	cases := make([]router.Case, 0, len(entries))
+	for _, entry := range entries {
+		fields, ok := entry.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("not a mapping")
+		}
+		name, _ := fields["name"].(string)
+		expression, _ := fields["expression"].(string)
+		cases = append(cases, router.Case{Name: name, Expression: expression})
+	}
+	return cases, nil
 }

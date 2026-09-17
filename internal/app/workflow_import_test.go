@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Gabes-Tint/mega-agents/internal/router"
 )
 
 func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
@@ -23,11 +25,15 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 				Prompt: "Implement {{workspace.branch}}\nwith \"care\"", OutputSchema: `{"type":"object"}`,
 				Retries: &retries, TimeoutMinutes: &timeout},
 			{ID: "s1", Type: "jsonschema", Name: "Check", X: 5, Y: 6, W: 7, H: 8, ParentID: "p1", Schema: `{"type":"object"}`},
+			{ID: "r1", Type: "router", Name: "Route", X: 1, Y: 1, W: 1, H: 1, ParentID: "p1", Cases: []router.Case{
+				{Name: "approved", Expression: `value.verdict == "approve"`}, {Name: "blocked", Expression: "size(value.findings) > 0"},
+			}},
 			{ID: "f1", Type: "agent", Name: "Fixer", X: 9, Y: 10, W: 11, H: 12, ParentID: "p1", Backend: "claude", Prompt: "Fix"},
 		},
 		Edges: []WorkflowEdgeInput{
 			{ID: "e1", From: "a1", To: "a2"}, {ID: "e2", From: "a1", To: "g2"},
 			{ID: "e3", From: "g2", To: "s1"}, {ID: "e4", From: "s1", To: "f1", FromPort: "invalid"},
+			{ID: "e5", From: "s1", To: "r1"},
 		},
 	}
 	yaml, err := BuildWorkflowYAML(request)
@@ -44,7 +50,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 		t.Errorf("name = %q", imported.Name)
 	}
 	// Identifiers replace editor ids, so compare with the ids exported.
-	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer"}
+	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
 	var want []WorkflowNodeInput
 	for _, node := range request.Nodes {
 		node.ID = rename[node.ID]
@@ -58,7 +64,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 	for _, edge := range imported.Edges {
 		edges[edge.From+">"+edge.To+":"+edge.FromPort] = true
 	}
-	if len(imported.Edges) != 4 || !edges["create-worktree>rebase:"] || !edges["create-worktree>agent-1:"] ||
+	if len(imported.Edges) != 5 || !edges["create-worktree>rebase:"] || !edges["create-worktree>agent-1:"] ||
 		!edges["agent-1>check:"] || !edges["check>fixer:invalid"] {
 		t.Errorf("edges = %+v", imported.Edges)
 	}
@@ -92,6 +98,10 @@ func TestImportRejectsDocumentsThatAreNotWorkflows(t *testing.T) {
 		"bad retries": {
 			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: agent@v1\n    with:\n      retries: many\n",
 			want: `x setting "retries" must be a number`,
+		},
+		"bad cases": {
+			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: router@v1\n    with:\n      cases: yes\n",
+			want: `x setting "cases" must be a list of name and expression`,
 		},
 		"unknown setting": {
 			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: project@v1\n    with:\n      colour: red\n",

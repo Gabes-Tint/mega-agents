@@ -32,25 +32,9 @@ func (planner runPlanner) schemaTask(node WorkflowNodeInput, included map[string
 	if err != nil {
 		return fail("%v", err)
 	}
-	var needs []engine.Need
-	values := 0
-	for _, edge := range planner.request.Edges {
-		if edge.To != node.ID || !included[edge.From] {
-			continue
-		}
-		port, err := planner.sourcePort(edge)
-		if err != nil {
-			return engine.Task{}, err
-		}
-		if port != "" && port != workspacePort {
-			values++
-		} else {
-			values += 2 // Only a value can be validated.
-		}
-		needs = append(needs, engine.Need{TaskID: edge.From, Port: port})
-	}
-	if values != 1 {
-		return fail("validates one value; connect exactly one block to it")
+	needs, err := planner.valueNeeds(node, included, "validates")
+	if err != nil {
+		return engine.Task{}, err
 	}
 	handlesInvalid := false
 	for _, edge := range planner.request.Edges {

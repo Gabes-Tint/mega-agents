@@ -5,7 +5,8 @@ export type NodeType =
   | "gitlab"
   | "githubapp"
   | "action"
-  | "jsonschema";
+  | "jsonschema"
+  | "router";
 
 export type GitAction = "fetch" | "worktree" | "rebase";
 
@@ -31,6 +32,11 @@ export const AGENT_BACKENDS: readonly { backend: string; label: string }[] = [
   { backend: "grok", label: "Grok" },
   { backend: "opencode", label: "OpenCode" },
 ];
+
+export interface RouteCase {
+  name: string;
+  expression: string;
+}
 
 export interface RunStepStatus {
   nodeId: string;
@@ -85,6 +91,7 @@ export interface GraphNode {
   retries?: number;
   timeoutMinutes?: number;
   schema?: string;
+  cases?: RouteCase[];
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -105,6 +112,7 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "gitlab", label: "GitLab" },
   { type: "githubapp", label: "GitHub App" },
   { type: "jsonschema", label: "JSON Schema" },
+  { type: "router", label: "Router" },
 ];
 
 // Single source of truth for where a block may go, agreed with the product
@@ -119,6 +127,7 @@ export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
   githubapp: ["github"],
   action: ["github"],
   jsonschema: ["project", "agent"],
+  router: ["project", "agent"],
 };
 
 // Boxes that can host children: every target that appears as a parent in
@@ -132,6 +141,7 @@ export const CONTAINER_TYPES: readonly NodeType[] = (
     "githubapp",
     "action",
     "jsonschema",
+    "router",
   ] as NodeType[]
 ).filter((type) =>
   Object.values(CONTAINMENT_MATRIX).some((targets) => targets.includes(type)),
@@ -182,6 +192,7 @@ const TARGET_LABELS: Record<NodeType, string> = {
   githubapp: "GitHub App",
   action: "Git action",
   jsonschema: "JSON Schema",
+  router: "Router",
 };
 
 // Human-readable list of the targets a block may be dropped into, used to
@@ -286,6 +297,10 @@ export class GraphStore {
       parentId: effectiveParent,
     };
     if (type === "agent") node.backend = "claude";
+    if (type === "router")
+      node.cases = [
+        { name: "approved", expression: 'value.verdict == "approve"' },
+      ];
     this.nodes.push(node);
     this.selectedId = node.id;
     // The store holds a reactive proxy of the node; hand that back so later
@@ -397,7 +412,14 @@ export class GraphStore {
       )
     )
       return false;
-    this.edges.push({ id: crypto.randomUUID(), from: fromId, to: toId });
+    // An arrow from a block with several outputs names the one it takes.
+    const fromPort = this.outputPorts(fromId)[0];
+    this.edges.push({
+      id: crypto.randomUUID(),
+      from: fromId,
+      to: toId,
+      ...(fromPort ? { fromPort } : {}),
+    });
     return true;
   }
 
@@ -555,6 +577,11 @@ export class GraphStore {
   outputPorts(id: string): string[] {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node?.type === "jsonschema") return ["valid", "invalid"];
+    if (node?.type === "router")
+      return [
+        ...(node.cases ?? []).map((routeCase) => routeCase.name),
+        "default",
+      ];
     return [];
   }
 
@@ -570,6 +597,39 @@ export class GraphStore {
   setEdgePort(edgeId: string, port: string): void {
     const edge = this.edges.find((candidate) => candidate.id === edgeId);
     if (edge) edge.fromPort = port;
+  }
+
+  addCase(id: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node?.cases) return;
+    node.cases.push({ name: `case-${node.cases.length + 1}`, expression: "" });
+  }
+
+  // Renaming a case keeps the arrows that took it on the renamed route.
+  setCase(
+    id: string,
+    index: number,
+    field: keyof RouteCase,
+    value: string,
+  ): void {
+    const routeCase = this.nodes.find((candidate) => candidate.id === id)
+      ?.cases?.[index];
+    if (!routeCase) return;
+    if (field === "name") {
+      for (const edge of this.outgoingEdges(id))
+        if (edge.fromPort === routeCase.name) edge.fromPort = value;
+    }
+    routeCase[field] = value;
+  }
+
+  // Arrows that took a removed case fall back to the default route.
+  removeCase(id: string, index: number): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    const removed = node?.cases?.[index];
+    if (!node?.cases || !removed) return;
+    node.cases.splice(index, 1);
+    for (const edge of this.outgoingEdges(id))
+      if (edge.fromPort === removed.name) edge.fromPort = "default";
   }
 
   setSchema(id: string, schema: string): void {

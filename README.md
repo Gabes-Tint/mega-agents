@@ -73,6 +73,12 @@ record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
   fails the run. Choose each outgoing arrow's output in the block's
   properties.
 
+- **Router** sends the one value connected to it down the first case whose
+  CEL condition over `value` holds (for example `value.verdict == "approve"`),
+  or down `default`, as `{"case": ..., "value": ...}`. Expressions are
+  type-checked when the run is planned and evaluated under a cost limit;
+  arrows on routes not taken are skipped.
+
 | Backend | CLI | Schema | Verified live |
 | --- | --- | --- | --- |
 | `claude` | `claude --print --output-format stream-json` | `--json-schema` | ✅ haiku |

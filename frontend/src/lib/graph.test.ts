@@ -802,6 +802,7 @@ describe("PALETTE", () => {
       { type: "gitlab", label: "GitLab" },
       { type: "githubapp", label: "GitHub App" },
       { type: "jsonschema", label: "JSON Schema" },
+      { type: "router", label: "Router" },
     ]);
   });
 });
@@ -828,6 +829,7 @@ describe("canHostChild", () => {
     ["githubapp", { root: false, project: false, github: true, agent: false }],
     ["action", { root: false, project: false, github: true, agent: false }],
     ["jsonschema", { root: false, project: true, github: false, agent: true }],
+    ["router", { root: false, project: true, github: false, agent: true }],
   ] as const;
 
   for (const [childType, targets] of matrix) {
@@ -1109,5 +1111,53 @@ describe("output ports", () => {
     graph.setSchema("missing", "ignored");
 
     expect(check.schema).toBe('{"type":"object"}');
+  });
+});
+
+describe("router cases", () => {
+  function routerInProject() {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const route = graph.addNode("router", 10, 10, project.id);
+    const ship = graph.addNode("agent", 200, 10, project.id);
+    return { graph, route, ship };
+  }
+
+  test("a new router starts with one example case and a default route", () => {
+    const { graph, route } = routerInProject();
+
+    expect(route.cases).toEqual([
+      { name: "approved", expression: 'value.verdict == "approve"' },
+    ]);
+    expect(graph.outputPorts(route.id)).toEqual(["approved", "default"]);
+  });
+
+  test("an arrow from a router takes its first route explicitly", () => {
+    const { graph, route, ship } = routerInProject();
+
+    graph.connect(route.id, ship.id);
+
+    expect(graph.edges[0]?.fromPort).toBe("approved");
+  });
+
+  test("adds, edits, renames, and removes cases", () => {
+    const { graph, route, ship } = routerInProject();
+    graph.connect(route.id, ship.id);
+
+    graph.addCase(route.id);
+    graph.setCase(route.id, 1, "expression", "size(value.findings) > 0");
+    graph.setCase(route.id, 0, "name", "ship");
+
+    expect(route.cases).toEqual([
+      { name: "ship", expression: 'value.verdict == "approve"' },
+      { name: "case-2", expression: "size(value.findings) > 0" },
+    ]);
+    expect(graph.edges[0]?.fromPort).toBe("ship");
+    graph.removeCase(route.id, 0);
+    expect(route.cases).toHaveLength(1);
+    expect(graph.edges[0]?.fromPort).toBe("default");
+    graph.addCase("missing");
+    graph.setCase("missing", 0, "name", "x");
+    graph.removeCase("missing", 0);
   });
 });

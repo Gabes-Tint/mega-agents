@@ -157,7 +157,7 @@ export async function dropInto(
   await page.mouse.down();
   await page.mouse.move(box.x + at.x, box.y + at.y, { steps: 10 });
   await page.mouse.up();
-  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("Name", { exact: true }).fill(name);
   return page.getByRole("button", { name, exact: true });
 }
 

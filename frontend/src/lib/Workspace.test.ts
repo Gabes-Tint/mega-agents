@@ -501,6 +501,9 @@ describe("graph builder workspace", () => {
     expect(palette).toContainElement(
       screen.getByRole("button", { name: "JSON Schema" }),
     );
+    expect(palette).toContainElement(
+      screen.getByRole("button", { name: "Router" }),
+    );
   });
 
   test("shows repository and secret key fields only for forge boxes", async () => {
@@ -2078,6 +2081,63 @@ describe("graph builder workspace", () => {
     expect(result).toHaveTextContent(
       "$.verdict: value must be one of 'approve'",
     );
+    vi.unstubAllGlobals();
+  });
+
+  test("edits a router's cases and routes its arrows", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Router", 410, 410);
+    await dropComponent("Agent", 450, 440);
+    await fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Fix" },
+    });
+    await fireEvent.click(screen.getByText("Router 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(screen.getByText("Fix"));
+    await fireEvent.click(screen.getByText("Router 1"));
+
+    expect(screen.getByLabelText("Case 1 name")).toHaveValue("approved");
+    await fireEvent.click(screen.getByRole("button", { name: "Add case" }));
+    await fireEvent.input(screen.getByLabelText("Case 2 name"), {
+      target: { value: "blocked" },
+    });
+    await fireEvent.input(screen.getByLabelText("Case 2 expression"), {
+      target: { value: "size(value.findings) > 0" },
+    });
+    const port = screen.getByLabelText("Output to Fix");
+    expect(port).toHaveValue("approved");
+    await fireEvent.change(port, { target: { value: "blocked" } });
+    expect(canvas().querySelector(".edge-port")).toHaveTextContent("blocked");
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Remove case 2" }),
+    );
+    expect(screen.queryByLabelText("Case 2 name")).toBeNull();
+    expect(screen.getByLabelText("Output to Fix")).toHaveValue("default");
+  });
+
+  test("shows the route a router step took", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [
+        record("succeeded", [
+          {
+            nodeId: "x1",
+            name: "Route",
+            action: "router",
+            status: "succeeded",
+            details: { case: "approved" },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Route: approved"));
     vi.unstubAllGlobals();
   });
 });

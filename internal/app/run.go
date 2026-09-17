@@ -10,10 +10,13 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
 	"github.com/Gabes-Tint/mega-agents/internal/gitops"
+	"github.com/Gabes-Tint/mega-agents/internal/router"
 	"github.com/Gabes-Tint/mega-agents/internal/runs"
 )
 
@@ -169,6 +172,8 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 			task, err = planner.agentTask(node, included)
 		case "jsonschema":
 			task, err = planner.schemaTask(node, included)
+		case "router":
+			task, err = planner.routerTask(node, included)
 		default:
 			task, err = planner.actionTask(node, included)
 		}
@@ -200,7 +205,7 @@ func (planner runPlanner) startingAction(github WorkflowNodeInput) (WorkflowNode
 }
 
 // executableTypes are the blocks a run executes when a start reaches them.
-var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true}
+var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true, "router": true}
 
 // include marks the node and every executable node its arrows reach.
 func (planner runPlanner) include(id string, included map[string]bool) {
@@ -287,8 +292,55 @@ func (planner runPlanner) sourcePort(edge WorkflowEdgeInput) (string, error) {
 			return edge.FromPort, nil
 		}
 		return "", fmt.Errorf("%s has no output %q; use %s or %s", source.Name, edge.FromPort, validPort, invalidPort)
+	case source.Type == "router":
+		routes := []string{}
+		for _, routeCase := range source.Cases {
+			routes = append(routes, routeCase.Name)
+		}
+		routes = append(routes, router.Default)
+		if edge.FromPort == "" {
+			return "", fmt.Errorf("choose which route the arrow from %s to %s takes", source.Name, planner.nodeByID[edge.To].Name)
+		}
+		if !slices.Contains(routes, edge.FromPort) {
+			return "", fmt.Errorf("%s has no route %q; use %s", source.Name, edge.FromPort, joinChoices(routes))
+		}
+		return edge.FromPort, nil
 	}
 	return "", nil
+}
+
+// joinChoices spells a list as "a, b or c".
+func joinChoices(choices []string) string {
+	if len(choices) == 1 {
+		return choices[0]
+	}
+	return strings.Join(choices[:len(choices)-1], ", ") + " or " + choices[len(choices)-1]
+}
+
+// valueNeeds collects the arrows into a block that takes exactly one value,
+// such as an agent's result, and nothing else.
+func (planner runPlanner) valueNeeds(node WorkflowNodeInput, included map[string]bool, verb string) ([]engine.Need, error) {
+	var needs []engine.Need
+	values := 0
+	for _, edge := range planner.request.Edges {
+		if edge.To != node.ID || !included[edge.From] {
+			continue
+		}
+		port, err := planner.sourcePort(edge)
+		if err != nil {
+			return nil, err
+		}
+		if port != "" && port != workspacePort {
+			values++
+		} else {
+			values += 2 // Only a value counts.
+		}
+		needs = append(needs, engine.Need{TaskID: edge.From, Port: port})
+	}
+	if values != 1 {
+		return nil, fmt.Errorf("%s: %s one value; connect exactly one block to it", node.Name, verb)
+	}
+	return needs, nil
 }
 
 func producesWorkspace(node WorkflowNodeInput) bool {

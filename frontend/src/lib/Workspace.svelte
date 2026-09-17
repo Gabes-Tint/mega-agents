@@ -34,6 +34,7 @@
     ["model", "Model"],
     ["sessionId", "Session"],
     ["attempts", "Attempts"],
+    ["case", "Route"],
   ];
 
   function fieldErrors(details: Record<string, unknown> | undefined): string[] {
