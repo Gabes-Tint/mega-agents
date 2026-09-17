@@ -450,10 +450,14 @@
       #fbfdfc;
   }
 
+  /* Above the blocks: arrows between blocks nested in a container would
+     otherwise be painted over by the container's own background. The layer
+     ignores the pointer, so the blocks under it stay clickable. */
   .edges {
     position: absolute;
     left: 0;
     top: 0;
+    z-index: 2;
     pointer-events: none;
     overflow: visible;
   }
