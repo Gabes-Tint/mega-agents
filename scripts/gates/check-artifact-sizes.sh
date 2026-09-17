@@ -3,7 +3,11 @@ set -euo pipefail
 
 binary=${1:-bin/mega-agents}
 assets=${2:-internal/web/dist/assets}
-max_binary=${MAX_BINARY_BYTES:-16777216}
+# 32 MiB: the Router block embeds CEL (cel.dev/cel-go), whose protobuf and
+# ANTLR runtime take the binary from 12 MiB to about 24 MiB. The development
+# notes choose CEL for type-checked, sandboxed routing expressions over a
+# hand-rolled language; re-baselined deliberately in review.
+max_binary=${MAX_BINARY_BYTES:-33554432}
 # 140 KiB: the graph workspace added an SVG edge layer and node interaction
 # logic, then executable blocks (Git actions, agents, validation, routing) with
 # their property editors and run views; re-baselined deliberately in review
