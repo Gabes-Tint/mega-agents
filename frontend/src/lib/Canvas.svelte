@@ -66,6 +66,52 @@
     "bottom left",
   ] as const;
 
+  // The sides a block shows a handle on for drawing an arrow from it.
+  const SIDES = ["top", "right", "bottom", "left"] as const;
+  const HANDLE_SIZE = 20;
+
+  // An arrow being drawn from a block's handle, or an arrow whose end is
+  // being dragged: the block at the fixed end, which end follows the pointer
+  // (the head of a new arrow), and the block under the pointer, if any, with
+  // whether the arrow may end there.
+  let linking = $state<{
+    anchorId: string;
+    end: "from" | "to";
+    edgeId?: string;
+    x: number;
+    y: number;
+    targetId?: string;
+    valid: boolean;
+  } | null>(null);
+  let hoverId = $state<string | null>(null);
+
+  // The outputs to choose from when a new arrow leaves a block with several,
+  // shown where the pointer was released.
+  let portMenu = $state<{
+    x: number;
+    y: number;
+    fromId: string;
+    toId: string;
+    edgeId?: string;
+    ports: string[];
+  } | null>(null);
+  let canvasElement: HTMLDivElement;
+  let menuElement = $state<HTMLDivElement>();
+
+  // Handles show on the hovered and the selected block, except while a block
+  // is dragged or resized, an arrow is drawn or its output is chosen.
+  const handleIds = $derived(
+    linking || portMenu || movingId || resizing
+      ? []
+      : [...new Set([graph.selectedId, hoverId])].filter(
+          (id): id is string => id !== null,
+        ),
+  );
+
+  $effect(() => {
+    if (portMenu) menuElement?.querySelector("button")?.focus();
+  });
+
   function edgesOf(edge: string): ResizeEdges {
     const sides = edge.split(" ");
     return {
@@ -112,7 +158,160 @@
       dx === 0 ? Number.POSITIVE_INFINITY : node.w / 2 / Math.abs(dx),
       dy === 0 ? Number.POSITIVE_INFINITY : node.h / 2 / Math.abs(dy),
     );
-    return { x: x + dx * t, y: y + dy * t };
+    return Number.isFinite(t) ? { x: x + dx * t, y: y + dy * t } : { x, y };
+  }
+
+  function borderToward(node: GraphNode, x: number, y: number) {
+    const origin = graph.absolutePosition(node);
+    return borderPoint(
+      node,
+      origin.x + node.w / 2,
+      origin.y + node.h / 2,
+      x,
+      y,
+    );
+  }
+
+  // Top left corner of a handle, just outside the middle of a block's side.
+  function handleAt(node: GraphNode, side: (typeof SIDES)[number]) {
+    const { x, y } = graph.absolutePosition(node);
+    const middleX = x + (node.w - HANDLE_SIZE) / 2;
+    const middleY = y + (node.h - HANDLE_SIZE) / 2;
+    return {
+      top: { x: middleX, y: y - HANDLE_SIZE },
+      right: { x: x + node.w, y: middleY },
+      bottom: { x: middleX, y: y + node.h },
+      left: { x: x - HANDLE_SIZE, y: middleY },
+    }[side];
+  }
+
+  // Pulls a line's ends in, so an arrow's click target leaves the resize
+  // strips of the blocks it joins alone.
+  function inset(
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+  ) {
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    const k = length > 20 ? 8 / length : 0;
+    const dx = (end.x - start.x) * k;
+    const dy = (end.y - start.y) * k;
+    return {
+      x1: start.x + dx,
+      y1: start.y + dy,
+      x2: end.x - dx,
+      y2: end.y - dy,
+    };
+  }
+
+  function contentPoint(event: { clientX: number; clientY: number }) {
+    const rect = canvasElement.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left + canvasElement.scrollLeft,
+      y: event.clientY - rect.top + canvasElement.scrollTop,
+    };
+  }
+
+  function hover(event: PointerEvent) {
+    if ((event.target as HTMLElement).closest(".link-handle")) return;
+    const point = contentPoint(event);
+    hoverId = graph.nodeAt(point.x, point.y)?.id ?? null;
+  }
+
+  // The arrow's source and target when its moving end lands on the block.
+  function pairWith(
+    active: NonNullable<typeof linking>,
+    id: string,
+  ): [string, string] {
+    return active.end === "to" ? [active.anchorId, id] : [id, active.anchorId];
+  }
+
+  function startLink(
+    event: PointerEvent & { currentTarget: EventTarget & globalThis.Element },
+    anchorId: string,
+    end: "from" | "to",
+    edgeId?: string,
+  ) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    portMenu = null;
+    linking = { anchorId, end, edgeId, ...contentPoint(event), valid: false };
+  }
+
+  function moveLink(event: PointerEvent) {
+    if (!linking) return;
+    const point = contentPoint(event);
+    const target = graph.nodeAt(point.x, point.y);
+    linking = {
+      ...linking,
+      ...point,
+      targetId: target?.id,
+      valid:
+        target !== undefined &&
+        graph.canConnect(...pairWith(linking, target.id), linking.edgeId),
+    };
+  }
+
+  // Draws or moves the arrow onto a block that may take it. A new source
+  // with several outputs first asks which one the arrow takes.
+  function endLink() {
+    const active = linking;
+    linking = null;
+    if (!active?.targetId || !active.valid) return;
+    const [fromId, toId] = pairWith(active, active.targetId);
+    const edge = graph.edges.find(
+      (candidate) => candidate.id === active.edgeId,
+    );
+    const ports = graph.outputPorts(fromId);
+    if (ports.length > 1 && edge?.from !== fromId) {
+      portMenu = {
+        x: active.x,
+        y: active.y,
+        fromId,
+        toId,
+        edgeId: edge?.id,
+        ports,
+      };
+      return;
+    }
+    if (!edge) graph.connect(fromId, toId);
+    else graph.reconnectEdge(edge.id, active.end, active.targetId);
+  }
+
+  function choosePort(port: string) {
+    const menu = portMenu;
+    portMenu = null;
+    if (!menu) return;
+    if (menu.edgeId)
+      graph.reconnectEdge(menu.edgeId, "from", menu.fromId, port);
+    else graph.connect(menu.fromId, menu.toId, port);
+  }
+
+  // Up and down move through the outputs, Enter or Space takes one, and Tab
+  // leaves the menu; Escape closes it from anywhere.
+  function menuKey(event: { key: string; preventDefault(): void }) {
+    const items = [...(menuElement?.querySelectorAll("button") ?? [])];
+    const index = items.findIndex((item) => item === document.activeElement);
+    const step = { ArrowDown: 1, ArrowUp: items.length - 1 }[event.key];
+    if (step !== undefined) items[(index + step) % items.length]?.focus();
+    else if (event.key === "Enter" || event.key === " ") {
+      const port = portMenu?.ports[index];
+      if (port !== undefined) choosePort(port);
+    } else if (event.key === "Tab") portMenu = null;
+    else return;
+    event.preventDefault();
+  }
+
+  function cancelLink(event: { key: string }) {
+    if (event.key !== "Escape") return;
+    linking = null;
+    portMenu = null;
+  }
+
+  function closeMenu(event: PointerEvent) {
+    if (portMenu && !menuElement?.contains(event.target as globalThis.Node))
+      portMenu = null;
   }
 
   function selectOrConnect(node: GraphNode): void {
@@ -354,15 +553,18 @@
   class="canvas"
   class:preview-invalid={previewing && !previewValid}
   class:resizing
+  class:linking
   role="region"
   aria-label="Graph canvas"
+  bind:this={canvasElement}
+  onpointermove={hover}
+  onpointerleave={() => (hoverId = null)}
   ondragover={previewDrop}
   ondragleave={clearPreview}
   ondrop={drop}
 >
   <svg
     class="edges"
-    aria-hidden="true"
     style:width="{extent.width}px"
     style:height="{extent.height}px"
   >
@@ -377,45 +579,115 @@
       >
         <path class="edge-arrow" d="M0 0 L8 4 L0 8 Z" />
       </marker>
+      <marker
+        id="edge-arrowhead-active"
+        markerWidth="8"
+        markerHeight="8"
+        refX="7"
+        refY="4"
+        orient="auto"
+      >
+        <path class="edge-arrow-active" d="M0 0 L8 4 L0 8 Z" />
+      </marker>
     </defs>
-    {#each graph.edges as edge (edge.id)}
-      {@const from = nodeById(edge.from)}
-      {@const to = nodeById(edge.to)}
-      {#if from && to}
-        {@const fromPosition = graph.absolutePosition(from)}
-        {@const toPosition = graph.absolutePosition(to)}
-        {@const start = borderPoint(
-          from,
-          fromPosition.x + from.w / 2,
-          fromPosition.y + from.h / 2,
-          toPosition.x + to.w / 2,
-          toPosition.y + to.h / 2,
-        )}
-        {@const end = borderPoint(
-          to,
-          toPosition.x + to.w / 2,
-          toPosition.y + to.h / 2,
-          fromPosition.x + from.w / 2,
-          fromPosition.y + from.h / 2,
-        )}
-        <line
-          class="edge-line"
-          x1={start.x}
-          y1={start.y}
-          x2={end.x}
-          y2={end.y}
-          marker-end="url(#edge-arrowhead)"
-        ></line>
-        {#if graph.portOf(edge)}
-          <text
-            class="edge-port"
-            x={(start.x + end.x) / 2}
-            y={(start.y + end.y) / 2 - 4}
-            text-anchor="middle">{graph.portOf(edge)}</text
-          >
+    <g role="listbox" aria-label="Arrows">
+      {#each graph.edges as edge (edge.id)}
+        {@const from = nodeById(edge.from)}
+        {@const to = nodeById(edge.to)}
+        {#if from && to}
+          {@const fromPosition = graph.absolutePosition(from)}
+          {@const toPosition = graph.absolutePosition(to)}
+          {@const start = borderToward(
+            from,
+            toPosition.x + to.w / 2,
+            toPosition.y + to.h / 2,
+          )}
+          {@const end = borderToward(
+            to,
+            fromPosition.x + from.w / 2,
+            fromPosition.y + from.h / 2,
+          )}
+          {@const selected = edge.id === graph.selectedEdgeId}
+          <line
+            class="edge-hit"
+            role="option"
+            tabindex="0"
+            aria-selected={selected}
+            aria-label="Arrow from {from.name} to {to.name}"
+            {...inset(start, end)}
+            onclick={(event) => {
+              graph.selectEdge(edge.id);
+              event.currentTarget.focus();
+            }}
+            onkeydown={(event) => {
+              // Delete or Backspace deletes the focused arrow.
+              if (event.key !== "Delete" && event.key !== "Backspace") return;
+              event.preventDefault();
+              graph.removeEdge(edge.id);
+            }}
+          ></line>
+          <line
+            class="edge-line"
+            class:selected
+            class:moving={linking?.edgeId === edge.id}
+            x1={start.x}
+            y1={start.y}
+            x2={end.x}
+            y2={end.y}
+            marker-end={selected
+              ? "url(#edge-arrowhead-active)"
+              : "url(#edge-arrowhead)"}
+          ></line>
+          {#if graph.portOf(edge)}
+            <text
+              class="edge-port"
+              aria-hidden="true"
+              x={(start.x + end.x) / 2}
+              y={(start.y + end.y) / 2 - 4}
+              text-anchor="middle">{graph.portOf(edge)}</text
+            >
+          {/if}
+          {#if selected && !linking}
+            <circle
+              class="edge-end"
+              data-end="from"
+              aria-hidden="true"
+              cx={start.x}
+              cy={start.y}
+              r="5"
+              onpointerdown={(event) =>
+                startLink(event, edge.to, "from", edge.id)}
+            ></circle>
+            <circle
+              class="edge-end"
+              data-end="to"
+              aria-hidden="true"
+              cx={end.x}
+              cy={end.y}
+              r="5"
+              onpointerdown={(event) =>
+                startLink(event, edge.from, "to", edge.id)}
+            ></circle>
+          {/if}
         {/if}
+      {/each}
+    </g>
+    {#if linking}
+      {@const anchor = nodeById(linking.anchorId)}
+      {#if anchor}
+        {@const border = borderToward(anchor, linking.x, linking.y)}
+        {@const tail = linking.end === "to" ? border : linking}
+        {@const head = linking.end === "to" ? linking : border}
+        <line
+          class="edge-preview"
+          x1={tail.x}
+          y1={tail.y}
+          x2={head.x}
+          y2={head.y}
+          marker-end="url(#edge-arrowhead-active)"
+        ></line>
       {/if}
-    {/each}
+    {/if}
   </svg>
   {#each graph.nodes as node (node.id)}
     <button
@@ -424,8 +696,10 @@
       class:selected={node.id === graph.selectedId}
       class:problem-error={graph.severityOf(node.id) === "error"}
       class:problem-warning={graph.severityOf(node.id) === "warning"}
-      class:drop-ok={previewing && nestId === node.id}
-      class:drop-no={previewing && refusedId === node.id}
+      class:drop-ok={(previewing && nestId === node.id) ||
+        (linking?.targetId === node.id && linking.valid)}
+      class:drop-no={(previewing && refusedId === node.id) ||
+        (linking?.targetId === node.id && !linking.valid)}
       class:dragging={node.id === movingId}
       aria-pressed={node.id === graph.selectedId}
       draggable="true"
@@ -490,6 +764,42 @@
       ></span>
     </button>
   {/each}
+  {#each handleIds as id (id)}
+    {@const node = nodeById(id)}
+    {#if node}
+      {#each SIDES as side (side)}
+        {@const at = handleAt(node, side)}
+        <span
+          class="link-handle"
+          data-side={side}
+          aria-hidden="true"
+          title="Drag to draw an arrow"
+          style:left="{at.x}px"
+          style:top="{at.y}px"
+          onpointerdown={(event) => startLink(event, node.id, "to")}
+        ></span>
+      {/each}
+    {/if}
+  {/each}
+  {#if portMenu}
+    <div
+      class="port-menu"
+      role="menu"
+      aria-label="Output"
+      tabindex="-1"
+      bind:this={menuElement}
+      style:left="{portMenu.x}px"
+      style:top="{portMenu.y}px"
+      onkeydown={menuKey}
+    >
+      <span class="port-menu-title" aria-hidden="true">Output</span>
+      {#each portMenu.ports as port, index (index)}
+        <button type="button" role="menuitem" onclick={() => choosePort(port)}
+          >{port}</button
+        >
+      {/each}
+    </div>
+  {/if}
   {#if landing}
     <div
       class="drop-preview block-{landing.type}"
@@ -514,9 +824,20 @@
 </div>
 
 <svelte:window
-  onpointermove={applyResize}
-  onpointerup={endResize}
-  onpointercancel={endResize}
+  onpointermove={(event) => {
+    applyResize(event);
+    moveLink(event);
+  }}
+  onpointerup={() => {
+    endResize();
+    endLink();
+  }}
+  onpointercancel={() => {
+    endResize();
+    linking = null;
+  }}
+  onpointerdown={closeMenu}
+  onkeydown={cancelLink}
 />
 
 <style>
@@ -547,6 +868,136 @@
 
   .edge-arrow {
     fill: var(--edge);
+  }
+
+  /* A wide invisible stroke under each arrow takes its clicks, the only
+     part of the layer that does. */
+  .edge-hit {
+    stroke: transparent;
+    stroke-width: 12;
+    pointer-events: stroke;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .edge-hit:hover + .edge-line {
+    stroke: var(--text-muted);
+  }
+
+  .edge-line.selected,
+  .edge-hit:focus-visible + .edge-line {
+    stroke: var(--accent);
+    stroke-width: 2.25;
+  }
+
+  .edge-line.moving {
+    opacity: 0.3;
+  }
+
+  .edge-arrow-active {
+    fill: var(--accent);
+  }
+
+  .edge-preview {
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+  }
+
+  /* The ends of the selected arrow, dragged onto another block to move it. */
+  .edge-end {
+    fill: var(--surface);
+    stroke: var(--accent);
+    stroke-width: 2;
+    pointer-events: all;
+    cursor: move;
+    touch-action: none;
+  }
+
+  .edge-end:hover {
+    fill: var(--accent);
+  }
+
+  /* draw.io style arrows just outside each side of a block; pressing one
+     and dragging onto another block draws an arrow to it. */
+  .link-handle {
+    position: absolute;
+    z-index: 4;
+    width: 20px;
+    height: 20px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .link-handle::before {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    background: var(--accent);
+    clip-path: polygon(50% 6%, 100% 94%, 0 94%);
+    opacity: 0.6;
+    transform: rotate(var(--turn, 0deg));
+    transition:
+      opacity 120ms ease,
+      transform 120ms ease;
+  }
+
+  .link-handle[data-side="right"] {
+    --turn: 90deg;
+  }
+
+  .link-handle[data-side="bottom"] {
+    --turn: 180deg;
+  }
+
+  .link-handle[data-side="left"] {
+    --turn: 270deg;
+  }
+
+  .link-handle:hover::before {
+    opacity: 1;
+    transform: rotate(var(--turn, 0deg)) scale(1.2);
+  }
+
+  .canvas.linking,
+  .canvas.linking .node {
+    cursor: crosshair;
+  }
+
+  .port-menu {
+    position: absolute;
+    z-index: 5;
+    display: grid;
+    min-width: 8rem;
+    padding: 0.25rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-lifted);
+  }
+
+  .port-menu-title {
+    padding: 0.15rem 0.5rem 0.25rem;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-faint);
+  }
+
+  .port-menu button {
+    justify-content: flex-start;
+    min-height: 1.7rem;
+    border: 0;
+    background: transparent;
+  }
+
+  .port-menu button:hover,
+  .port-menu button:focus-visible {
+    background: var(--surface-hover);
+    outline: none;
+  }
+
+  .port-menu button:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--focus);
   }
 
   .edge-port {
@@ -830,7 +1281,7 @@
 
   /* The container a dragged block will land in, and the preview of that
      block, share one highlight so the pairing reads at a glance. */
-  .node.drop-ok,
+  .canvas .node.drop-ok,
   .drop-preview.nesting {
     border-color: var(--ok);
     box-shadow:
@@ -838,7 +1289,7 @@
       var(--shadow);
   }
 
-  .node.drop-ok {
+  .canvas .node.drop-ok {
     background: color-mix(in oklch, var(--ok-soft) 45%, var(--block-body));
   }
 
@@ -864,7 +1315,7 @@
     }
   }
 
-  .node.drop-no {
+  .canvas .node.drop-no {
     border-color: var(--fail);
     box-shadow: 0 0 0 3px var(--fail-soft);
   }

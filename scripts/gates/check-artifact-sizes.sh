@@ -8,12 +8,14 @@ assets=${2:-internal/web/dist/assets}
 # notes choose CEL for type-checked, sandboxed routing expressions over a
 # hand-rolled language; re-baselined deliberately in review.
 max_binary=${MAX_BINARY_BYTES:-33554432}
-# 160 KiB: the graph workspace added an SVG edge layer and node interaction
+# 192 KiB: the graph workspace added an SVG edge layer and node interaction
 # logic, then executable blocks (Git actions, agents, validation, routing) with
 # their property editors and run views, then the editor redesign (themes,
-# block deletion, palette explanations, a problems panel); re-baselined
-# deliberately in review rather than trimming features.
-max_javascript=${MAX_JAVASCRIPT_BYTES:-163840}
+# block deletion, palette explanations, a problems panel), then draw.io style
+# arrows (drag handles, output menu, arrow selection, deletion and
+# reconnection); re-baselined deliberately in review rather than trimming
+# features.
+max_javascript=${MAX_JAVASCRIPT_BYTES:-196736}
 max_css=${MAX_CSS_BYTES:-51200}
 
 test -f "$binary" || { echo "Missing binary: $binary" >&2; exit 1; }

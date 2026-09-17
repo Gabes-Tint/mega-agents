@@ -400,6 +400,8 @@ export class GraphStore {
   nodes = $state<GraphNode[]>([]);
   edges = $state<GraphEdge[]>([]);
   selectedId = $state<string | null>(null);
+  // The selected arrow; selecting a block or an arrow clears the other.
+  selectedEdgeId = $state<string | null>(null);
   connecting = $state(false);
   connectFromId = $state<string | null>(null);
   // Component type currently dragged from the palette; dataTransfer.getData
@@ -421,7 +423,7 @@ export class GraphStore {
     this.nodes = workflow.nodes;
     this.edges = workflow.edges ?? [];
     this.workflowName = workflow.name ?? "workflow";
-    this.selectedId = null;
+    this.select(null);
     this.cancelConnect();
     this.showRun([]);
     this.logNodeId = null;
@@ -433,6 +435,10 @@ export class GraphStore {
 
   get selected(): GraphNode | undefined {
     return this.nodes.find((node) => node.id === this.selectedId);
+  }
+
+  get selectedEdge(): GraphEdge | undefined {
+    return this.edges.find((edge) => edge.id === this.selectedEdgeId);
   }
 
   // Content-space position of a box, accumulated over its full parent chain
@@ -478,7 +484,7 @@ export class GraphStore {
         { name: "approved", expression: 'value.verdict == "approve"' },
       ];
     this.nodes.push(node);
-    this.selectedId = node.id;
+    this.select(node.id);
     // The store holds a reactive proxy of the node; hand that back so later
     // changes through the store are visible to the caller.
     return this.nodes.at(-1) ?? node;
@@ -486,6 +492,12 @@ export class GraphStore {
 
   select(id: string | null): void {
     this.selectedId = id;
+    this.selectedEdgeId = null;
+  }
+
+  selectEdge(id: string | null): void {
+    this.selectedEdgeId = id;
+    this.selectedId = null;
   }
 
   moveNode(id: string, x: number, y: number): void {
@@ -565,8 +577,9 @@ export class GraphStore {
   // boxes or two children of the same project. Level membership is validated
   // at creation only; edges follow their endpoints afterward. Any number of
   // arrows may leave or enter a box, but a pair is connected at most once in
-  // either direction.
-  connect(fromId: string, toId: string): boolean {
+  // either direction. The arrow named by exceptEdgeId, one whose end is being
+  // moved, does not count as connecting its pair.
+  canConnect(fromId: string, toId: string, exceptEdgeId?: string): boolean {
     const from = this.nodes.find((candidate) => candidate.id === fromId);
     const to = this.nodes.find((candidate) => candidate.id === toId);
     // A schema check takes the reply of the agent it sits in, never an arrow.
@@ -591,22 +604,60 @@ export class GraphStore {
     const intoProvider =
       target !== undefined && target.parentId === from.parentId;
     if (!sameLevel && !besideProvider && !intoProvider) return false;
-    if (
-      this.edges.some(
-        (edge) =>
-          (edge.from === fromId && edge.to === toId) ||
-          (edge.from === toId && edge.to === fromId),
-      )
-    )
-      return false;
-    // An arrow from a block with several outputs names the one it takes.
-    const fromPort = this.outputPorts(fromId)[0];
+    return !this.edges.some(
+      (edge) =>
+        edge.id !== exceptEdgeId &&
+        ((edge.from === fromId && edge.to === toId) ||
+          (edge.from === toId && edge.to === fromId)),
+    );
+  }
+
+  connect(fromId: string, toId: string, fromPort?: string): boolean {
+    if (!this.canConnect(fromId, toId)) return false;
     this.edges.push({
       id: crypto.randomUUID(),
       from: fromId,
       to: toId,
-      ...(fromPort ? { fromPort } : {}),
+      ...this.portFor(fromId, fromPort),
     });
+    return true;
+  }
+
+  // An arrow from a block with several outputs names the one it takes: the
+  // chosen one, or the block's first.
+  private portFor(fromId: string, chosen?: string): { fromPort?: string } {
+    const ports = this.outputPorts(fromId);
+    const fromPort = chosen && ports.includes(chosen) ? chosen : ports[0];
+    return fromPort ? { fromPort } : {};
+  }
+
+  // Removes one arrow. An arrow between Git actions goes like any other:
+  // nothing rejoins the sequence, so the actions after it leave the run, and
+  // the problems panel says so, until an arrow joins them again.
+  removeEdge(id: string): void {
+    this.edges = this.edges.filter((edge) => edge.id !== id);
+    if (this.selectedEdgeId === id) this.selectedEdgeId = null;
+  }
+
+  // Moves one end of an arrow onto another block when the new pair may be
+  // connected. The arrow keeps its output while its source stays, and takes
+  // the chosen or first output of a new source.
+  reconnectEdge(
+    id: string,
+    end: "from" | "to",
+    nodeId: string,
+    fromPort?: string,
+  ): boolean {
+    const edge = this.edges.find((candidate) => candidate.id === id);
+    if (!edge) return false;
+    const from = end === "from" ? nodeId : edge.from;
+    const to = end === "to" ? nodeId : edge.to;
+    if (!this.canConnect(from, to, id)) return false;
+    if (from !== edge.from) {
+      delete edge.fromPort;
+      Object.assign(edge, { from }, this.portFor(from, fromPort));
+    }
+    edge.to = to;
     return true;
   }
 
@@ -663,6 +714,7 @@ export class GraphStore {
       }
     if (this.selectedId && removed.includes(this.selectedId))
       this.selectedId = null;
+    if (!this.selectedEdge) this.selectedEdgeId = null;
     if (this.logNodeId && removed.includes(this.logNodeId))
       this.logNodeId = null;
     if (this.connectFromId && removed.includes(this.connectFromId))
@@ -696,6 +748,24 @@ export class GraphStore {
           bestDepth = depth;
         }
       }
+    }
+    return best;
+  }
+
+  // Innermost block of any type whose box contains the content point, the
+  // later one where blocks at the same depth overlap.
+  nodeAt(x: number, y: number): GraphNode | undefined {
+    let best: GraphNode | undefined;
+    for (const node of this.nodes) {
+      const origin = this.absolutePosition(node);
+      if (
+        x >= origin.x &&
+        x < origin.x + node.w &&
+        y >= origin.y &&
+        y < origin.y + node.h &&
+        (!best || this.nodeDepth(node) >= this.nodeDepth(best))
+      )
+        best = node;
     }
     return best;
   }
@@ -882,7 +952,7 @@ export class GraphStore {
     const added = this.nodes.at(-1) ?? node;
     if (previous) this.connect(previous.id, added.id);
     this.growToFit(added);
-    this.selectedId = added.id;
+    this.select(added.id);
     return added;
   }
 

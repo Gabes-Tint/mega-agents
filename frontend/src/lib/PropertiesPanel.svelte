@@ -629,6 +629,36 @@
       <p class="hint">
         Delete or Backspace on a selected block deletes it too.
       </p>
+    {:else if graph.selectedEdge}
+      {@const edge = graph.selectedEdge}
+      {@const name = (id: string) =>
+        graph.nodes.find((candidate) => candidate.id === id)?.name}
+      <p>Arrow from {name(edge.from)} to {name(edge.to)}</p>
+      {#if graph.outputPorts(edge.from).length > 0}
+        <label>
+          Output
+          <select
+            value={graph.portOf(edge)}
+            onchange={(event) =>
+              graph.setEdgePort(edge.id, event.currentTarget.value)}
+          >
+            {#each graph.outputPorts(edge.from) as port (port)}
+              <option value={port}>{port}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+      <button
+        type="button"
+        class="delete"
+        onclick={() => graph.removeEdge(edge.id)}
+      >
+        Delete arrow
+      </button>
+      <p class="hint">
+        Delete or Backspace on a selected arrow deletes it too. Drag either end
+        onto another block to move it.
+      </p>
     {:else}
       <p>Select a node on the canvas to edit its properties.</p>
     {/if}

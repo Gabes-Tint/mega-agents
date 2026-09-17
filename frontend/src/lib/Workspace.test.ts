@@ -3432,3 +3432,248 @@ describe("resizable panels", () => {
     expect(sizeOf("Resize properties sidebar")).toBe(300);
   });
 });
+
+describe("drawing arrows on the canvas", () => {
+  function block(name: string) {
+    return screen.getByRole("button", { name });
+  }
+
+  function handle(side: string) {
+    const found = canvas().querySelector(`.link-handle[data-side="${side}"]`);
+    if (!found) throw new Error(`no ${side} handle`);
+    return found;
+  }
+
+  function arrows() {
+    return canvas().querySelectorAll(".edge-line");
+  }
+
+  // Presses on an element and moves the pointer to content point (x, y);
+  // the canvas sits at the viewport origin here, so the two coincide.
+  async function pressAndMove(element: Element, x: number, y: number) {
+    await fireEvent.pointerDown(element, {
+      button: 0,
+      pointerId: 1,
+      clientX: 0,
+      clientY: 0,
+    });
+    await fireEvent.pointerMove(window, { clientX: x, clientY: y });
+  }
+
+  // Two top-level projects, the first selected so its handles show.
+  async function twoProjects() {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Project", 400, 400);
+    await fireEvent.click(block("Project 1"));
+  }
+
+  // A roomy project holding a command gate at (40, 30) and agents at
+  // (400, 200) and (400, 330).
+  async function gateAndAgents() {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    const grip = block("Project 1").querySelector(".resize-handle");
+    if (!grip) throw new Error("no resize grip");
+    await fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0 });
+    await fireEvent.pointerMove(window, { clientX: 500, clientY: 400 });
+    await fireEvent.pointerUp(window);
+    await dropComponent("Command", 40, 30);
+    await dropComponent("Agent", 400, 200);
+    await dropComponent("Agent", 400, 330);
+    await fireEvent.click(block("Command 1"));
+  }
+
+  test("a hovered or selected block shows a handle on each side", async () => {
+    await twoProjects();
+    const sides = () =>
+      [...canvas().querySelectorAll(".link-handle")].map((element) =>
+        element.getAttribute("data-side"),
+      );
+    expect(sides()).toEqual(["top", "right", "bottom", "left"]);
+
+    await fireEvent.pointerMove(canvas(), { clientX: 450, clientY: 420 });
+    expect(sides()).toHaveLength(8);
+
+    await fireEvent.pointerMove(canvas(), { clientX: 700, clientY: 100 });
+    expect(sides()).toHaveLength(4);
+  });
+
+  test("dragging from a handle onto a block draws an arrow to it", async () => {
+    await twoProjects();
+
+    await pressAndMove(handle("right"), 450, 420);
+    expect(block("Project 2")).toHaveClass("drop-ok");
+    expect(canvas().querySelector(".edge-preview")).toBeInTheDocument();
+    await fireEvent.pointerUp(window);
+
+    expect(arrows()).toHaveLength(1);
+    expect(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    ).toBeInTheDocument();
+    expect(canvas().querySelector(".edge-preview")).not.toBeInTheDocument();
+    expect(block("Project 2")).not.toHaveClass("drop-ok");
+  });
+
+  test("a block the arrow may not reach is marked and gets no arrow", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Agent", 40, 30);
+    await dropComponent("Project", 400, 400);
+    await fireEvent.click(block("Agent 1"));
+
+    await pressAndMove(handle("bottom"), 450, 420);
+    expect(block("Project 2")).toHaveClass("drop-no");
+    await fireEvent.pointerUp(window);
+
+    expect(arrows()).toHaveLength(0);
+    expect(block("Project 2")).not.toHaveClass("drop-no");
+  });
+
+  test("releasing on the empty canvas or pressing Escape draws nothing", async () => {
+    await twoProjects();
+
+    await pressAndMove(handle("right"), 700, 100);
+    await fireEvent.pointerUp(window);
+    expect(arrows()).toHaveLength(0);
+
+    await pressAndMove(handle("right"), 450, 420);
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(canvas().querySelector(".edge-preview")).not.toBeInTheDocument();
+    expect(block("Project 2")).not.toHaveClass("drop-ok");
+    await fireEvent.pointerUp(window);
+    expect(arrows()).toHaveLength(0);
+  });
+
+  test("an arrow from a block with several outputs asks which one", async () => {
+    await gateAndAgents();
+
+    await pressAndMove(handle("right"), 450, 220);
+    await fireEvent.pointerUp(window);
+
+    const menu = screen.getByRole("menu", { name: "Output" });
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent?.trim())).toEqual([
+      "passed",
+      "failed",
+    ]);
+    expect(items[0]).toHaveFocus();
+    expect(arrows()).toHaveLength(0);
+
+    await fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    await fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(items[0]).toHaveFocus();
+    await fireEvent.keyDown(menu, { key: "ArrowUp" });
+    await fireEvent.keyDown(items[1]!, { key: "Enter" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(arrows()).toHaveLength(1);
+    expect(canvas().querySelector(".edge-port")).toHaveTextContent("failed");
+  });
+
+  test("Escape or a press elsewhere closes the output menu", async () => {
+    await gateAndAgents();
+
+    await pressAndMove(handle("right"), 450, 220);
+    await fireEvent.pointerUp(window);
+    await fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    await pressAndMove(handle("right"), 450, 220);
+    await fireEvent.pointerUp(window);
+    await fireEvent.pointerDown(canvas());
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(arrows()).toHaveLength(0);
+  });
+
+  test("an arrow is selected by clicking it and deleted with Delete", async () => {
+    await twoProjects();
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(block("Project 2"));
+    const arrow = screen.getByRole("option", {
+      name: "Arrow from Project 1 to Project 2",
+    });
+
+    await fireEvent.click(arrow);
+    expect(arrow).toHaveAttribute("aria-selected", "true");
+    expect(block("Project 1")).not.toHaveClass("selected");
+    expect(
+      screen.getByRole("button", { name: "Delete arrow" }),
+    ).toBeInTheDocument();
+
+    await fireEvent.click(block("Project 1"));
+    expect(arrow).toHaveAttribute("aria-selected", "false");
+
+    await fireEvent.click(arrow);
+    await fireEvent.keyDown(arrow, { key: "Delete" });
+    expect(arrows()).toHaveLength(0);
+    expect(block("Project 2")).toBeInTheDocument();
+  });
+
+  test("the properties panel deletes the selected arrow", async () => {
+    await twoProjects();
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(block("Project 2"));
+    await fireEvent.click(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "Delete arrow" }));
+
+    expect(arrows()).toHaveLength(0);
+    expect(
+      screen.getByText("Select a node on the canvas to edit its properties."),
+    ).toBeInTheDocument();
+  });
+
+  test("dragging a selected arrow's head moves it onto another block", async () => {
+    await twoProjects();
+    await dropComponent("Project", 30, 400);
+    await fireEvent.click(block("Project 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(block("Project 2"));
+    await fireEvent.click(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    );
+    const head = () => canvas().querySelector('.edge-end[data-end="to"]')!;
+
+    await pressAndMove(head(), 700, 100);
+    await fireEvent.pointerUp(window);
+    expect(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    ).toBeInTheDocument();
+
+    await pressAndMove(head(), 60, 420);
+    expect(block("Project 3")).toHaveClass("drop-ok");
+    await fireEvent.pointerUp(window);
+
+    expect(arrows()).toHaveLength(1);
+    expect(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 3" }),
+    ).toBeInTheDocument();
+  });
+
+  test("moving an arrow's tail onto a block with outputs asks which one", async () => {
+    await gateAndAgents();
+    await fireEvent.click(block("Agent 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(block("Agent 2"));
+    await fireEvent.click(
+      screen.getByRole("option", { name: "Arrow from Agent 1 to Agent 2" }),
+    );
+
+    await pressAndMove(
+      canvas().querySelector('.edge-end[data-end="from"]')!,
+      60,
+      50,
+    );
+    await fireEvent.pointerUp(window);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "failed" }));
+
+    expect(
+      screen.getByRole("option", { name: "Arrow from Command 1 to Agent 2" }),
+    ).toBeInTheDocument();
+    expect(canvas().querySelector(".edge-port")).toHaveTextContent("failed");
+  });
+});

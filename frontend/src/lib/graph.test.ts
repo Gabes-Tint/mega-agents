@@ -1786,3 +1786,200 @@ describe("resizing from an edge", () => {
     expect([agent.x, agent.y]).toEqual([0, 0]);
   });
 });
+
+describe("drawing and editing arrows", () => {
+  // A project holding a command gate, two agents and a writer with a schema
+  // check, beside a second project with an agent of its own.
+  function flow() {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    graph.resizeNode(project.id, 900, 600);
+    const gate = graph.addNode("command", 20, 40, project.id);
+    const coder = graph.addNode("agent", 300, 40, project.id);
+    const reviewer = graph.addNode("agent", 600, 40, project.id);
+    const writer = graph.addNode("agent", 20, 300, project.id);
+    const check = graph.addNode("jsonschema", 10, 40, writer.id);
+    const other = graph.addNode("project", 1000, 0);
+    const stranger = graph.addNode("agent", 10, 40, other.id);
+    return { graph, project, gate, coder, reviewer, writer, check, stranger };
+  }
+
+  test("tells whether an arrow may be drawn without drawing it", () => {
+    const { graph, project, gate, coder, writer, check, stranger } = flow();
+
+    expect(graph.canConnect(gate.id, coder.id)).toBe(true);
+    expect(graph.canConnect(check.id, coder.id)).toBe(true);
+    expect(graph.canConnect(coder.id, coder.id)).toBe(false);
+    expect(graph.canConnect(coder.id, stranger.id)).toBe(false);
+    expect(graph.canConnect(project.id, coder.id)).toBe(false);
+    expect(graph.canConnect(writer.id, check.id)).toBe(false);
+    expect(graph.canConnect(coder.id, "missing")).toBe(false);
+    expect(graph.edges).toEqual([]);
+
+    graph.connect(gate.id, coder.id);
+    expect(graph.canConnect(gate.id, coder.id)).toBe(false);
+    expect(graph.canConnect(coder.id, gate.id)).toBe(false);
+  });
+
+  test("follows the Git action rules connect follows", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const github = graph.addNode("github", 20, 20, project.id);
+    const commit = graph.addAction(github.id, "commit")!;
+    const agent = graph.addNode("agent", 300, 20, project.id);
+    const other = graph.addNode("project", 900, 0);
+    const stranger = graph.addNode("agent", 10, 10, other.id);
+
+    expect(graph.canConnect(agent.id, commit.id)).toBe(true);
+    expect(graph.canConnect(commit.id, agent.id)).toBe(true);
+    expect(graph.canConnect(stranger.id, commit.id)).toBe(false);
+  });
+
+  test("an arrow moving its own end may land where it already is", () => {
+    const { graph, gate, coder } = flow();
+    graph.connect(gate.id, coder.id);
+    const edge = graph.edges[0]!;
+
+    expect(graph.canConnect(gate.id, coder.id, edge.id)).toBe(true);
+    expect(graph.canConnect(coder.id, gate.id, edge.id)).toBe(true);
+  });
+
+  test("an arrow takes the output it is drawn from", () => {
+    const { graph, gate, coder, reviewer } = flow();
+
+    expect(graph.connect(gate.id, coder.id, "failed")).toBe(true);
+    graph.connect(gate.id, reviewer.id, "no-such-output");
+
+    expect(graph.edges.map((edge) => edge.fromPort)).toEqual([
+      "failed",
+      "passed",
+    ]);
+  });
+
+  test("selecting an arrow and selecting a block exclude each other", () => {
+    const { graph, gate, coder } = flow();
+    graph.connect(gate.id, coder.id);
+    const edge = graph.edges[0]!;
+
+    graph.selectEdge(edge.id);
+    expect(graph.selectedEdge).toMatchObject({ id: edge.id });
+    expect(graph.selectedId).toBeNull();
+
+    graph.select(coder.id);
+    expect(graph.selectedEdgeId).toBeNull();
+    expect(graph.selectedEdge).toBeUndefined();
+
+    graph.selectEdge(edge.id);
+    graph.addNode("agent", 50, 500);
+    expect(graph.selectedEdgeId).toBeNull();
+
+    graph.selectEdge(edge.id);
+    graph.load({ nodes: [] });
+    expect(graph.selectedEdgeId).toBeNull();
+  });
+
+  test("removes one arrow and its selection", () => {
+    const { graph, gate, coder, reviewer } = flow();
+    graph.connect(gate.id, coder.id);
+    graph.connect(coder.id, reviewer.id);
+    const [first, second] = graph.edges;
+    graph.selectEdge(first!.id);
+
+    graph.removeEdge(first!.id);
+    graph.removeEdge("missing");
+
+    expect(graph.edges.map((edge) => edge.id)).toEqual([second!.id]);
+    expect(graph.selectedEdgeId).toBeNull();
+    expect(graph.canConnect(gate.id, coder.id)).toBe(true);
+  });
+
+  test("deleting a block drops the selection of its arrows", () => {
+    const { graph, gate, coder } = flow();
+    graph.connect(gate.id, coder.id);
+    graph.selectEdge(graph.edges[0]!.id);
+
+    graph.removeNode(coder.id);
+
+    expect(graph.selectedEdgeId).toBeNull();
+  });
+
+  // Actions run along their arrows from the starting action, so removing an
+  // arrow in the sequence leaves the actions after it out of the run until
+  // a new arrow joins them; nothing is rejoined behind the user's back.
+  test("removing an arrow between Git actions does not rejoin the sequence", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const github = graph.addNode("github", 20, 20, project.id);
+    const fetch = graph.addAction(github.id, "fetch")!;
+    const worktree = graph.addAction(github.id, "worktree")!;
+    const rebase = graph.addAction(github.id, "rebase")!;
+    const link = graph.edges.find((edge) => edge.to === worktree.id)!;
+
+    graph.removeEdge(link.id);
+
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0]).toMatchObject({ from: worktree.id, to: rebase.id });
+    expect(graph.actionSequence(github.id).map((node) => node.name)).toEqual([
+      "Fetch",
+      "Create worktree",
+      "Rebase",
+    ]);
+    const tail = graph.edges[0]!;
+    expect(graph.reconnectEdge(tail.id, "from", fetch.id)).toBe(true);
+    expect(graph.connect(rebase.id, worktree.id)).toBe(true);
+    expect(graph.actionSequence(github.id).map((node) => node.name)).toEqual([
+      "Fetch",
+      "Rebase",
+      "Create worktree",
+    ]);
+  });
+
+  test("moves an arrow's head to another block and keeps its output", () => {
+    const { graph, gate, coder, reviewer, stranger } = flow();
+    graph.connect(gate.id, coder.id, "failed");
+    const edge = graph.edges[0]!;
+
+    expect(graph.reconnectEdge(edge.id, "to", stranger.id)).toBe(false);
+    expect(graph.reconnectEdge(edge.id, "to", gate.id)).toBe(false);
+    expect(graph.reconnectEdge(edge.id, "to", reviewer.id)).toBe(true);
+
+    expect(graph.edges).toEqual([
+      { id: edge.id, from: gate.id, to: reviewer.id, fromPort: "failed" },
+    ]);
+  });
+
+  test("moves an arrow's tail and picks up the new source's output", () => {
+    const { graph, gate, coder, reviewer, check } = flow();
+    graph.connect(gate.id, reviewer.id, "failed");
+    const edge = graph.edges[0]!;
+
+    expect(graph.reconnectEdge(edge.id, "from", gate.id)).toBe(true);
+    expect(graph.edges[0]?.fromPort).toBe("failed");
+
+    expect(graph.reconnectEdge(edge.id, "from", check.id, "invalid")).toBe(
+      true,
+    );
+    expect(graph.edges[0]).toMatchObject({
+      from: check.id,
+      to: reviewer.id,
+      fromPort: "invalid",
+    });
+
+    expect(graph.reconnectEdge(edge.id, "from", coder.id)).toBe(true);
+    expect(graph.edges[0]).toEqual({
+      id: edge.id,
+      from: coder.id,
+      to: reviewer.id,
+    });
+    expect(graph.reconnectEdge("missing", "from", gate.id)).toBe(false);
+  });
+
+  test("finds the innermost block under a point", () => {
+    const { graph, project, writer, check } = flow();
+
+    expect(graph.nodeAt(35, 345)?.id).toBe(check.id);
+    expect(graph.nodeAt(25, 305)?.id).toBe(writer.id);
+    expect(graph.nodeAt(850, 550)?.id).toBe(project.id);
+    expect(graph.nodeAt(950, 10)).toBeUndefined();
+  });
+});

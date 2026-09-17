@@ -70,6 +70,16 @@ point reaches. Choosing a problem selects its block; the status bar counts
 them. Select a block and choose **Delete block**, or press Delete, to remove
 it with everything inside it.
 
+To connect two blocks, hover one and drag an arrow handle from any of its
+sides onto the other; the block under the pointer turns green where the arrow
+may go and red where it may not, and Escape cancels. An arrow from a block with
+several outputs (a command, schema check, router or loop) asks which output it
+takes. **Connect** in a selected block's properties does the same from the
+keyboard. Click an arrow to select it, then press Delete or choose **Delete
+arrow**, or drag either end onto another block to move it. Deleting an arrow
+between Git actions does not rejoin their sequence: the actions after it stop
+running until an arrow joins them again.
+
 Every run, whether started from the editor or the command line, keeps its
 record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
 `~/.mega-agents/runs`). In the editor, select a block after a run and choose
