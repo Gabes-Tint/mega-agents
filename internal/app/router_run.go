@@ -39,7 +39,7 @@ func (planner runPlanner) routerTask(node WorkflowNodeInput) (engine.Task, error
 				return engine.Result{Details: details}, err
 			}
 			details["case"] = route
-			fmt.Fprintf(log, "Routed to %s\n", route)
+			fmt.Fprintf(log, "🔀 Routed to %s\n", route)
 			routed := map[string]any{"case": route, "value": inputs[0].Value}
 			return engine.Result{Outputs: map[string]any{route: routed}, Details: details}, nil
 		},

@@ -154,7 +154,7 @@ func reuseSucceededSteps(tasks []engine.Task, previous runs.Record) {
 		tasks[i].Run = func(context.Context, []engine.Input, io.Writer) (engine.Result, error) {
 			return engine.Result{Outputs: outputs, Details: details}, nil
 		}
-		tasks[i].Run = logged(tasks[i].Run, fmt.Sprintf("Reused the result of %s from run %s", name, previous.ID))
+		tasks[i].Run = logged(tasks[i].Run, fmt.Sprintf("♻️ Reused the result of %s from run %s", name, previous.ID))
 	}
 }
 

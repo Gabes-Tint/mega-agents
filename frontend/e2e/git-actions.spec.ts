@@ -87,7 +87,7 @@ test.describe("Git actions inside a GitHub block", () => {
     await page.getByRole("button", { name: "Show logs" }).click();
     const fetchLog = page.getByRole("dialog", { name: "Logs: Fetch" });
     await expect(fetchLog).toContainText("$ git fetch origin");
-    await expect(fetchLog).toContainText("Fetch succeeded in");
+    await expect(fetchLog).toContainText("✅ Fetch succeeded in");
     await fetchLog.getByRole("button", { name: "Close" }).click();
 
     await page.getByRole("button", { name: "Logs of Create worktree" }).click();
@@ -107,7 +107,11 @@ test.describe("Git actions inside a GitHub block", () => {
     await page.getByRole("button", { name: "Run flow" }).click();
 
     const result = page.getByRole("region", { name: "Run result" });
-    await expect(result).toContainText("Run failed", { timeout: 15_000 });
+    await expect(result).toContainText("❌ Run failed", { timeout: 15_000 });
+    await expect(result).toContainText(
+      /❌\s+Create worktree: worktree\s+failed/,
+    );
+    await expect(result).toContainText(/⏭️\s+Rebase: rebase\s+skipped/);
     await expect(result).toContainText("set the branch the worktree works on");
     await expect(
       page.getByRole("button", { name: "Create worktree", exact: true }),

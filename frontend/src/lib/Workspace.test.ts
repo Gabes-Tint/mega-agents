@@ -358,8 +358,8 @@ describe("graph builder workspace", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
 
     const result = screen.getByRole("region", { name: "Run result" });
-    await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
-    expect(result).toHaveTextContent("GitHub 1: fetch succeeded");
+    await waitFor(() => expect(result).toHaveTextContent("✅ Run succeeded"));
+    expect(result).toHaveTextContent("✅ GitHub 1: fetch succeeded");
     expect(result).toHaveTextContent("Repository: acme/api");
     expect(result).toHaveTextContent("Remote: origin");
     expect(result).toHaveTextContent("From github.com:acme/api");
@@ -408,8 +408,8 @@ describe("graph builder workspace", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
 
     const result = screen.getByRole("region", { name: "Run result" });
-    await waitFor(() => expect(result).toHaveTextContent("Run failed"));
-    expect(result).toHaveTextContent("GitHub 1: fetch failed");
+    await waitFor(() => expect(result).toHaveTextContent("❌ Run failed"));
+    expect(result).toHaveTextContent("❌ GitHub 1: fetch failed");
     expect(result).toHaveTextContent(
       "project path /home/user/api is not a Git repository",
     );

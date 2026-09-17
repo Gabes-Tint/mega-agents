@@ -67,7 +67,7 @@ func talk(ctx context.Context, backend Backend, turn Turn, retries int, run turn
 	attempt.Prompt = turn.Prompt + "\n\n" + instruction
 	var usage Usage
 	for number := 1; ; number++ {
-		fmt.Fprintf(log, "Attempt %d\n", number)
+		fmt.Fprintf(log, "🔁 Attempt %d\n", number)
 		reply, err := run(ctx, attempt)
 		usage = usage.Add(reply.Usage)
 		if err != nil {
@@ -78,13 +78,13 @@ func talk(ctx context.Context, backend Backend, turn Turn, retries int, run turn
 			return Result{Reply: reply, Value: value, Attempts: number, Usage: usage}, nil
 		}
 		correction := errs[0].String()
-		fmt.Fprintf(log, "attempt %d did not satisfy the schema: %s\n", number, correction)
+		fmt.Fprintf(log, "⚠️ attempt %d did not satisfy the schema: %s\n", number, correction)
 		invalid := &InvalidReplyError{Attempts: number, Errors: errs}
 		if number > retries {
 			return Result{Reply: reply, Attempts: number, Usage: usage}, invalid
 		}
 		if turn.MaxCostUSD > 0 && usage.CostKnown && usage.CostUSD > turn.MaxCostUSD {
-			fmt.Fprintf(log, "the conversation has cost $%.4f, over its $%.4f budget; not retrying\n", usage.CostUSD, turn.MaxCostUSD)
+			fmt.Fprintf(log, "💸 the conversation has cost $%.4f, over its $%.4f budget; not retrying\n", usage.CostUSD, turn.MaxCostUSD)
 			return Result{Reply: reply, Attempts: number, Usage: usage}, &BudgetError{Spent: usage.CostUSD, Budget: turn.MaxCostUSD, Reason: invalid}
 		}
 		if reply.SessionID != "" {

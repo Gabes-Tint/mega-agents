@@ -60,21 +60,21 @@ func (planner runPlanner) schemaTask(node WorkflowNodeInput) (engine.Task, error
 				"durationMs": time.Since(started).Milliseconds(),
 			}
 			if len(errs) == 0 {
-				fmt.Fprintln(log, "The value satisfies the schema")
+				fmt.Fprintln(log, "✅ The value satisfies the schema")
 				return engine.Result{Outputs: map[string]any{validPort: inputs[0].Value}, Details: details}, nil
 			}
 			details["errors"] = errs
 			messages := make([]string, len(errs))
 			for i, fieldError := range errs {
 				messages[i] = fieldError.String()
-				fmt.Fprintln(log, fieldError.String())
+				fmt.Fprintln(log, "❌", fieldError.String())
 			}
 			if !handlesInvalid {
 				return engine.Result{Details: details}, fmt.Errorf(
 					"the value did not satisfy the schema: %s", strings.Join(messages, "; "),
 				)
 			}
-			fmt.Fprintln(log, "The value takes the invalid branch")
+			fmt.Fprintln(log, "⚠️ The value takes the invalid branch")
 			invalid := map[string]any{"value": inputs[0].Value, "errors": errs}
 			return engine.Result{Outputs: map[string]any{invalidPort: invalid}, Details: details}, nil
 		},

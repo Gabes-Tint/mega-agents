@@ -226,7 +226,7 @@ func (e *execution) skip(i int, reason string) {
 	step := &e.run.Steps[i]
 	e.started[i], e.settled[i] = true, true
 	step.Status, step.Error = Skipped, reason
-	fmt.Fprintf(e.log(i), "%s skipped: %s\n", labelOf(e.tasks[i]), reason)
+	fmt.Fprintf(e.log(i), "%s %s skipped: %s\n", Skipped.Emoji(), labelOf(e.tasks[i]), reason)
 	e.notify()
 }
 
@@ -241,7 +241,7 @@ func (e *execution) start(i int) {
 	e.started[i] = true
 	step.Status, step.StartedAt = Running, startedAt
 	log := e.log(i)
-	fmt.Fprintf(log, "%s started at %s\n", labelOf(task), startedAt)
+	fmt.Fprintf(log, "%s %s started at %s\n", Running.Emoji(), labelOf(task), startedAt)
 	e.notify()
 	go func() {
 		result, err := task.Run(e.ctx, inputs, log)
@@ -261,12 +261,12 @@ func (e *execution) complete(i int) {
 	log := e.log(i)
 	if outcome.err != nil {
 		step.Status, step.Error = Failed, outcome.err.Error()
-		fmt.Fprintf(log, "%s failed in %s: %s\n", labelOf(task), elapsed, outcome.err)
+		fmt.Fprintf(log, "%s %s failed in %s: %s\n", Failed.Emoji(), labelOf(task), elapsed, outcome.err)
 	} else {
 		step.Status = Succeeded
 		step.Outputs = outcome.result.Outputs
 		e.outputs[task.ID] = outcome.result.Outputs
-		fmt.Fprintf(log, "%s succeeded in %s\n", labelOf(task), elapsed)
+		fmt.Fprintf(log, "%s %s succeeded in %s\n", Succeeded.Emoji(), labelOf(task), elapsed)
 	}
 	e.notify()
 }

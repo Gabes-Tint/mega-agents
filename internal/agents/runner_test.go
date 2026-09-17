@@ -127,7 +127,7 @@ func TestRunnerReportsTheCLIsOwnFailure(t *testing.T) {
 	if err == nil || err.Error() != "grok reported an error: insufficient credits" {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(log.String(), "exited 1") {
+	if !strings.Contains(log.String(), "❌ grok exited 1") {
 		t.Fatalf("log = %s", log.String())
 	}
 }

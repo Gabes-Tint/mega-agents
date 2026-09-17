@@ -44,7 +44,7 @@ func TestACommandRunsInTheWorkspaceAndPassesItsOutputOn(t *testing.T) {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	log := get(t, handler, "/api/runs/"+record.ID+"/logs/c1").Body.String()
-	if !strings.Contains(log, "$ pwd; git branch --show-current;") || !strings.Contains(log, "exited 0") {
+	if !strings.Contains(log, "$ pwd; git branch --show-current;") || !strings.Contains(log, "✅ exited 0") {
 		t.Fatalf("log = %s", log)
 	}
 }

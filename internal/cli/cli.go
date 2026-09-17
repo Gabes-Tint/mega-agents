@@ -158,7 +158,7 @@ func follow(execute app.Execution, env Env) int {
 			}
 		}
 	})
-	fmt.Fprintf(env.Stdout, "Run %s %s; inspect it with: mega-agents logs %s\n", finished.ID, finished.Status, finished.ID)
+	fmt.Fprintf(env.Stdout, "%s Run %s %s; inspect it with: mega-agents logs %s\n", finished.Status.Emoji(), finished.ID, finished.Status, finished.ID)
 	if finished.Status != engine.Succeeded {
 		return 1
 	}
@@ -168,13 +168,13 @@ func follow(execute app.Execution, env Env) int {
 func stepLine(step engine.Step) string {
 	switch step.Status {
 	case engine.Running:
-		return fmt.Sprintf("▶ %s running", step.Name)
+		return fmt.Sprintf("%s %s running", step.Status.Emoji(), step.Name)
 	case engine.Succeeded:
-		return fmt.Sprintf("✔ %s succeeded", step.Name)
+		return fmt.Sprintf("%s %s succeeded", step.Status.Emoji(), step.Name)
 	case engine.Failed:
-		return fmt.Sprintf("✖ %s failed: %s", step.Name, step.Error)
+		return fmt.Sprintf("%s %s failed: %s", step.Status.Emoji(), step.Name, step.Error)
 	case engine.Skipped:
-		return fmt.Sprintf("⏭ %s skipped: %s", step.Name, step.Error)
+		return fmt.Sprintf("%s %s skipped: %s", step.Status.Emoji(), step.Name, step.Error)
 	}
 	return ""
 }
@@ -241,7 +241,7 @@ func listRuns(store *runs.Store, env Env) int {
 	table := tabwriter.NewWriter(env.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(table, "RUN\tSTATUS\tSTARTED\tWORKFLOW")
 	for _, record := range records {
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", record.ID, record.Status, record.StartedAt, record.Workflow)
+		fmt.Fprintf(table, "%s\t%s %s\t%s\t%s\n", record.ID, record.Status.Emoji(), record.Status, record.StartedAt, record.Workflow)
 	}
 	_ = table.Flush()
 	return 0
@@ -265,7 +265,7 @@ func showRun(store *runs.Store, id string, env Env) int {
 	if !ok {
 		return 1
 	}
-	fmt.Fprintf(env.Stdout, "Run %s  %s  %s\n", record.ID, record.Workflow, record.Status)
+	fmt.Fprintf(env.Stdout, "Run %s  %s  %s %s\n", record.ID, record.Workflow, record.Status.Emoji(), record.Status)
 	fmt.Fprintf(env.Stdout, "Started %s", record.StartedAt)
 	if record.FinishedAt != "" {
 		fmt.Fprintf(env.Stdout, "  finished %s", record.FinishedAt)
@@ -276,9 +276,9 @@ func showRun(store *runs.Store, id string, env Env) int {
 	}
 	fmt.Fprint(env.Stdout, "\n")
 	for _, step := range record.Steps {
-		fmt.Fprintf(env.Stdout, "%s  %s  %s  %s\n", step.TaskID, step.Name, step.Kind, step.Status)
+		fmt.Fprintf(env.Stdout, "%s  %s  %s  %s %s\n", step.TaskID, step.Name, step.Kind, step.Status.Emoji(), step.Status)
 		if step.Error != "" {
-			fmt.Fprintf(env.Stdout, "  error: %s\n", step.Error)
+			fmt.Fprintf(env.Stdout, "  ❌ error: %s\n", step.Error)
 		}
 		keys := make([]string, 0, len(step.Details))
 		for key := range step.Details {
@@ -327,7 +327,7 @@ func printLogs(args []string, env Env) int {
 			return 1
 		}
 		if len(args) == 1 {
-			fmt.Fprintf(env.Stdout, "== %s (%s) %s ==\n", step.Name, step.TaskID, step.Status)
+			fmt.Fprintf(env.Stdout, "== %s (%s) %s %s ==\n", step.Name, step.TaskID, step.Status.Emoji(), step.Status)
 		}
 		fmt.Fprint(env.Stdout, text)
 	}

@@ -147,7 +147,11 @@ func runShell(ctx context.Context, dir string, command string, environment []str
 	writer.Close()
 	<-collected
 	exitCode := process.ProcessState.ExitCode()
-	fmt.Fprintf(log, "exited %d after %s\n", exitCode, time.Since(started).Round(time.Millisecond))
+	outcome := engine.Succeeded
+	if exitCode != 0 {
+		outcome = engine.Failed
+	}
+	fmt.Fprintf(log, "%s exited %d after %s\n", outcome.Emoji(), exitCode, time.Since(started).Round(time.Millisecond))
 	text := output.String()
 	if len(text) > maxCommandOutput {
 		text = "…" + text[len(text)-maxCommandOutput:]

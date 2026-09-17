@@ -83,7 +83,11 @@ func (Runner) Run(ctx context.Context, backend Backend, turn Turn, log io.Writer
 	if text := strings.TrimSpace(stderr.String()); text != "" {
 		fmt.Fprintf(log, "stderr: %s\n", tail(text, 4000))
 	}
-	fmt.Fprintf(log, "%s exited %d after %s\n", command.Args[0], exitCode, time.Since(started).Round(time.Millisecond))
+	mark := "✅"
+	if exitCode != 0 {
+		mark = "❌"
+	}
+	fmt.Fprintf(log, "%s %s exited %d after %s\n", mark, command.Args[0], exitCode, time.Since(started).Round(time.Millisecond))
 	if ctx.Err() != nil {
 		return Reply{}, fmt.Errorf("%s turn stopped after %s: %w", command.Args[0], time.Since(started).Round(time.Second), ctx.Err())
 	}

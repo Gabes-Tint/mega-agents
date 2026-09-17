@@ -56,7 +56,7 @@ func TestTalkRepairsAReplyOnTheSameSession(t *testing.T) {
 	if !strings.Contains(agent.turns[2].Prompt, "That reply was rejected: $.verdict: ") {
 		t.Fatalf("second repair = %q", agent.turns[2].Prompt)
 	}
-	if !strings.Contains(log.String(), "attempt 1 did not satisfy the schema: $: the reply was not a JSON object") {
+	if !strings.Contains(log.String(), "⚠️ attempt 1 did not satisfy the schema: $: the reply was not a JSON object") {
 		t.Fatalf("log = %s", log.String())
 	}
 }

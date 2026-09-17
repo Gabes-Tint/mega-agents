@@ -64,7 +64,7 @@ func TestARetryReusesTheStepsThatSucceededAndRunsTheRest(t *testing.T) {
 		t.Fatalf("the gate did not run in the reused worktree: %q", output)
 	}
 	log := get(t, handler, "/api/runs/"+retried.ID+"/logs/a1").Body.String()
-	if !strings.Contains(log, "Reused the result of Coder from run "+failed.ID) {
+	if !strings.Contains(log, "♻️ Reused the result of Coder from run "+failed.ID) {
 		t.Fatalf("log = %q", log)
 	}
 }

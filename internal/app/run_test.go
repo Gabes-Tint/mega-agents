@@ -452,7 +452,7 @@ func TestRunKeepsTheLogOfEveryStep(t *testing.T) {
 		t.Fatalf("log response = %d %q", response.Code, response.Header().Get("Content-Type"))
 	}
 	log := response.Body.String()
-	for _, want := range []string{"GitHub 1 started at ", "$ git fetch origin\n", "main       -> origin/main", "GitHub 1 succeeded in "} {
+	for _, want := range []string{"▶️ GitHub 1 started at ", "$ git fetch origin\n", "main       -> origin/main", "✅ GitHub 1 succeeded in "} {
 		if !strings.Contains(log, want) {
 			t.Fatalf("log = %q, want it to contain %q", log, want)
 		}

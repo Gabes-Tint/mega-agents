@@ -116,9 +116,9 @@ func TestRunExecutesAWorkflowFileAndReportsEachStep(t *testing.T) {
 	}
 	for _, want := range []string{
 		"started nightly-sync",
-		"✔ Fetch succeeded",
-		"✖ Create worktree failed: set the branch the worktree works on",
-		"failed",
+		"✅ Fetch succeeded",
+		"❌ Create worktree failed: set the branch the worktree works on",
+		"❌ Run ",
 	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, got.stdout)
@@ -136,7 +136,7 @@ func TestRunSucceedsWithExitZero(t *testing.T) {
 
 	got := run(t, "run", writeWorkflow(t, "sync.yml", workflow))
 
-	if got.code != 0 || !strings.Contains(got.stdout, "✔ Create worktree succeeded") {
+	if got.code != 0 || !strings.Contains(got.stdout, "✅ Create worktree succeeded") {
 		t.Fatalf("code = %d\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
 	}
 }
@@ -150,7 +150,7 @@ func TestRunAcceptsTheEditorsJSONGraph(t *testing.T) {
 
 	got := run(t, "run", writeWorkflow(t, "graph.json", graph))
 
-	if got.code != 0 || !strings.Contains(got.stdout, "✔ GitHub 1 succeeded") || !strings.Contains(got.stdout, "started from-editor") {
+	if got.code != 0 || !strings.Contains(got.stdout, "✅ GitHub 1 succeeded") || !strings.Contains(got.stdout, "started from-editor") {
 		t.Fatalf("code = %d\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
 	}
 }
@@ -199,7 +199,7 @@ func TestRunsListsRecordedRuns(t *testing.T) {
 
 	got := run(t, "runs")
 
-	if got.code != 0 || !strings.Contains(got.stdout, id) || !strings.Contains(got.stdout, "failed") ||
+	if got.code != 0 || !strings.Contains(got.stdout, id) || !strings.Contains(got.stdout, "❌ failed") ||
 		!strings.Contains(got.stdout, "nightly-sync") {
 		t.Fatalf("code = %d\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
 	}
@@ -222,8 +222,8 @@ func TestRunsShowDescribesEveryStep(t *testing.T) {
 
 	for _, want := range []string{
 		"Run " + id, "nightly-sync", "failed",
-		"fetch  Fetch  fetch  succeeded",
-		"worktree  Create worktree  worktree  failed",
+		"fetch  Fetch  fetch  ✅ succeeded",
+		"worktree  Create worktree  worktree  ❌ failed",
 		"set the branch the worktree works on",
 		"remote: origin",
 	} {
@@ -250,8 +250,8 @@ func TestLogsPrintsEveryStepInOrder(t *testing.T) {
 
 	got := run(t, "logs", id)
 
-	fetch := strings.Index(got.stdout, "== Fetch (fetch) succeeded ==")
-	worktree := strings.Index(got.stdout, "== Create worktree (worktree) failed ==")
+	fetch := strings.Index(got.stdout, "== Fetch (fetch) ✅ succeeded ==")
+	worktree := strings.Index(got.stdout, "== Create worktree (worktree) ❌ failed ==")
 	if got.code != 0 || fetch < 0 || worktree < fetch || !strings.Contains(got.stdout, "Create worktree failed in") {
 		t.Fatalf("code = %d\nstdout:\n%s", got.code, got.stdout)
 	}
@@ -328,7 +328,7 @@ func TestRunExecutesASavedWorkflowByName(t *testing.T) {
 	if listed.code != 0 || !strings.Contains(listed.stdout, "nightly-sync") {
 		t.Fatalf("workflows: %d %q", listed.code, listed.stdout)
 	}
-	if !strings.Contains(got.stdout, "started nightly-sync") || !strings.Contains(got.stdout, "✔ Fetch succeeded") {
+	if !strings.Contains(got.stdout, "started nightly-sync") || !strings.Contains(got.stdout, "✅ Fetch succeeded") {
 		t.Fatalf("run: %d\n%s\n%s", got.code, got.stdout, got.stderr)
 	}
 	if missing := run(t, "run", "nope"); missing.code != 2 || !strings.Contains(missing.stderr, "no workflow file or saved workflow named nope") {
@@ -384,7 +384,7 @@ func TestRetryRunsWhatFailedAgain(t *testing.T) {
 
 	got := run(t, "retry", id)
 
-	if got.code != 0 || !strings.Contains(got.stdout, "retrying "+id) || !strings.Contains(got.stdout, "✔ Gate succeeded") {
+	if got.code != 0 || !strings.Contains(got.stdout, "retrying "+id) || !strings.Contains(got.stdout, "✅ Gate succeeded") {
 		t.Fatalf("code = %d\n%s\n%s", got.code, got.stdout, got.stderr)
 	}
 	if again := run(t, "retry", runID.FindStringSubmatch(got.stdout)[1]); again.code != 1 || !strings.Contains(again.stderr, "nothing to retry") {

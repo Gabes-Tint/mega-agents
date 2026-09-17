@@ -277,15 +277,15 @@ func TestRunGivesEachTaskItsOwnLog(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	fetch := logs["fetch"].String()
-	if !strings.Contains(fetch, "Fetch started") || !strings.Contains(fetch, "$ git fetch origin\n") ||
-		!strings.Contains(fetch, "Fetch succeeded in ") {
+	if !strings.Contains(fetch, "▶️ Fetch started") || !strings.Contains(fetch, "$ git fetch origin\n") ||
+		!strings.Contains(fetch, "✅ Fetch succeeded in ") {
 		t.Fatalf("fetch log = %q", fetch)
 	}
 	if worktree := logs["worktree"].String(); !strings.Contains(worktree, "$ git worktree add\n") ||
-		!strings.Contains(worktree, "Create worktree failed in ") || !strings.Contains(worktree, "path occupied") {
+		!strings.Contains(worktree, "❌ Create worktree failed in ") || !strings.Contains(worktree, "path occupied") {
 		t.Fatalf("worktree log = %q", worktree)
 	}
-	if rebase := logs["rebase"].String(); !strings.Contains(rebase, "Rebase skipped: Create worktree failed") {
+	if rebase := logs["rebase"].String(); !strings.Contains(rebase, "⏭️ Rebase skipped: Create worktree failed") {
 		t.Fatalf("rebase log = %q", rebase)
 	}
 }

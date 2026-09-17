@@ -82,6 +82,21 @@
     return `Agents cost $${total.costUsd.toFixed(4)} · ${total.inputTokens} input tokens · ${total.outputTokens} output tokens`;
   }
 
+  // Marks a run's or a step's status, as the logs and the CLI do.
+  const STATUS_EMOJI: Record<string, string> = {
+    pending: "⏳",
+    running: "▶️",
+    succeeded: "✅",
+    failed: "❌",
+    skipped: "⏭️",
+    cancelled: "🛑",
+    interrupted: "⚠️",
+  };
+
+  function emojiOf(status: string): string {
+    return STATUS_EMOJI[status] ?? "•";
+  }
+
   function fieldErrors(details: Record<string, unknown> | undefined): string[] {
     const errors = details?.errors;
     if (!Array.isArray(errors)) return [];
@@ -616,7 +631,8 @@
             {#each pastRuns as pastRun (pastRun.id)}
               <li>
                 <button type="button" onclick={() => void openRun(pastRun.id)}
-                  >{pastRun.workflow} · {pastRun.status} · {pastRun.startedAt}</button
+                  >{emojiOf(pastRun.status)}
+                  {pastRun.workflow} · {pastRun.status} · {pastRun.startedAt}</button
                 >
               </li>
             {/each}
@@ -736,8 +752,7 @@
         <div class="run-summary">
           {#if runResult && !runError}
             <span class="run-status {runResult.status}">
-              <span class="dot" aria-hidden="true"></span>
-              Run {runResult.status}
+              {emojiOf(runResult.status)} Run {runResult.status}
             </span>
             {#if runResult.retryOf}
               <span class="meta">Retry of {runResult.retryOf}</span>
@@ -766,8 +781,8 @@
             {#each runResult.steps as step (step.nodeId)}
               <li class="step {step.status}">
                 <div class="step-line">
-                  <span class="dot" aria-hidden="true"></span>
                   <strong>
+                    {emojiOf(step.status)}
                     {step.name}: {step.action}
                     {step.status}
                   </strong>
@@ -1162,36 +1177,6 @@
     align-items: center;
     gap: 0.35rem;
     font-weight: 600;
-  }
-
-  .dot {
-    flex: none;
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    background: var(--text-faint);
-  }
-
-  .succeeded > .dot,
-  .succeeded > .step-line > .dot {
-    background: var(--ok);
-  }
-
-  .failed > .dot,
-  .failed > .step-line > .dot {
-    background: var(--fail);
-  }
-
-  .running > .dot,
-  .running > .step-line > .dot {
-    background: var(--info);
-  }
-
-  .cancelled > .dot,
-  .interrupted > .dot,
-  .cancelled > .step-line > .dot,
-  .interrupted > .step-line > .dot {
-    background: var(--warn);
   }
 
   .run-status.failed {

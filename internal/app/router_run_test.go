@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
+	"github.com/Gabes-Tint/mega-agents/internal/router"
 )
 
 // routedFlow: a reviewer whose fake reply is the given envelope, a router
@@ -116,5 +118,44 @@ func TestRouterPlansAreCheckedBeforeRunning(t *testing.T) {
 				t.Fatalf("response = %d %q, want %q", response.Code, response.Body.String(), testCase.want)
 			}
 		})
+	}
+}
+
+func TestRouterAndSchemaLogsMarkTheirOutcome(t *testing.T) {
+	t.Parallel()
+	tasks, failures, _ := plan(WorkflowRequest{Nodes: []WorkflowNodeInput{
+		{ID: "p1", Type: "project", Name: "api", Path: "/work/api"},
+		{ID: "a1", Type: "agent", Name: "Reviewer", ParentID: "p1", Start: true, Backend: "claude", Prompt: "Review"},
+		{ID: "x1", Type: "router", Name: "Route", ParentID: "p1", Cases: []router.Case{{Name: "approved", Expression: "value.ok"}}},
+		{ID: "s1", Type: "jsonschema", Name: "Check", ParentID: "p1", Schema: `{"type":"object","required":["ok"]}`},
+		{ID: "fix", Type: "agent", Name: "Fix", ParentID: "p1", Backend: "claude", Prompt: "Fix {{result}}"},
+	}, Edges: []WorkflowEdgeInput{
+		{ID: "e1", From: "a1", To: "x1"},
+		{ID: "e2", From: "a1", To: "s1"},
+		{ID: "e3", From: "s1", To: "fix", FromPort: "invalid"},
+	}})
+	if len(failures) > 0 {
+		t.Fatalf("failures = %v", failures)
+	}
+	logOf := func(id string, value any) string {
+		for _, task := range tasks {
+			if task.ID == id {
+				var log strings.Builder
+				_, _ = task.Run(context.Background(), []engine.Input{{TaskID: "a1", Port: resultPort, Value: value}}, &log)
+				return log.String()
+			}
+		}
+		t.Fatalf("no task %s", id)
+		return ""
+	}
+
+	if got := logOf("x1", map[string]any{"ok": true}); !strings.Contains(got, "🔀 Routed to approved") {
+		t.Errorf("router log = %q", got)
+	}
+	if got := logOf("s1", map[string]any{"ok": true}); !strings.Contains(got, "✅ The value satisfies the schema") {
+		t.Errorf("valid schema log = %q", got)
+	}
+	if got := logOf("s1", map[string]any{}); !strings.Contains(got, "⚠️ The value takes the invalid branch") {
+		t.Errorf("invalid schema log = %q", got)
 	}
 }
