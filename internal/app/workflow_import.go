@@ -133,6 +133,7 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		"backend": &node.Backend, "model": &node.Model, "effort": &node.Effort, "prompt": &node.Prompt,
 		"outputSchema": &node.OutputSchema, "schema": &node.Schema, "command": &node.Command,
 		"message": &node.Message, "title": &node.Title, "body": &node.Body,
+		"untilNode": &node.UntilNode, "untilPort": &node.UntilPort,
 	}
 	for key, value := range entry.With {
 		switch key {
@@ -149,7 +150,7 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 			}
 			node.Cases = cases
 			continue
-		case "retries", "timeoutMinutes", "issue", "maxCostUsd":
+		case "retries", "timeoutMinutes", "issue", "maxCostUsd", "maxIterations":
 			number, ok := value.(int)
 			decimal, isFloat := value.(float64)
 			if !ok && !isFloat {
@@ -164,6 +165,9 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 			case "retries":
 				retries := int(decimal)
 				node.Retries = &retries
+			case "maxIterations":
+				iterations := int(decimal)
+				node.MaxIterations = &iterations
 			case "maxCostUsd":
 				node.MaxCostUSD = &decimal
 			default:

@@ -102,13 +102,10 @@ func (service Runs) start(request WorkflowRequest, previous *runs.Record) (runs.
 	if err := engine.Validate(tasks); err != nil {
 		return runs.Record{}, nil, err
 	}
-	steps := make([]engine.Step, len(tasks))
-	for i, task := range tasks {
-		steps[i] = engine.Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: engine.Pending}
-	}
 	if previous != nil {
 		reuseSucceededSteps(tasks, *previous)
 	}
+	steps := engine.PendingSteps(tasks)
 	name := request.Name
 	if name == "" {
 		name = "workflow"
@@ -151,6 +148,7 @@ func reuseSucceededSteps(tasks []engine.Task, previous runs.Record) {
 		}
 		details["reusedFrom"] = previous.ID
 		name := task.Name
+		tasks[i].Loop = nil
 		tasks[i].Run = func(context.Context, []engine.Input, io.Writer) (engine.Result, error) {
 			return engine.Result{Outputs: outputs, Details: details}, nil
 		}
@@ -274,6 +272,10 @@ func plan(request WorkflowRequest) ([]engine.Task, []planFailure, map[string]boo
 	var failures []planFailure
 	for _, node := range request.Nodes {
 		switch {
+		case node.Start && planner.loopOf(node).ID != "":
+			failures = append(failures, planFailure{nodeID: node.ID, err: fmt.Errorf(
+				"%s: blocks inside a loop start with the loop; clear its starting point", node.Name,
+			)})
 		case node.Type == "agent" && node.Start:
 			planner.include(node.ID, included)
 		case node.Type == "github" && node.Start:
@@ -293,11 +295,13 @@ func plan(request WorkflowRequest) ([]engine.Task, []planFailure, map[string]boo
 		return nil, []planFailure{{err: errNoStartingBlock}}, included
 	}
 	for _, node := range request.Nodes {
-		if !included[node.ID] {
+		if !included[node.ID] || planner.loopOf(node).ID != "" {
 			continue
 		}
 		var task engine.Task
 		switch node.Type {
+		case "loop":
+			task, err = planner.loopTask(node, &failures)
 		case "agent":
 			task, err = planner.agentTask(node)
 		case "jsonschema":
@@ -338,19 +342,49 @@ func (planner runPlanner) startingAction(github WorkflowNodeInput) (WorkflowNode
 }
 
 // executableTypes are the blocks a run executes when a start reaches them.
-var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true, "router": true, "command": true}
+var executableTypes = map[string]bool{"action": true, "agent": true, "jsonschema": true, "router": true, "command": true, "loop": true}
 
-// include marks the node and every executable node its arrows reach.
+// include marks the node and every executable node its arrows reach, and
+// the blocks inside a loop it reaches.
 func (planner runPlanner) include(id string, included map[string]bool) {
 	if included[id] || !executableTypes[planner.nodeByID[id].Type] {
 		return
 	}
 	included[id] = true
+	for _, child := range planner.childrenOf[id] {
+		if planner.nodeByID[id].Type == "loop" && executableTypes[child.Type] {
+			included[child.ID] = true
+		}
+	}
 	for _, edge := range planner.request.Edges {
 		if edge.From == id {
 			planner.include(edge.To, included)
 		}
 	}
+}
+
+// loopOf is the loop a block sits directly inside, or no block.
+func (planner runPlanner) loopOf(node WorkflowNodeInput) WorkflowNodeInput {
+	if parent := planner.nodeByID[node.ParentID]; parent.Type == "loop" {
+		return parent
+	}
+	return WorkflowNodeInput{}
+}
+
+// arrowsInto are the arrows a block receives. A block inside a loop that no
+// block beside it feeds starts each iteration, and receives the arrows into
+// the loop.
+func (planner runPlanner) arrowsInto(node WorkflowNodeInput) []WorkflowEdgeInput {
+	var arrows []WorkflowEdgeInput
+	for _, edge := range planner.request.Edges {
+		if edge.To == node.ID {
+			arrows = append(arrows, edge)
+		}
+	}
+	if loop := planner.loopOf(node); len(arrows) == 0 && loop.ID != "" {
+		return planner.arrowsInto(loop)
+	}
+	return arrows
 }
 
 // needsWorkspace are the Git actions that work inside a workspace.
@@ -464,8 +498,8 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput) (engine.Task, error
 // alongside its own output.
 func (planner runPlanner) incomingNeeds(node WorkflowNodeInput) ([]engine.Need, error) {
 	var needs []engine.Need
-	for _, edge := range planner.request.Edges {
-		if edge.To != node.ID || !planner.included[edge.From] {
+	for _, edge := range planner.arrowsInto(node) {
+		if !planner.included[edge.From] {
 			continue
 		}
 		port, err := planner.sourcePort(edge)
@@ -487,13 +521,13 @@ func (planner runPlanner) passesWorkspace(id string, visiting map[string]bool) b
 	switch node.Type {
 	case "action":
 		return node.Action == "worktree" || needsWorkspace[node.Action]
-	case "agent", "command":
+	case "agent", "command", "loop":
 		if visiting[id] {
 			return false
 		}
 		visiting[id] = true
-		for _, edge := range planner.request.Edges {
-			if edge.To == id && planner.included[edge.From] && planner.passesWorkspace(edge.From, visiting) {
+		for _, edge := range planner.arrowsInto(node) {
+			if planner.included[edge.From] && planner.passesWorkspace(edge.From, visiting) {
 				return true
 			}
 		}
@@ -514,6 +548,14 @@ func (planner runPlanner) sourcePort(edge WorkflowEdgeInput) (string, error) {
 		return workspacePort, nil
 	case source.Type == "agent":
 		return resultPort, nil
+	case source.Type == "loop":
+		switch edge.FromPort {
+		case "":
+			return donePort, nil
+		case donePort, exhaustedPort:
+			return edge.FromPort, nil
+		}
+		return "", fmt.Errorf("%s has no output %q; use %s or %s", source.Name, edge.FromPort, donePort, exhaustedPort)
 	case source.Type == "jsonschema":
 		switch edge.FromPort {
 		case "":

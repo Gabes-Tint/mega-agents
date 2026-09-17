@@ -134,21 +134,15 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 	if limit <= 0 {
 		limit = DefaultParallelism
 	}
-	// Each task's step, followed by the steps of a loop's body.
-	run := Run{Status: Running}
+	run := Run{Status: Running, Steps: PendingSteps(tasks)}
 	index := make(map[string]int, len(tasks))
-	for i, task := range tasks {
-		index[task.ID] = i
-	}
 	stepOf := make([]int, len(tasks))
 	for i, task := range tasks {
-		stepOf[i] = len(run.Steps)
-		run.Steps = append(run.Steps, Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: Pending})
-		if task.Loop != nil {
-			for _, body := range task.Loop.Body {
-				run.Steps = append(run.Steps, Step{
-					TaskID: body.ID, Name: body.Name, Kind: body.Kind, Status: Pending, Loop: task.ID,
-				})
+		index[task.ID] = i
+		if i > 0 {
+			stepOf[i] = stepOf[i-1] + 1
+			if previous := tasks[i-1].Loop; previous != nil {
+				stepOf[i] += len(previous.Body)
 			}
 		}
 	}
@@ -196,6 +190,21 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 		}
 	}
 	return run, nil
+}
+
+// PendingSteps are the steps of a plan before it runs: each task's, followed
+// by the steps of a loop's body.
+func PendingSteps(tasks []Task) []Step {
+	var steps []Step
+	for _, task := range tasks {
+		steps = append(steps, Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: Pending})
+		if task.Loop != nil {
+			for _, body := range task.Loop.Body {
+				steps = append(steps, Step{TaskID: body.ID, Name: body.Name, Kind: body.Kind, Status: Pending, Loop: task.ID})
+			}
+		}
+	}
+	return steps
 }
 
 // execution is one run in progress. Only the goroutine running Execute

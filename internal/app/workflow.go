@@ -64,6 +64,11 @@ type WorkflowNodeInput struct {
 	Cases []router.Case `json:"cases,omitempty"`
 	// Command blocks.
 	Command string `json:"command,omitempty"`
+	// Loop blocks: how many times the blocks inside may run, and the block
+	// inside and its output that end the loop.
+	MaxIterations *int   `json:"maxIterations,omitempty"`
+	UntilNode     string `json:"untilNode,omitempty"`
+	UntilPort     string `json:"untilPort,omitempty"`
 	// Delivery actions: a commit message, a pull request's title and body,
 	// and the issue to read.
 	Message string `json:"message,omitempty"`
@@ -88,6 +93,7 @@ var knownComponentTypes = map[string]bool{
 	"jsonschema": true,
 	"router":     true,
 	"command":    true,
+	"loop":       true,
 }
 
 // containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
@@ -95,15 +101,16 @@ var knownComponentTypes = map[string]bool{
 // Any placement outside these lists is rejected so the exported YAML always
 // matches what the builder validates while dragging.
 var containmentMatrix = map[string]map[string]bool{
-	"agent":      {"project": true, "agent": true},
+	"agent":      {"project": true, "agent": true, "loop": true},
 	"project":    {"root": true, "project": true},
 	"github":     {"project": true},
 	"gitlab":     {"project": true},
 	"githubapp":  {"github": true},
 	"action":     {"github": true},
-	"jsonschema": {"project": true, "agent": true},
-	"router":     {"project": true, "agent": true},
-	"command":    {"project": true, "agent": true},
+	"jsonschema": {"project": true, "agent": true, "loop": true},
+	"router":     {"project": true, "agent": true, "loop": true},
+	"command":    {"project": true, "agent": true, "loop": true},
+	"loop":       {"project": true},
 }
 
 func containmentAllows(target string, childType string) bool {
@@ -254,6 +261,16 @@ func (emitter *workflowEmitter) emitNode(
 				fmt.Sprintf("%s        expression: %s", indent, yamlString(routeCase.Expression)),
 			)
 		}
+	}
+	if node.MaxIterations != nil {
+		with = append(with, fmt.Sprintf("%s    maxIterations: %d", indent, *node.MaxIterations))
+	}
+	if node.UntilNode != "" {
+		// The block that ends the loop is named by its identifier, as needs are.
+		with = append(with, fmt.Sprintf("%s    untilNode: %s", indent, yamlString(emitter.identifierByNode[node.UntilNode])))
+	}
+	if node.UntilPort != "" {
+		with = append(with, fmt.Sprintf("%s    untilPort: %s", indent, yamlString(node.UntilPort)))
 	}
 	if node.Issue != 0 {
 		with = append(with, fmt.Sprintf("%s    issue: %d", indent, node.Issue))

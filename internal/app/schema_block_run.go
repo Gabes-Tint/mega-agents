@@ -46,6 +46,7 @@ func (planner runPlanner) schemaTask(node WorkflowNodeInput) (engine.Task, error
 			handlesInvalid = handlesInvalid || port == invalidPort
 		}
 	}
+	handlesInvalid = handlesInvalid || planner.loopOf(node).UntilNode == node.ID
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "jsonschema", Needs: needs,
 		Run: func(_ context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {

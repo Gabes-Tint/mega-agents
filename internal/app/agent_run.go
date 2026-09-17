@@ -73,11 +73,11 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 		return fail("%v", err)
 	}
 	if node.ContinueSession {
-		var agentsBefore []WorkflowNodeInput
-		for _, edge := range planner.request.Edges {
-			if edge.To == node.ID && planner.included[edge.From] && planner.nodeByID[edge.From].Type == "agent" {
-				agentsBefore = append(agentsBefore, planner.nodeByID[edge.From])
-			}
+		agentsBefore := planner.agentsInto(node)
+		if loop := planner.loopOf(node); len(agentsBefore) == 0 && loop.ID != "" {
+			// Inside a loop, an agent may continue the conversation of the
+			// agent that feeds the loop, such as a fixer the coder's.
+			agentsBefore = planner.agentsInto(loop)
 		}
 		if len(agentsBefore) != 1 {
 			return fail("continuing a session needs exactly one agent connected to this one")
@@ -108,15 +108,23 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 			for _, input := range inputs {
 				if input.Port == sessionPort {
 					continued, _ = input.Value.(string)
-					details["continuedFrom"] = continued
 				}
+			}
+			// In a loop's later iterations, the agent continues its own
+			// conversation rather than another copy of the one it started from.
+			fork := continued != ""
+			if own, _ := engine.Previous(ctx, node.ID)[sessionPort].(string); node.ContinueSession && own != "" {
+				continued, fork = own, false
+			}
+			if continued != "" {
+				details["continuedFrom"] = continued
 			}
 			ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout*float64(time.Minute)))
 			defer cancel()
 			fmt.Fprintf(log, "Working in %s\nPrompt:\n%s\n", dir, prompt)
 			conversation, err := agents.Talk(ctx, agents.Runner{}, backend, agents.Turn{
 				Prompt: prompt, Dir: dir, Model: node.Model, Effort: node.Effort, Schema: outputSchema,
-				MaxCostUSD: maxCost, SessionID: continued, Fork: continued != "",
+				MaxCostUSD: maxCost, SessionID: continued, Fork: fork,
 			}, retries, log)
 			details["attempts"] = conversation.Attempts
 			details["usage"] = conversation.Usage
@@ -151,6 +159,17 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 			return engine.Result{Outputs: outputs, Details: details}, nil
 		},
 	}, nil
+}
+
+// agentsInto are the executed agents with arrows into a block.
+func (planner runPlanner) agentsInto(node WorkflowNodeInput) []WorkflowNodeInput {
+	var agents []WorkflowNodeInput
+	for _, edge := range planner.request.Edges {
+		if edge.To == node.ID && planner.included[edge.From] && planner.nodeByID[edge.From].Type == "agent" {
+			agents = append(agents, planner.nodeByID[edge.From])
+		}
+	}
+	return agents
 }
 
 // projectOf finds the project an agent sits in, through any agents that

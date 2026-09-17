@@ -57,6 +57,9 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput) (engine.Task, erro
 		}
 		handlesFailure = handlesFailure || port == failedPort
 	}
+	// The loop around the block that ends it handles every other output by
+	// running again.
+	handlesFailure = handlesFailure || planner.loopOf(node).UntilNode == node.ID
 	limit := time.Duration(timeout * float64(time.Minute))
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "command", Needs: needs,
