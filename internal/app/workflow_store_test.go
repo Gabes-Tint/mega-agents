@@ -61,6 +61,26 @@ func TestSavedWorkflowsAreYAMLFilesThatOpenAgain(t *testing.T) {
 	}
 }
 
+func TestASavedWorkflowKeepsAClearedListOfLabelsToIgnore(t *testing.T) {
+	handler, _ := workflowHandler(t)
+	graph := `{"name": "labels", "nodes": [
+		{"id": "p1", "type": "project", "name": "api", "w": 400, "h": 300},
+		{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "w": 200, "h": 240},
+		{"id": "i1", "type": "action", "action": "issue", "name": "Cleared", "parentId": "g1", "issue": 8, "ignoreLabels": []},
+		{"id": "i2", "type": "action", "action": "issue", "name": "Old", "parentId": "g1", "issue": 9}
+	], "edges": []}`
+
+	if saved := workflowRequest(t, handler, http.MethodPut, "/api/workflows/labels", graph, "application/json"); saved.Code != http.StatusOK {
+		t.Fatalf("save = %d %s", saved.Code, saved.Body.String())
+	}
+	opened := workflowRequest(t, handler, http.MethodGet, "/api/workflows/labels", "", "").Body.String()
+
+	// The editor tells a cleared list from a missing one, which means the defaults.
+	if strings.Count(opened, `"ignoreLabels"`) != 1 || !strings.Contains(opened, `"ignoreLabels":[]`) {
+		t.Fatalf("opened = %s", opened)
+	}
+}
+
 func TestSavedWorkflowsAreListedByName(t *testing.T) {
 	handler, _ := workflowHandler(t)
 	for _, name := range []string{"nightly", "issue-to-pr"} {

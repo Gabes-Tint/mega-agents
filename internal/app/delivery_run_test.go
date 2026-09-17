@@ -103,14 +103,18 @@ func TestReadIssueFailsOnAnIssueWithALabelToIgnore(t *testing.T) {
 		], "edges": []}`, clone, settings)
 	}
 
-	ignored := finishedRunOnly(t, flow(`, "ignoreLabels": ["draft", "paused"]`))
+	// Without the setting, as in workflows saved before it existed, the
+	// default labels paused, draft and needs-attention are ignored.
+	for _, settings := range []string{`, "ignoreLabels": ["draft", "paused"]`, ""} {
+		ignored := finishedRunOnly(t, flow(settings))
 
-	if ignored.Status != engine.Failed ||
-		ignored.Steps[0].Error != `issue #8 is labeled "Paused", one of the labels to ignore` {
-		t.Fatalf("record = %+v", ignored)
+		if ignored.Status != engine.Failed ||
+			ignored.Steps[0].Error != `issue #8 is labeled "Paused", one of the labels to ignore` {
+			t.Fatalf("with %q: record = %+v", settings, ignored)
+		}
 	}
-	// A workflow saved before the setting existed ignores no labels.
-	for _, settings := range []string{"", `, "ignoreLabels": []`, `, "ignoreLabels": ["draft"]`} {
+	// A cleared list ignores nothing.
+	for _, settings := range []string{`, "ignoreLabels": []`, `, "ignoreLabels": ["draft"]`} {
 		if record := finishedRunOnly(t, flow(settings)); record.Status != engine.Succeeded {
 			t.Fatalf("with %q: record = %+v", settings, record)
 		}

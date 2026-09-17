@@ -2467,6 +2467,68 @@ describe("graph builder workspace", () => {
     vi.unstubAllGlobals();
   });
 
+  test("a Read issue from an older workflow shows the default labels to ignore", async () => {
+    fakeBackend({
+      "GET /api/workflows": [
+        () =>
+          Response.json([{ name: "old", updatedAt: "2026-09-17T01:00:00Z" }]),
+      ],
+      "GET /api/workflows/old": [
+        () =>
+          Response.json({
+            name: "old",
+            nodes: [
+              {
+                id: "api",
+                type: "project",
+                name: "api",
+                x: 10,
+                y: 10,
+                w: 300,
+                h: 300,
+              },
+              {
+                id: "gh",
+                type: "github",
+                name: "GitHub 1",
+                x: 10,
+                y: 30,
+                w: 200,
+                h: 200,
+                parentId: "api",
+              },
+              {
+                id: "read",
+                type: "action",
+                action: "issue",
+                name: "Read issue",
+                x: 10,
+                y: 40,
+                w: 160,
+                h: 64,
+                parentId: "gh",
+                issue: 8,
+              },
+            ],
+            edges: [],
+          }),
+      ],
+    });
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "old" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Read issue" }),
+    );
+
+    const labels = screen.getByLabelText("Labels to ignore");
+    expect(labels).toHaveValue("paused, draft, needs-attention");
+    await fireEvent.input(labels, { target: { value: "" } });
+    expect(labels).toHaveValue("");
+    vi.unstubAllGlobals();
+  });
+
   test("shows when there is nothing to open", async () => {
     fakeBackend({ "GET /api/workflows": [() => Response.json([])] });
     render(Workspace);

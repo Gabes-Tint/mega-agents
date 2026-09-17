@@ -18,6 +18,9 @@ export type ActionField =
 
 // Git actions a GitHub block runs as its own internal sequence. They are
 // added from the block's properties rather than dragged from the palette.
+// The labels Read issue ignores unless the action lists its own.
+export const DEFAULT_IGNORE_LABELS = ["paused", "draft", "needs-attention"];
+
 export const GIT_ACTIONS: readonly { action: GitAction; label: string }[] = [
   { action: "fetch", label: "Fetch" },
   { action: "worktree", label: "Create worktree" },
@@ -159,7 +162,8 @@ export interface GraphNode {
   title?: string;
   body?: string;
   issue?: number;
-  // Labels that stop Read issue from reading an issue.
+  // Labels that stop Read issue from reading an issue; without them the
+  // defaults apply, and an empty list ignores none.
   ignoreLabels?: string[];
   maxIterations?: number;
   untilNode?: string;
@@ -873,9 +877,6 @@ export class GraphStore {
       h: DEFAULT_NODE_HEIGHT,
       parentId: githubId,
       start: previous === undefined,
-      ...(action === "issue" && {
-        ignoreLabels: ["paused", "draft", "needs-attention"],
-      }),
     };
     this.nodes.push(node);
     const added = this.nodes.at(-1) ?? node;

@@ -524,7 +524,7 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput) (engine.Task, error
 				}
 				// A fixed issue that carries a label to ignore fails the step
 				// so nothing after it works on an issue meant to be left alone.
-				if label := gitops.IgnoredLabel(issue, node.IgnoreLabels); label != "" {
+				if label := gitops.IgnoredLabel(issue, node.ignoreLabels()); label != "" {
 					return engine.Result{}, fmt.Errorf("issue #%d is labeled %q, one of the labels to ignore", node.Issue, label)
 				}
 				return engine.Result{Outputs: map[string]any{issuePort: issue}, Details: map[string]any{"issue": issue}}, nil

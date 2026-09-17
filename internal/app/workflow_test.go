@@ -422,7 +422,9 @@ func TestWorkflowYAMLExportsGitActionsAsVersionedGitBlocks(t *testing.T) {
 			{"id": "n2", "type": "github", "name": "GitHub 1", "x": 20, "y": 10, "w": 200, "h": 240, "parentId": "n1"},
 			{"id": "n3", "type": "action", "action": "worktree", "name": "Create worktree", "x": 12, "y": 40, "w": 160, "h": 64, "parentId": "n2", "start": true, "branch": "feature/login", "base": "origin/main", "worktreePath": "/tmp/login"},
 			{"id": "n4", "type": "action", "action": "rebase", "name": "Rebase", "x": 12, "y": 128, "w": 160, "h": 64, "parentId": "n2", "onto": "origin/release"},
-			{"id": "n5", "type": "action", "action": "issue", "name": "Read issue", "x": 12, "y": 216, "w": 160, "h": 64, "parentId": "n2", "issue": 7, "ignoreLabels": ["paused", "", "needs attention"]}
+			{"id": "n5", "type": "action", "action": "issue", "name": "Read issue", "x": 12, "y": 216, "w": 160, "h": 64, "parentId": "n2", "issue": 7, "ignoreLabels": ["paused", "", "needs attention"]},
+			{"id": "n6", "type": "action", "action": "issue", "name": "Cleared", "x": 12, "y": 304, "w": 160, "h": 64, "parentId": "n2", "issue": 8, "ignoreLabels": [""]},
+			{"id": "n7", "type": "action", "action": "issue", "name": "Old", "x": 12, "y": 392, "w": 160, "h": 64, "parentId": "n2", "issue": 9}
 		],
 		"edges": [{"id": "e1", "from": "n3", "to": "n4"}, {"id": "e2", "from": "n4", "to": "n5"}]
 	}`)
@@ -437,6 +439,8 @@ func TestWorkflowYAMLExportsGitActionsAsVersionedGitBlocks(t *testing.T) {
 		"          rebase:\n            uses: git/rebase@v1\n            name: \"Rebase\"\n            needs:\n              - create-worktree\n            with:\n" +
 			"              onto: \"origin/release\"\n",
 		"            with:\n              issue: 7\n              ignoreLabels: [\"paused\", \"needs attention\"]\n",
+		"            with:\n              issue: 8\n              ignoreLabels: []\n",
+		"            with:\n              issue: 9\n            layout:\n",
 	}
 	for _, expected := range expectations {
 		if !strings.Contains(body, expected) {

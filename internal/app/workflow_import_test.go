@@ -20,7 +20,10 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 				ParentID: "g1", Start: true, Branch: "feature/login", Base: "origin/main", WorktreePath: "/tmp/login"},
 			{ID: "a2", Type: "action", Action: "rebase", Name: "Rebase", X: 12, Y: 128, W: 160, H: 64, ParentID: "g1", Onto: "origin/next"},
 			{ID: "i1", Type: "action", Action: "issue", Name: "Read issue", X: 12, Y: 216, W: 160, H: 64, ParentID: "g1",
-				Issue: 7, IgnoreLabels: []string{"paused", "needs attention"}},
+				Issue: 7, IgnoreLabels: &[]string{"paused", "needs attention"}},
+			{ID: "i2", Type: "action", Action: "issue", Name: "Cleared", X: 12, Y: 304, W: 160, H: 64, ParentID: "g1",
+				Issue: 8, IgnoreLabels: &[]string{}},
+			{ID: "i3", Type: "action", Action: "issue", Name: "Old", X: 12, Y: 392, W: 160, H: 64, ParentID: "g1", Issue: 9},
 			{ID: "x1", Type: "githubapp", Name: "App", X: 1, Y: 2, W: 3, H: 4, ParentID: "g1", AppID: "42", PrivateKeyPath: "/k.pem"},
 			{ID: "g2", Type: "agent", Name: "Agent 1", X: 240, Y: 10, W: 160, H: 64, ParentID: "p1",
 				Backend: "opencode", Model: "opencode-go/glm-5.3-flash", Effort: "high",
@@ -52,7 +55,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 		t.Errorf("name = %q", imported.Name)
 	}
 	// Identifiers replace editor ids, so compare with the ids exported.
-	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "i1": "read-issue", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
+	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "i1": "read-issue", "i2": "cleared", "i3": "old", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
 	var want []WorkflowNodeInput
 	for _, node := range request.Nodes {
 		node.ID = rename[node.ID]

@@ -2,6 +2,7 @@
   import { Dialog } from "bits-ui";
   import {
     AGENT_BACKENDS,
+    DEFAULT_IGNORE_LABELS,
     GIT_ACTIONS,
     GraphStore,
     isForgeType,
@@ -286,7 +287,7 @@
             <input
               type="text"
               placeholder="none"
-              value={node.ignoreLabels?.join(", ") ?? ""}
+              value={(node.ignoreLabels ?? DEFAULT_IGNORE_LABELS).join(", ")}
               oninput={(event) =>
                 graph.setActionIgnoreLabels(node.id, event.currentTarget.value)}
             />

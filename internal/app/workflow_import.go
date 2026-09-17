@@ -151,7 +151,7 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 			if !ok {
 				return WorkflowNodeInput{}, fmt.Errorf("%s setting %q must be a list of labels", identifier, key)
 			}
-			node.IgnoreLabels = labels
+			node.IgnoreLabels = &labels
 			continue
 		case "cases":
 			cases, err := importedCases(value)

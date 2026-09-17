@@ -14,6 +14,7 @@ import {
   rejectedDropHint,
   shortNodeId,
   GIT_ACTIONS,
+  DEFAULT_IGNORE_LABELS,
   BLOCK_HUES,
   workflowSlug,
   type NodeType,
@@ -941,17 +942,22 @@ describe("Git actions inside a GitHub block", () => {
     graph.setActionIssue("missing", "1");
   });
 
-  test("a new Read issue ignores paused, draft and needs-attention issues", () => {
+  test("Read issue ignores paused, draft and needs-attention unless its labels are set", () => {
     const { graph, githubId } = githubInProject();
     const issue = graph.addAction(githubId, "issue")!;
-    const commit = graph.addAction(githubId, "commit")!;
 
-    expect(issue.ignoreLabels).toEqual(["paused", "draft", "needs-attention"]);
-    expect(commit.ignoreLabels).toBeUndefined();
+    expect(DEFAULT_IGNORE_LABELS).toEqual([
+      "paused",
+      "draft",
+      "needs-attention",
+    ]);
+    // Without the setting the backend applies the defaults too.
+    expect(issue.ignoreLabels).toBeUndefined();
     graph.setActionIgnoreLabels(issue.id, " paused,wip , ");
     expect(issue.ignoreLabels).toEqual(["paused", "wip", ""]);
     graph.setActionIgnoreLabels(issue.id, "");
     expect(issue.ignoreLabels).toEqual([]);
+    expect(JSON.stringify(graph.toRequest())).toContain('"ignoreLabels":[]');
     graph.setActionIgnoreLabels("missing", "draft");
   });
 

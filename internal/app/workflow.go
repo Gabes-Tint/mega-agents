@@ -74,12 +74,23 @@ type WorkflowNodeInput struct {
 	WaitForAny bool `json:"waitForAny,omitempty"`
 	// Delivery actions: a commit message, a pull request's title and body,
 	// and the issue to read with the labels that stop it from being read.
-	// Without labels no issue is refused, as before the setting existed.
-	Message      string   `json:"message,omitempty"`
-	Title        string   `json:"title,omitempty"`
-	Body         string   `json:"body,omitempty"`
-	Issue        int      `json:"issue,omitempty"`
-	IgnoreLabels []string `json:"ignoreLabels,omitempty"`
+	// Without the setting the default labels apply; an empty list ignores none.
+	Message      string    `json:"message,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Body         string    `json:"body,omitempty"`
+	Issue        int       `json:"issue,omitempty"`
+	IgnoreLabels *[]string `json:"ignoreLabels,omitempty"`
+}
+
+// defaultIgnoreLabels are the labels Read issue ignores unless the action
+// lists its own.
+var defaultIgnoreLabels = []string{"paused", "draft", "needs-attention"}
+
+func (node WorkflowNodeInput) ignoreLabels() []string {
+	if node.IgnoreLabels == nil {
+		return defaultIgnoreLabels
+	}
+	return *node.IgnoreLabels
 }
 
 type WorkflowRequest struct {
@@ -280,13 +291,14 @@ func (emitter *workflowEmitter) emitNode(
 	if node.Issue != 0 {
 		with = append(with, fmt.Sprintf("%s    issue: %d", indent, node.Issue))
 	}
-	var labels []string
-	for _, label := range node.IgnoreLabels {
-		if label = strings.TrimSpace(label); label != "" {
-			labels = append(labels, yamlString(label))
+	if node.IgnoreLabels != nil {
+		// A cleared list is written as [] so it does not fall back to the defaults.
+		var labels []string
+		for _, label := range *node.IgnoreLabels {
+			if label = strings.TrimSpace(label); label != "" {
+				labels = append(labels, yamlString(label))
+			}
 		}
-	}
-	if len(labels) > 0 {
 		with = append(with, fmt.Sprintf("%s    ignoreLabels: [%s]", indent, strings.Join(labels, ", ")))
 	}
 	if node.Retries != nil {

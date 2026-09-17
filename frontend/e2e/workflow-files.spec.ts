@@ -61,6 +61,73 @@ test.describe("Workflow files", () => {
     await expect(page.getByRole("button", { name: "GitHub 1" })).toBeVisible();
   });
 
+  test("an older Read issue ignores the default labels until they are cleared", async ({
+    page,
+  }) => {
+    const name = `old-${Date.now()}`;
+    const file = join(fixture.root, "old.yaml");
+    // Written before Read issue had labels to ignore. The fake GitHub CLI
+    // labels issue #8 "paused".
+    writeFileSync(
+      file,
+      `apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+metadata:
+  name: ${name}
+nodes:
+  api:
+    uses: project@v1
+    with:
+      path: "${fixture.clone}"
+    layout: { x: 40, y: 40, w: 400, h: 300 }
+    children:
+      github:
+        uses: github@v1
+        start: true
+        with:
+          authenticated: true
+        layout: { x: 20, y: 40, w: 220, h: 200 }
+        children:
+          read-issue:
+            uses: git/issue@v1
+            name: "Read issue"
+            start: true
+            with:
+              issue: 8
+            layout: { x: 12, y: 40, w: 160, h: 64 }
+`,
+    );
+    await page.getByLabel("Import YAML").setInputFiles(file);
+    const readIssue = page.getByRole("button", {
+      name: "Read issue",
+      exact: true,
+    });
+    await readIssue.click();
+    const labels = page.getByLabel("Labels to ignore");
+    await expect(labels).toHaveValue("paused, draft, needs-attention");
+    const result = page.getByRole("region", { name: "Run result" });
+    await page.getByRole("button", { name: "Run flow" }).click();
+    await expect(result).toContainText(
+      'issue #8 is labeled "paused", one of the labels to ignore',
+      { timeout: 15_000 },
+    );
+
+    await labels.fill("");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(
+      page.getByRole("status", { name: "Workflow file" }),
+    ).toHaveText(`Saved as ${name}`);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.getByRole("button", { name: "Open…" }).click();
+    await page.getByRole("button", { name, exact: true }).click();
+    await readIssue.click();
+
+    await expect(labels).toHaveValue("");
+    await page.getByRole("button", { name: "Run flow" }).click();
+    await expect(result).toContainText("Run succeeded", { timeout: 15_000 });
+  });
+
   test("a workflow YAML file imports into the editor", async ({ page }) => {
     const file = join(fixture.root, "imported.yaml");
     writeFileSync(
