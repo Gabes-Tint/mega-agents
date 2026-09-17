@@ -11,6 +11,7 @@
     type NodeType,
   } from "./graph.svelte.js";
   import { hideDragImage } from "./dragImage.js";
+  import BlockIcon from "./BlockIcon.svelte";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -440,7 +441,10 @@
             aria-hidden="true"
           ></span>
         {/if}
-        <span class="node-id" aria-hidden="true">{shortNodeId(node.id)}</span>
+        <span class="node-meta">
+          <span class="node-id" aria-hidden="true">{shortNodeId(node.id)}</span>
+          <BlockIcon {node} />
+        </span>
       </span>
       <span class="node-separator" aria-hidden="true"></span>
       <span
@@ -574,7 +578,9 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.4rem 0.65rem;
+    min-height: 2.25rem;
+    box-sizing: border-box;
+    padding: 0.2rem 0.4rem 0.2rem 0.65rem;
     font-weight: 600;
     background: var(--block-soft);
     white-space: nowrap;
@@ -600,9 +606,17 @@
     font-size: 10px;
   }
 
-  .node-id {
+  /* The block's id over its type icon, at the header's right edge. */
+  .node-meta {
     margin-left: auto;
-    align-self: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .node-id {
+    line-height: 1;
     font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 400;
@@ -627,7 +641,7 @@
     border-radius: 50%;
   }
 
-  .problem-mark + .node-id {
+  .problem-mark + .node-meta {
     margin-left: 0;
   }
 

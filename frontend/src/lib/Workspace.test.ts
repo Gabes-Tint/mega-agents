@@ -1588,6 +1588,20 @@ describe("graph builder workspace", () => {
     expect(id).toHaveTextContent(/^[0-9a-z]{3}$/);
   });
 
+  test("stacks the block id over an icon of the block's type", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    await dropComponent("GitHub");
+    const github = screen.getByRole("button", { name: "GitHub 1" });
+    const meta = github.querySelector(".node-meta");
+
+    expect(meta?.children[0]).toHaveClass("node-id");
+    expect(meta?.children[1]).toHaveClass("block-icon", "object");
+    expect(meta?.children[1]).toHaveAttribute("data-icon", "github");
+    expect(meta?.children[1]?.querySelector("svg")).toBeInTheDocument();
+  });
+
   test("shows the same block id in the properties panel", async () => {
     render(Workspace);
 
