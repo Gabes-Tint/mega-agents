@@ -394,3 +394,32 @@ func TestRetryRunsWhatFailedAgain(t *testing.T) {
 		t.Fatalf("usage = %d %q", usage.code, usage.stderr)
 	}
 }
+
+func TestTemplatesAreListedAndStartSavedWorkflows(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+
+	listed := run(t, "templates")
+	created := run(t, "init", "gate-and-fix", "nightly-gate")
+	defaulted := run(t, "init", "review-and-route")
+	saved := run(t, "workflows")
+
+	if listed.code != 0 || !strings.Contains(listed.stdout, "issue-to-pull-request") || !strings.Contains(listed.stdout, "Gate and fix") {
+		t.Fatalf("templates: %d %q", listed.code, listed.stdout)
+	}
+	if created.code != 0 || !strings.Contains(created.stdout, "Saved nightly-gate from template gate-and-fix") {
+		t.Fatalf("init: %d %q %q", created.code, created.stdout, created.stderr)
+	}
+	if defaulted.code != 0 || !strings.Contains(saved.stdout, "nightly-gate") || !strings.Contains(saved.stdout, "review-and-route") {
+		t.Fatalf("workflows: %q", saved.stdout)
+	}
+	for args, want := range map[string]string{
+		"init":                "usage: mega-agents init <template> [name]",
+		"init nope":           "template nope not found; see mega-agents templates",
+		"init gate-and-fix X": "use lowercase letters, digits and -",
+	} {
+		got := run(t, strings.Fields(args)...)
+		if got.code == 0 || !strings.Contains(got.stderr, want) {
+			t.Errorf("%s: %d %q, want %q", args, got.code, got.stderr, want)
+		}
+	}
+}

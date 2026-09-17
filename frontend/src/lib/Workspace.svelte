@@ -165,6 +165,43 @@
     }
   }
 
+  interface TemplateSummary {
+    name: string;
+    title: string;
+    description: string;
+  }
+
+  let templateDialog = $state(false);
+  let templates = $state<TemplateSummary[] | null>(null);
+
+  async function listTemplates(): Promise<void> {
+    templates = null;
+    try {
+      const response = await fetch("/api/templates");
+      templates = response.ok
+        ? ((await response.json()) as TemplateSummary[])
+        : [];
+    } catch {
+      templates = [];
+    }
+  }
+
+  async function startFromTemplate(template: TemplateSummary): Promise<void> {
+    templateDialog = false;
+    try {
+      const response = await fetch(`/api/templates/${template.name}`);
+      if (!response.ok) {
+        fileStatus = (await response.text()).trim();
+        return;
+      }
+      graph.load((await response.json()) as WorkflowGraph);
+      runResult = null;
+      fileStatus = `Started from template ${template.title}`;
+    } catch {
+      fileStatus = "Cannot reach the backend";
+    }
+  }
+
   let fileStatus = $state("");
   let openDialog = $state(false);
   let savedWorkflows = $state<WorkflowSummary[] | null>(null);
@@ -397,6 +434,15 @@
       >
         Open…
       </button>
+      <button
+        type="button"
+        onclick={() => {
+          templateDialog = true;
+          void listTemplates();
+        }}
+      >
+        Templates…
+      </button>
       <label class="import">
         Import YAML
         <input
@@ -493,6 +539,31 @@
           Logs: {loggedStep?.name ?? ""}
         </Dialog.Title>
         <pre class="log-text">{logText || "Loading…"}</pre>
+        <Dialog.Close class="close-button">Close</Dialog.Close>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
+  <Dialog.Root bind:open={templateDialog}>
+    <Dialog.Portal>
+      <Dialog.Overlay class="backdrop" />
+      <Dialog.Content class="log-viewer">
+        <Dialog.Title class="dialog-title">Start from a template</Dialog.Title>
+        {#if templates === null}
+          <p>Loading…</p>
+        {:else}
+          <ul class="saved-workflows">
+            {#each templates as template (template.name)}
+              <li>
+                <button
+                  type="button"
+                  onclick={() => void startFromTemplate(template)}
+                  >{template.title}</button
+                >
+                <span>{template.description}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
         <Dialog.Close class="close-button">Close</Dialog.Close>
       </Dialog.Content>
     </Dialog.Portal>

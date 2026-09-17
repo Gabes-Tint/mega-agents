@@ -39,6 +39,8 @@ Commands:
   run <workflow.yaml|.json>    run a workflow file and record the run
   run <name>                   run a workflow saved from the editor
   workflows                    list workflows saved from the editor
+  templates                    list the workflow templates
+  init <template> [name]       save a new workflow from a template
   retry <run-id>               run a failed run again, reusing the steps that succeeded
   runs                         list recorded runs, newest first
   runs show <run-id>           show a run and each of its steps
@@ -68,6 +70,10 @@ func Main(args []string, env Env) int {
 		return listWorkflows(env)
 	case "retry":
 		return retryRun(args[1:], env)
+	case "templates":
+		return listTemplates(env)
+	case "init":
+		return initWorkflow(args[1:], env)
 	case "logs":
 		return printLogs(args[1:], env)
 	case "help", "-h", "--help":
@@ -345,5 +351,47 @@ func listWorkflows(env Env) int {
 		fmt.Fprintf(table, "%s\t%s\t%s\n", workflow.Name, workflow.UpdatedAt, store.Path(workflow.Name))
 	}
 	_ = table.Flush()
+	return 0
+}
+
+func listTemplates(env Env) int {
+	templates, err := app.ListTemplates()
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return 1
+	}
+	table := tabwriter.NewWriter(env.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "TEMPLATE\tTITLE\tDESCRIPTION")
+	for _, template := range templates {
+		fmt.Fprintf(table, "%s\t%s\t%s\n", template.Name, template.Title, template.Description)
+	}
+	_ = table.Flush()
+	return 0
+}
+
+func initWorkflow(args []string, env Env) int {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(env.Stderr, "usage: mega-agents init <template> [name]")
+		return 2
+	}
+	request, err := app.LoadTemplate(args[0])
+	if err != nil {
+		fmt.Fprintf(env.Stderr, "template %s not found; see mega-agents templates\n", args[0])
+		return 1
+	}
+	name := args[0]
+	if len(args) == 2 {
+		name = args[1]
+	}
+	store, err := app.DefaultWorkflowStore()
+	if err == nil {
+		err = store.Save(name, request)
+	}
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return 1
+	}
+	fmt.Fprintf(env.Stdout, "Saved %s from template %s at %s; set its project path, then: mega-agents run %s\n",
+		name, args[0], store.Path(name), name)
 	return 0
 }

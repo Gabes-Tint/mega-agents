@@ -2592,4 +2592,64 @@ describe("graph builder workspace", () => {
     );
     vi.unstubAllGlobals();
   });
+
+  test("starts a workflow from a template", async () => {
+    fakeBackend({
+      "GET /api/templates": [
+        () =>
+          Response.json([
+            {
+              name: "gate-and-fix",
+              title: "Gate and fix",
+              description: "Run the gate, fix what fails.",
+            },
+          ]),
+      ],
+      "GET /api/templates/gate-and-fix": [
+        () =>
+          Response.json({
+            name: "gate-and-fix",
+            nodes: [
+              {
+                id: "project",
+                type: "project",
+                name: "Project",
+                x: 40,
+                y: 40,
+                w: 600,
+                h: 400,
+              },
+              {
+                id: "gate",
+                type: "command",
+                name: "Gate",
+                x: 20,
+                y: 60,
+                w: 180,
+                h: 64,
+                parentId: "project",
+                command: "make verify",
+              },
+            ],
+            edges: [],
+          }),
+      ],
+    });
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Templates…" }));
+    expect(
+      await screen.findByText("Run the gate, fix what fails."),
+    ).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Gate and fix" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Gate" })).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Workflow name")).toHaveValue("gate-and-fix");
+    expect(
+      screen.getByRole("status", { name: "Workflow file" }),
+    ).toHaveTextContent("Started from template Gate and fix");
+    vi.unstubAllGlobals();
+  });
 });

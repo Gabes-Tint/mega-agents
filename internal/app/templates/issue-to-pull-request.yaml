@@ -1,0 +1,117 @@
+apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+
+metadata:
+  name: issue-to-pull-request
+  title: "Issue to pull request"
+  description: "Read a GitHub issue, implement it with an agent in a fresh worktree, gate the change with the tests, then commit, push and open a pull request."
+
+nodes:
+  project:
+    uses: project@v1
+    name: "Project"
+    layout:
+      x: 40
+      y: 40
+      w: 760
+      h: 620
+    children:
+      github:
+        uses: github@v1
+        name: "GitHub"
+        start: true
+        with:
+          authenticated: true
+        layout:
+          x: 20
+          y: 50
+          w: 200
+          h: 540
+        children:
+          read-issue:
+            uses: git/issue@v1
+            name: "Read issue"
+            start: true
+            with:
+              issue: 1
+            layout:
+              x: 12
+              y: 40
+              w: 160
+              h: 64
+          create-worktree:
+            uses: git/worktree@v1
+            name: "Create worktree"
+            needs:
+              - read-issue
+            with:
+              branch: "issue-1"
+            layout:
+              x: 12
+              y: 128
+              w: 160
+              h: 64
+          commit:
+            uses: git/commit@v1
+            name: "Commit"
+            needs:
+              - tests.passed
+            with:
+              message: "Implement the issue on {{workspace.branch}}"
+            layout:
+              x: 12
+              y: 304
+              w: 160
+              h: 64
+          push:
+            uses: git/push@v1
+            name: "Push"
+            needs:
+              - commit
+            layout:
+              x: 12
+              y: 392
+              w: 160
+              h: 64
+          open-pull-request:
+            uses: git/pullrequest@v1
+            name: "Open pull request"
+            needs:
+              - push
+            with:
+              title: "Implement {{workspace.branch}}"
+              body: "Opened by a Mega Agents workflow."
+            layout:
+              x: 12
+              y: 480
+              w: 160
+              h: 64
+      implementer:
+        uses: agent@v1
+        name: "Implementer"
+        needs:
+          - read-issue
+          - create-worktree
+        with:
+          backend: "claude"
+          model: "haiku"
+          prompt: "Implement this GitHub issue in {{workspace.path}} on branch {{workspace.branch}}. Keep the change small and add tests. Do not commit.\n\nIssue: {{results.read-issue}}"
+          timeoutMinutes: 30
+        layout:
+          x: 300
+          y: 90
+          w: 180
+          h: 64
+      tests:
+        uses: command@v1
+        name: "Tests"
+        needs:
+          - implementer
+        with:
+          command: "make test"
+          timeoutMinutes: 15
+        layout:
+          x: 300
+          y: 250
+          w: 180
+          h: 64

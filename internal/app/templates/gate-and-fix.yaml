@@ -1,0 +1,89 @@
+apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+
+metadata:
+  name: gate-and-fix
+  title: "Gate and fix"
+  description: "Run the quality gate in a fresh worktree; when it fails, a fixer agent works on the output in the same worktree and the gate runs again."
+
+nodes:
+  project:
+    uses: project@v1
+    name: "Project"
+    layout:
+      x: 40
+      y: 40
+      w: 700
+      h: 460
+    children:
+      github:
+        uses: github@v1
+        name: "GitHub"
+        start: true
+        with:
+          authenticated: true
+        layout:
+          x: 20
+          y: 50
+          w: 200
+          h: 220
+        children:
+          fetch:
+            uses: git/fetch@v1
+            name: "Fetch"
+            start: true
+            layout:
+              x: 12
+              y: 40
+              w: 160
+              h: 64
+          create-worktree:
+            uses: git/worktree@v1
+            name: "Create worktree"
+            needs:
+              - fetch
+            with:
+              branch: "quality-fixes"
+            layout:
+              x: 12
+              y: 128
+              w: 160
+              h: 64
+      gate:
+        uses: command@v1
+        name: "Gate"
+        needs:
+          - create-worktree
+        with:
+          command: "make verify"
+        layout:
+          x: 300
+          y: 70
+          w: 180
+          h: 64
+      fixer:
+        uses: agent@v1
+        name: "Fixer"
+        needs:
+          - gate.failed
+        with:
+          backend: "claude"
+          model: "haiku"
+          prompt: "The quality gate failed in {{workspace.path}}. Fix the cause without weakening any check, and do not commit.\n\n{{results.gate}}"
+        layout:
+          x: 300
+          y: 210
+          w: 180
+          h: 64
+      gate-again:
+        uses: command@v1
+        name: "Gate again"
+        needs:
+          - fixer
+        with:
+          command: "make verify"
+        layout:
+          x: 300
+          y: 350
+          w: 180
+          h: 64

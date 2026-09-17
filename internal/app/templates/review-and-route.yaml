@@ -1,0 +1,88 @@
+apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+
+metadata:
+  name: review-and-route
+  title: "Review and route"
+  description: "A coder makes a change, a reviewer returns a schema-checked verdict, and a router sends approved work to a summary and rejected work to a fixer."
+
+nodes:
+  project:
+    uses: project@v1
+    name: "Project"
+    layout:
+      x: 40
+      y: 40
+      w: 640
+      h: 460
+    children:
+      coder:
+        uses: agent@v1
+        name: "Coder"
+        start: true
+        with:
+          backend: "claude"
+          model: "haiku"
+          prompt: "Make the change described in TODO.md. Do not commit."
+        layout:
+          x: 30
+          y: 60
+          w: 180
+          h: 64
+      reviewer:
+        uses: agent@v1
+        name: "Reviewer"
+        needs:
+          - coder
+        with:
+          backend: "opencode"
+          model: "opencode-go/glm-5.3-flash"
+          prompt: "Review the uncommitted changes in this repository. The coder reported: {{result}}"
+          outputSchema: "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"verdict\",\"reasons\"],\"properties\":{\"verdict\":{\"type\":\"string\",\"enum\":[\"approve\",\"reject\"]},\"reasons\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}"
+        layout:
+          x: 30
+          y: 200
+          w: 180
+          h: 64
+      route:
+        uses: router@v1
+        name: "Route"
+        needs:
+          - reviewer
+        with:
+          cases:
+            - name: "approved"
+              expression: "value.verdict == \"approve\""
+        layout:
+          x: 30
+          y: 340
+          w: 180
+          h: 64
+      summarize:
+        uses: agent@v1
+        name: "Summarize"
+        needs:
+          - route.approved
+        with:
+          backend: "claude"
+          model: "haiku"
+          prompt: "Write a one-paragraph summary of the approved change: {{result}}"
+        layout:
+          x: 380
+          y: 260
+          w: 180
+          h: 64
+      fix:
+        uses: agent@v1
+        name: "Fix"
+        needs:
+          - route.default
+        with:
+          backend: "claude"
+          model: "haiku"
+          prompt: "The reviewer rejected the change for these reasons; fix them without committing: {{result}}"
+        layout:
+          x: 380
+          y: 380
+          w: 180
+          h: 64

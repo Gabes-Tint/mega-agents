@@ -42,6 +42,7 @@ func NewHandlerWithRuns(assets fs.FS, service Runs, workflows WorkflowStore) htt
 	mux := http.NewServeMux()
 	registerWorkflowYAMLHandler(mux)
 	registerWorkflowStoreHandler(mux, workflows)
+	registerTemplateHandler(mux)
 	registerRunHandler(mux, service)
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
