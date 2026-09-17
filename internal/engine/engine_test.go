@@ -8,6 +8,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,6 +16,7 @@ import (
 // recorder builds tasks that log their execution order and hand their
 // inputs back as evidence.
 type recorder struct {
+	mu     sync.Mutex
 	order  []string
 	inputs map[string][]Input
 }
@@ -23,11 +25,13 @@ func (r *recorder) task(id string, needs []Need, run func([]Input) (Result, erro
 	return Task{
 		ID: id, Needs: needs,
 		Run: func(_ context.Context, inputs []Input, _ io.Writer) (Result, error) {
+			r.mu.Lock()
 			r.order = append(r.order, id)
 			if r.inputs == nil {
 				r.inputs = map[string][]Input{}
 			}
 			r.inputs[id] = inputs
+			r.mu.Unlock()
 			return run(inputs)
 		},
 	}
@@ -83,7 +87,7 @@ func TestRunKeepsDeclarationOrderAmongIndependentTasks(t *testing.T) {
 		r.task("c", []Need{{TaskID: "a"}}, emits("", nil)),
 	}
 
-	if _, err := Execute(context.Background(), tasks, Options{}); err != nil {
+	if _, err := Execute(context.Background(), tasks, Options{Parallelism: 1}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if !reflect.DeepEqual(r.order, []string{"b", "a", "c"}) {
@@ -315,5 +319,89 @@ func TestASucceededStepKeepsItsOutputs(t *testing.T) {
 	}
 	if run.Steps[0].Outputs["workspace"] != "w" {
 		t.Fatalf("step = %+v", run.Steps[0])
+	}
+}
+
+// concurrency tracks how many tasks run at once.
+type concurrency struct {
+	mu      sync.Mutex
+	current int
+	peak    int
+}
+
+func (c *concurrency) task(id string, needs []Need, hold time.Duration) Task {
+	return Task{ID: id, Needs: needs, Run: func(context.Context, []Input, io.Writer) (Result, error) {
+		c.mu.Lock()
+		c.current++
+		c.peak = max(c.peak, c.current)
+		c.mu.Unlock()
+		time.Sleep(hold)
+		c.mu.Lock()
+		c.current--
+		c.mu.Unlock()
+		return Result{Outputs: map[string]any{"done": id}}, nil
+	}}
+}
+
+func TestIndependentTasksRunAtTheSameTime(t *testing.T) {
+	c := &concurrency{}
+	order := make(chan string, 3)
+	tasks := []Task{
+		c.task("coder", nil, 150*time.Millisecond),
+		c.task("reviewer", nil, 150*time.Millisecond),
+		{ID: "merge", Needs: []Need{{TaskID: "coder", Port: "done"}, {TaskID: "reviewer", Port: "done"}},
+			Run: func(_ context.Context, inputs []Input, _ io.Writer) (Result, error) {
+				order <- fmt.Sprintf("merge after %d inputs", len(inputs))
+				return Result{}, nil
+			}},
+	}
+	started := time.Now()
+
+	run, err := Execute(context.Background(), tasks, Options{})
+
+	if err != nil || run.Status != Succeeded {
+		t.Fatalf("run = %+v, %v", run, err)
+	}
+	if elapsed := time.Since(started); elapsed > 280*time.Millisecond {
+		t.Fatalf("took %s; the two independent tasks did not overlap", elapsed)
+	}
+	if c.peak != 2 || <-order != "merge after 2 inputs" {
+		t.Fatalf("peak = %d", c.peak)
+	}
+}
+
+func TestParallelismBoundsHowManyTasksRunAtOnce(t *testing.T) {
+	for limit, want := range map[int]int{1: 1, 0: 4} {
+		c := &concurrency{}
+		var tasks []Task
+		for i := range 6 {
+			tasks = append(tasks, c.task(fmt.Sprintf("t%d", i), nil, 30*time.Millisecond))
+		}
+
+		if _, err := Execute(context.Background(), tasks, Options{Parallelism: limit}); err != nil {
+			t.Fatal(err)
+		}
+		if c.peak != want {
+			t.Errorf("parallelism %d: peak = %d, want %d", limit, c.peak, want)
+		}
+	}
+}
+
+func TestAFailureSkipsOnlyItsOwnBranchWhileTheOtherRuns(t *testing.T) {
+	c := &concurrency{}
+	tasks := []Task{
+		{ID: "broken", Run: func(context.Context, []Input, io.Writer) (Result, error) { return Result{}, errors.New("boom") }},
+		c.task("slow", nil, 80*time.Millisecond),
+		c.task("after-broken", []Need{{TaskID: "broken"}}, 0),
+		c.task("after-slow", []Need{{TaskID: "slow"}}, 0),
+	}
+
+	run, err := Execute(context.Background(), tasks, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Status{"broken": Failed, "slow": Succeeded, "after-broken": Skipped, "after-slow": Succeeded}
+	if got := statuses(run); !reflect.DeepEqual(got, want) {
+		t.Fatalf("statuses = %v", got)
 	}
 }

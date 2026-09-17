@@ -68,6 +68,11 @@ instead of running again.
 
 ## Blocks that run
 
+Steps run as soon as everything they need has finished, up to four at a
+time, so independent agents or gates work in parallel. Fetch, worktree
+creation and push of one repository take turns, since they update its shared
+refs.
+
 - **GitHub** flagged as a starting point runs its **Actions** in order:
   *Fetch*, *Create worktree* (outputs a `workspace`), *Rebase*, *Read issue*
   (the issue's title, body, labels and comments via `gh`), *Commit*, *Push*

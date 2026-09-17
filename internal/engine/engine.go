@@ -11,6 +11,7 @@ import (
 	"io"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -85,16 +86,25 @@ type Options struct {
 	Log func(taskID string) io.Writer
 	// Now is the clock steps are timed with; nil uses the system clock.
 	Now func() time.Time
+	// Parallelism bounds how many tasks run at once; 0 means
+	// DefaultParallelism and 1 runs them one at a time.
+	Parallelism int
 }
+
+// DefaultParallelism is how many independent tasks run at once.
+const DefaultParallelism = 4
 
 // Execute validates the plan, then runs its tasks one at a time in dependency
 // order, keeping declaration order among tasks that are ready together. It
 // returns an error only for a plan that cannot run; task failures are
 // recorded on their steps.
 func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
-	order, err := schedule(tasks)
-	if err != nil {
+	if _, err := schedule(tasks); err != nil {
 		return Run{}, err
+	}
+	limit := options.Parallelism
+	if limit <= 0 {
+		limit = DefaultParallelism
 	}
 	run := Run{Status: Running, Steps: make([]Step, len(tasks))}
 	index := make(map[string]int, len(tasks))
@@ -102,58 +112,41 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 		index[task.ID] = i
 		run.Steps[i] = Step{TaskID: task.ID, Name: task.Name, Kind: task.Kind, Status: Pending}
 	}
-	outputs := make(map[string]map[string]any, len(tasks))
-	notify := func() {
-		if options.Observe != nil {
-			options.Observe(snapshot(run))
-		}
-	}
 	now := options.Now
 	if now == nil {
 		now = time.Now
 	}
-	stamp := func() (time.Time, string) {
-		at := now().UTC()
-		return at, at.Format(time.RFC3339)
+	execution := &execution{
+		ctx: ctx, tasks: tasks, options: options, run: &run, index: index, now: now,
+		outputs: make(map[string]map[string]any, len(tasks)),
+		logs:    make([]io.Writer, len(tasks)),
+		settled: make([]bool, len(tasks)), started: make([]bool, len(tasks)),
+		finished: make(chan int),
 	}
-	notify()
-	for _, i := range order {
-		task, step := tasks[i], &run.Steps[i]
-		log := io.Discard
-		if options.Log != nil {
-			if writer := options.Log(task.ID); writer != nil {
-				log = writer
+	execution.notify()
+	running := 0
+	for remaining := len(tasks); remaining > 0; {
+		for i := range tasks {
+			if execution.started[i] || !execution.ready(i) {
+				continue
 			}
+			if reason := execution.blocked(i); reason != "" {
+				execution.skip(i, reason)
+				remaining--
+				continue
+			}
+			if running == limit {
+				break
+			}
+			execution.start(i)
+			running++
 		}
-		label := labelOf(task)
-		inputs, reason := gather(task, run.Steps, index, outputs)
-		if reason == "" && ctx.Err() != nil {
-			reason = "the run was cancelled"
+		if remaining == 0 {
+			break
 		}
-		if reason != "" {
-			step.Status, step.Error = Skipped, reason
-			fmt.Fprintf(log, "%s skipped: %s\n", label, reason)
-			notify()
-			continue
-		}
-		started, startedAt := stamp()
-		step.Status, step.StartedAt = Running, startedAt
-		fmt.Fprintf(log, "%s started at %s\n", label, startedAt)
-		notify()
-		result, err := task.Run(ctx, inputs, log)
-		finished, finishedAt := stamp()
-		step.Details, step.FinishedAt = result.Details, finishedAt
-		elapsed := finished.Sub(started).Round(time.Millisecond)
-		if err != nil {
-			step.Status, step.Error = Failed, err.Error()
-			fmt.Fprintf(log, "%s failed in %s: %s\n", label, elapsed, err)
-		} else {
-			step.Status = Succeeded
-			step.Outputs = result.Outputs
-			outputs[task.ID] = result.Outputs
-			fmt.Fprintf(log, "%s succeeded in %s\n", label, elapsed)
-		}
-		notify()
+		execution.complete(<-execution.finished)
+		running--
+		remaining--
 	}
 	run.Status = Succeeded
 	for _, step := range run.Steps {
@@ -163,6 +156,119 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 		}
 	}
 	return run, nil
+}
+
+// execution is one run in progress. Only the goroutine running Execute
+// changes the run; tasks report back through finished.
+type execution struct {
+	ctx      context.Context
+	tasks    []Task
+	options  Options
+	run      *Run
+	index    map[string]int
+	now      func() time.Time
+	outputs  map[string]map[string]any
+	logs     []io.Writer
+	settled  []bool
+	started  []bool
+	results  sync.Map
+	finished chan int
+	begun    []time.Time
+}
+
+type taskResult struct {
+	result Result
+	err    error
+}
+
+func (e *execution) notify() {
+	if e.options.Observe != nil {
+		e.options.Observe(snapshot(*e.run))
+	}
+}
+
+func (e *execution) stamp() (time.Time, string) {
+	at := e.now().UTC()
+	return at, at.Format(time.RFC3339)
+}
+
+func (e *execution) log(i int) io.Writer {
+	if e.logs[i] == nil {
+		e.logs[i] = io.Discard
+		if e.options.Log != nil {
+			if writer := e.options.Log(e.tasks[i].ID); writer != nil {
+				e.logs[i] = writer
+			}
+		}
+	}
+	return e.logs[i]
+}
+
+// ready reports whether every task i needs has settled.
+func (e *execution) ready(i int) bool {
+	for _, need := range e.tasks[i].Needs {
+		if !e.settled[e.index[need.TaskID]] {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *execution) blocked(i int) string {
+	_, reason := gather(e.tasks[i], e.run.Steps, e.index, e.outputs)
+	if reason == "" && e.ctx.Err() != nil {
+		reason = "the run was cancelled"
+	}
+	return reason
+}
+
+func (e *execution) skip(i int, reason string) {
+	step := &e.run.Steps[i]
+	e.started[i], e.settled[i] = true, true
+	step.Status, step.Error = Skipped, reason
+	fmt.Fprintf(e.log(i), "%s skipped: %s\n", labelOf(e.tasks[i]), reason)
+	e.notify()
+}
+
+func (e *execution) start(i int) {
+	task, step := e.tasks[i], &e.run.Steps[i]
+	inputs, _ := gather(task, e.run.Steps, e.index, e.outputs)
+	started, startedAt := e.stamp()
+	if e.begun == nil {
+		e.begun = make([]time.Time, len(e.tasks))
+	}
+	e.begun[i] = started
+	e.started[i] = true
+	step.Status, step.StartedAt = Running, startedAt
+	log := e.log(i)
+	fmt.Fprintf(log, "%s started at %s\n", labelOf(task), startedAt)
+	e.notify()
+	go func() {
+		result, err := task.Run(e.ctx, inputs, log)
+		e.results.Store(i, taskResult{result: result, err: err})
+		e.finished <- i
+	}()
+}
+
+func (e *execution) complete(i int) {
+	value, _ := e.results.LoadAndDelete(i)
+	outcome := value.(taskResult)
+	task, step := e.tasks[i], &e.run.Steps[i]
+	finished, finishedAt := e.stamp()
+	e.settled[i] = true
+	step.Details, step.FinishedAt = outcome.result.Details, finishedAt
+	elapsed := finished.Sub(e.begun[i]).Round(time.Millisecond)
+	log := e.log(i)
+	if outcome.err != nil {
+		step.Status, step.Error = Failed, outcome.err.Error()
+		fmt.Fprintf(log, "%s failed in %s: %s\n", labelOf(task), elapsed, outcome.err)
+	} else {
+		step.Status = Succeeded
+		step.Outputs = outcome.result.Outputs
+		e.outputs[task.ID] = outcome.result.Outputs
+		fmt.Fprintf(log, "%s succeeded in %s\n", labelOf(task), elapsed)
+	}
+	e.notify()
 }
 
 // gather collects a task's inputs, or explains why it cannot run.

@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,5 +276,27 @@ func TestRebaseRejectsAMissingWorkspace(t *testing.T) {
 	_, err := Rebase(context.Background(), Workspace{Path: filepath.Join(t.TempDir(), "gone"), Base: "origin/main"}, "")
 	if err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("err = %v, want a missing-workspace error", err)
+	}
+}
+
+func TestWorktreesOfOneCloneCanBeCreatedAtTheSameTime(t *testing.T) {
+	clone, _ := githubClone(t, "https://github.com/acme/api.git")
+	root := t.TempDir()
+	errs := make(chan error, 6)
+	for i := range 6 {
+		go func() {
+			_, err := CreateWorktree(context.Background(), WorktreeRequest{
+				Dir: clone, Branch: fmt.Sprintf("parallel-%d", i), Path: filepath.Join(root, fmt.Sprintf("w%d", i)),
+			})
+			errs <- err
+		}()
+	}
+	for range 6 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent worktree: %v", err)
+		}
+	}
+	if listing := runGit(t, clone, "worktree", "list"); strings.Count(listing, "parallel-") != 6 {
+		t.Fatalf("worktrees = %s", listing)
 	}
 }

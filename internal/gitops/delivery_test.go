@@ -144,3 +144,39 @@ func TestReadIssueReturnsItsFields(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestFetchesAndPushesOfOneRepositoryDoNotCollide(t *testing.T) {
+	clone, seed := githubClone(t, "https://github.com/acme/api.git")
+	runGit(t, clone, "config", "user.name", "Test")
+	runGit(t, clone, "config", "user.email", "test@example.com")
+	pushCommit(t, seed, "moved")
+	var workspaces []Workspace
+	for i := range 4 {
+		workspace, err := CreateWorktree(context.Background(), WorktreeRequest{
+			Dir: clone, Branch: "push-" + string(rune('a'+i)), Path: filepath.Join(t.TempDir(), "w"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace.Path, "f.txt"), []byte(workspace.Branch), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Commit(context.Background(), workspace, "change"); err != nil {
+			t.Fatal(err)
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	errs := make(chan error, 8)
+	for _, workspace := range workspaces {
+		go func() { errs <- Push(context.Background(), workspace) }()
+		go func() {
+			_, err := Fetch(context.Background(), clone, "acme/api")
+			errs <- err
+		}()
+	}
+	for range 8 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent git: %v", err)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
 )
@@ -235,5 +236,30 @@ func TestAgentPlansAreCheckedBeforeRunning(t *testing.T) {
 				t.Fatalf("response = %d %q, want %q", response.Code, response.Body.String(), testCase.want)
 			}
 		})
+	}
+}
+
+func TestIndependentAgentsWorkAtTheSameTime(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nsleep 1\necho '{\"type\":\"result\",\"session_id\":\"s\",\"result\":\"done\"}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "s1", "type": "command", "name": "Start", "parentId": "p1", "command": "true"},
+		{"id": "a1", "type": "agent", "name": "Domain", "parentId": "p1", "start": true, "backend": "claude", "prompt": "Domain"},
+		{"id": "a2", "type": "agent", "name": "Interface", "parentId": "p1", "start": true, "backend": "claude", "prompt": "UI"}
+	]}`, t.TempDir())
+	started := time.Now()
+
+	record := finishedRunOnly(t, body)
+
+	if record.Status != engine.Succeeded {
+		t.Fatalf("record = %+v", record)
+	}
+	if elapsed := time.Since(started); elapsed > 1800*time.Millisecond {
+		t.Fatalf("two one-second agents took %s; they did not run at the same time", elapsed)
 	}
 }

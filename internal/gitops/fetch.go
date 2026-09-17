@@ -38,6 +38,7 @@ func Fetch(ctx context.Context, dir string, repository string) (FetchResult, err
 	if err != nil {
 		return FetchResult{}, err
 	}
+	defer lockRepository(ctx, dir)()
 	output, err := git(ctx, dir, "fetch", detected.Remote)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("git fetch %s failed: %w", detected.Remote, err)

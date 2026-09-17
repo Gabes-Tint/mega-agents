@@ -7,6 +7,8 @@ const prompt = args[args.indexOf("-p") + 1] ?? "";
 const schemaIndex = args.indexOf("--json-schema");
 // A prompt marked [slow] stands in for a long turn someone may cancel.
 if (prompt.includes("[slow]")) await Bun.sleep(30_000);
+// A prompt marked [wait] takes long enough to watch it run.
+if (prompt.includes("[wait]")) await Bun.sleep(2_000);
 const reply =
   schemaIndex >= 0
     ? JSON.stringify({ verdict: "approve" })

@@ -48,6 +48,7 @@ func Push(ctx context.Context, workspace Workspace) error {
 	if remote == "" {
 		remote = "origin"
 	}
+	defer lockRepository(ctx, workspace.Path)()
 	if _, err := git(ctx, workspace.Path, "push", "--set-upstream", remote, "HEAD:refs/heads/"+workspace.Branch); err != nil {
 		return fmt.Errorf("git push %s %s failed: %w", remote, workspace.Branch, err)
 	}

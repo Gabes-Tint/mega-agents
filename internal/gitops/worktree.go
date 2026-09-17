@@ -70,6 +70,7 @@ func CreateWorktree(ctx context.Context, request WorktreeRequest) (Workspace, er
 		Repository: detected.Repository, Remote: detected.Remote, Path: path,
 		Branch: branch, Base: base, BaseRevision: revision,
 	}
+	defer lockRepository(ctx, request.Dir)()
 	reuse, err := existingWorktree(ctx, request.Dir, path, branch)
 	if err != nil || reuse {
 		return workspace, err
