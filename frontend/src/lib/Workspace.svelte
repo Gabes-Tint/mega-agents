@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Dialog } from "bits-ui";
   import { GraphStore } from "./graph.svelte.js";
   import Palette from "./Palette.svelte";
   import Canvas from "./Canvas.svelte";
@@ -14,9 +15,13 @@
   }
 
   interface RunResult {
+    id?: string;
     status: string;
     steps: RunStep[];
   }
+
+  // How often a started run is polled for progress.
+  const RUN_POLL_MS = 250;
 
   // Step details shown as labelled lines, in this order.
   const DETAIL_LABELS: [string, string][] = [
@@ -32,6 +37,64 @@
   let running = $state(false);
   let runResult = $state<RunResult | null>(null);
   let runError = $state("");
+  let logText = $state("");
+  let logRequest = 0;
+
+  const loggedStep = $derived(
+    runResult?.steps.find((step) => step.nodeId === graph.logNodeId),
+  );
+
+  function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function showResult(result: RunResult): void {
+    runResult = result;
+    graph.showRun(result.steps, result.id ?? null);
+    if (graph.logNodeId) void loadLog(graph.logNodeId);
+  }
+
+  async function loadLog(nodeId: string): Promise<void> {
+    const request = ++logRequest;
+    try {
+      const response = await fetch(
+        `/api/runs/${encodeURIComponent(graph.runId ?? "")}/logs/${encodeURIComponent(nodeId)}`,
+      );
+      const text = response.ok
+        ? await response.text()
+        : "No log recorded for this step";
+      if (request === logRequest) logText = text;
+    } catch {
+      if (request === logRequest) logText = "Cannot reach the backend";
+    }
+  }
+
+  // Opening a block's log, from here or from its properties, loads it.
+  $effect(() => {
+    const nodeId = graph.logNodeId;
+    logText = "";
+    if (nodeId) void loadLog(nodeId);
+  });
+
+  // A run the backend started keeps executing after the request returns;
+  // poll it so the canvas and the result follow each step.
+  async function follow(result: RunResult): Promise<void> {
+    let current = result;
+    while (current.id && current.status === "running") {
+      await wait(RUN_POLL_MS);
+      try {
+        const response = await fetch(
+          `/api/runs/${encodeURIComponent(current.id)}`,
+        );
+        if (!response.ok) throw new Error(await response.text());
+        current = (await response.json()) as RunResult;
+      } catch {
+        runError = `Lost track of run ${current.id}; see it with: mega-agents runs show ${current.id}`;
+        return;
+      }
+      showResult(current);
+    }
+  }
 
   function attachmentFilename(header: string | null): string {
     const match = /filename="([^"]+)"/.exec(header ?? "");
@@ -72,6 +135,7 @@
     runResult = null;
     runError = "";
     graph.showRun([]);
+    graph.openLog(null);
     try {
       const response = await fetch("/api/runs", {
         method: "POST",
@@ -85,8 +149,9 @@
         runError = (await response.text()).trim();
         return;
       }
-      runResult = (await response.json()) as RunResult;
-      graph.showRun(runResult.steps);
+      const started = (await response.json()) as RunResult;
+      showResult(started);
+      await follow(started);
     } catch {
       runError = "Cannot reach the backend";
     } finally {
@@ -127,6 +192,16 @@
                 {step.name}: {step.action}
                 {step.status}
               </strong>
+              {#if runResult.id}
+                <button
+                  type="button"
+                  class="log-link"
+                  aria-label="Logs of {step.name}"
+                  onclick={() => graph.openLog(step.nodeId)}
+                >
+                  Logs
+                </button>
+              {/if}
               {#each DETAIL_LABELS as [key, label] (key)}
                 {#if step.details?.[key]}
                   <span>{label}: {step.details[key]}</span>
@@ -143,6 +218,23 @@
       {/if}
     </section>
   </div>
+  <Dialog.Root
+    open={graph.logNodeId !== null && !!runResult}
+    onOpenChange={(open) => {
+      if (!open) graph.openLog(null);
+    }}
+  >
+    <Dialog.Portal>
+      <Dialog.Overlay class="backdrop" />
+      <Dialog.Content class="log-viewer">
+        <Dialog.Title class="dialog-title">
+          Logs: {loggedStep?.name ?? ""}
+        </Dialog.Title>
+        <pre class="log-text">{logText || "Loading…"}</pre>
+        <Dialog.Close class="close-button">Close</Dialog.Close>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
   <Palette {graph} />
   <Canvas {graph} />
   <PropertiesPanel {graph} />
@@ -225,6 +317,38 @@
   .run-result .failed,
   .run-status.failed {
     color: #a03030;
+  }
+
+  .log-link {
+    margin-left: 0.5rem;
+    padding: 0 0.4rem;
+    font-size: 0.75rem;
+  }
+
+  :global(.log-viewer) {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(48rem, 92vw);
+    max-height: 80vh;
+    display: grid;
+    gap: 0.5rem;
+    border: 1px solid #b8ccc4;
+    border-radius: 0.375rem;
+    background: #ffffff;
+    padding: 0.75rem;
+  }
+
+  .log-text {
+    margin: 0;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: 0.75rem;
+    color: #17342c;
+    background: #f4f7f6;
+    padding: 0.5rem;
   }
 
   .yaml-error {

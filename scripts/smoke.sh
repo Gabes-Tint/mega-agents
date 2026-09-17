@@ -20,4 +20,11 @@ test "${response:-}" = '{"message":"Mega Agents backend is running"}' || {
   exit 1
 }
 curl --fail --silent "http://127.0.0.1:$port/" | grep -q '<title>Mega Agents</title>'
+home=$(mktemp -d "${TMPDIR:-/tmp}/mega-agents-smoke-home.XXXXXX")
+MEGA_AGENTS_HOME=$home ./bin/mega-agents runs | grep -q 'No runs recorded yet' || {
+  echo 'Command-line runs smoke test failed.' >&2
+  rm -rf -- "$home"
+  exit 1
+}
+rm -rf -- "$home"
 echo 'Embedded application smoke test passed.'

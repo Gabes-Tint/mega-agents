@@ -199,6 +199,10 @@ export class GraphStore {
   // store to power live dragover validation on the canvas.
   draggingType = $state<NodeType | null>(null);
   runStatuses = $state<Record<string, string>>({});
+  // The run whose statuses the canvas shows, and the block whose log of that
+  // run is open.
+  runId = $state<string | null>(null);
+  logNodeId = $state<string | null>(null);
 
   get selected(): GraphNode | undefined {
     return this.nodes.find((node) => node.id === this.selectedId);
@@ -512,10 +516,20 @@ export class GraphStore {
   }
 
   // Replaces the statuses shown on the canvas with a run's steps.
-  showRun(steps: readonly RunStepStatus[]): void {
+  showRun(steps: readonly RunStepStatus[], runId: string | null = null): void {
+    this.runId = runId;
     this.runStatuses = Object.fromEntries(
       steps.map((step) => [step.nodeId, step.status]),
     );
+  }
+
+  // Whether the shown run has a step, and so a log, of the block's own.
+  hasLog(id: string): boolean {
+    return this.runId !== null && this.runStatuses[id] !== undefined;
+  }
+
+  openLog(id: string | null): void {
+    this.logNodeId = id;
   }
 
   // A block's own step status, or for a block without a step of its own the

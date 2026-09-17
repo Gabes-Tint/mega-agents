@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -189,12 +190,29 @@ func ParseGitHubRepository(repository string) (string, error) {
 	return path, nil
 }
 
+type logKey struct{}
+
+// WithLog returns a context whose Git commands, with their output and exit
+// status, are written to log.
+func WithLog(ctx context.Context, log io.Writer) context.Context {
+	return context.WithValue(ctx, logKey{}, log)
+}
+
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Dir = dir
 	command.Env = append(CleanEnvironment(os.Environ()), "GIT_TERMINAL_PROMPT=0")
 	output, err := command.CombinedOutput()
 	trimmed := strings.TrimSpace(string(output))
+	if log, ok := ctx.Value(logKey{}).(io.Writer); ok {
+		fmt.Fprintf(log, "$ git %s\n", strings.Join(args, " "))
+		if trimmed != "" {
+			fmt.Fprintln(log, trimmed)
+		}
+		if err != nil {
+			fmt.Fprintf(log, "(%s)\n", err)
+		}
+	}
 	if err != nil {
 		return trimmed, fmt.Errorf("%w: %s", err, trimmed)
 	}

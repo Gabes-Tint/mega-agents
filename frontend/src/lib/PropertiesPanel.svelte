@@ -136,6 +136,11 @@
       >
         Connect
       </button>
+      {#if graph.hasLog(node.id)}
+        <button type="button" onclick={() => graph.openLog(node.id)}>
+          Show logs
+        </button>
+      {/if}
       {#if node.type === "project"}
         <label>
           Path

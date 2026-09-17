@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
 	"github.com/Gabes-Tint/mega-agents/internal/gitops"
+	"github.com/Gabes-Tint/mega-agents/internal/runs"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -65,31 +67,74 @@ func runBody(projectPath string, github string) string {
 
 const startedGitHub = `{"id": "g1", "type": "github", "name": "GitHub 1", "x": 10, "y": 10, "w": 160, "h": 64, "parentId": "p1", "start": true, "authenticated": true, "repository": "acme/api"}`
 
-func postRun(t *testing.T, body string) *httptest.ResponseRecorder {
+// postRun starts a run on a handler recording under a fresh Mega Agents
+// home, which the returned handler keeps using.
+func postRun(t *testing.T, body string) (*httptest.ResponseRecorder, http.Handler) {
 	t.Helper()
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	handler := NewHandler(testAssets())
 	request := httptest.NewRequest(http.MethodPost, "/api/runs", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
-	NewHandler(testAssets()).ServeHTTP(response, request)
+	handler.ServeHTTP(response, request)
+	return response, handler
+}
+
+func finishedRunOnly(t *testing.T, body string) runs.Record {
+	t.Helper()
+	record, _ := finishedRun(t, body)
+	return record
+}
+
+func get(t *testing.T, handler http.Handler, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 	return response
 }
 
-func decodeRun(t *testing.T, response *httptest.ResponseRecorder) engine.Run {
+func decodeRecord(t *testing.T, response *httptest.ResponseRecorder) runs.Record {
 	t.Helper()
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	var record runs.Record
+	if err := json.NewDecoder(response.Body).Decode(&record); err != nil {
+		t.Fatalf("decode run: %v: %s", err, response.Body.String())
 	}
-	var run engine.Run
-	if err := json.NewDecoder(response.Body).Decode(&run); err != nil {
-		t.Fatalf("decode run: %v", err)
+	return record
+}
+
+// finishedRun starts a run and follows it until it is no longer running.
+func finishedRun(t *testing.T, body string) (runs.Record, http.Handler) {
+	t.Helper()
+	response, handler := postRun(t, body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", response.Code, response.Body.String())
 	}
-	return run
+	return awaitRun(t, handler, decodeRecord(t, response).ID), handler
+}
+
+// awaitRun follows a run until it is no longer running, so its background
+// execution never outlives the test's temporary folders.
+func awaitRun(t *testing.T, handler http.Handler, id string) runs.Record {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		polled := get(t, handler, "/api/runs/"+id)
+		if polled.Code != http.StatusOK {
+			t.Fatalf("poll = %d: %s", polled.Code, polled.Body.String())
+		}
+		if record := decodeRecord(t, polled); record.Status != engine.Running {
+			return record
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not finish", id)
+	return runs.Record{}
 }
 
 func TestRunFetchesTheStartingGitHubBlockInItsProjectPath(t *testing.T) {
 	clone, pushed := projectClone(t)
 
-	run := decodeRun(t, postRun(t, runBody(clone, startedGitHub)))
+	run := finishedRunOnly(t, runBody(clone, startedGitHub))
 
 	if run.Status != "succeeded" || len(run.Steps) != 1 {
 		t.Fatalf("run = %+v, want one succeeded step", run)
@@ -134,7 +179,7 @@ func TestRunReportsAFailedStepWithTheReason(t *testing.T) {
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			run := decodeRun(t, postRun(t, runBody(testCase.path, testCase.github)))
+			run := finishedRunOnly(t, runBody(testCase.path, testCase.github))
 
 			if run.Status != "failed" || len(run.Steps) != 1 || run.Steps[0].Status != "failed" {
 				t.Fatalf("run = %+v, want one failed step", run)
@@ -150,7 +195,7 @@ func TestRunLoadsAnEmptyRepositoryFromTheProject(t *testing.T) {
 	clone, pushed := projectClone(t)
 	github := strings.Replace(startedGitHub, `"repository": "acme/api"`, `"repository": ""`, 1)
 
-	run := decodeRun(t, postRun(t, runBody(clone, github)))
+	run := finishedRunOnly(t, runBody(clone, github))
 
 	if run.Status != "succeeded" || len(run.Steps) != 1 || run.Steps[0].Details["repository"] != "acme/api" {
 		t.Fatalf("run = %+v, want one succeeded step for acme/api", run)
@@ -165,7 +210,7 @@ func TestRunFailsAnEmptyRepositoryWhenTheProjectHasNoGitHubRemote(t *testing.T) 
 	runGit(t, clone, "remote", "set-url", "origin", "https://gitlab.com/acme/api.git")
 	github := strings.Replace(startedGitHub, `"repository": "acme/api"`, `"repository": ""`, 1)
 
-	run := decodeRun(t, postRun(t, runBody(clone, github)))
+	run := finishedRunOnly(t, runBody(clone, github))
 
 	if run.Status != "failed" || len(run.Steps) != 1 ||
 		!strings.Contains(run.Steps[0].Error, "no GitHub remote") ||
@@ -219,7 +264,7 @@ func TestRepositoryEndpointRejectsPathsWithoutAGitHubRepository(t *testing.T) {
 func TestRunRequiresAStartingGitHubBlock(t *testing.T) {
 	github := strings.Replace(startedGitHub, `"start": true`, `"start": false`, 1)
 
-	response := postRun(t, runBody(t.TempDir(), github))
+	response, _ := postRun(t, runBody(t.TempDir(), github))
 
 	if response.Code != http.StatusBadRequest ||
 		!strings.Contains(response.Body.String(), "flag a GitHub block as the starting point") {
@@ -230,7 +275,7 @@ func TestRunRequiresAStartingGitHubBlock(t *testing.T) {
 func TestRunRejectsGraphsTheEditorWouldNotAllow(t *testing.T) {
 	body := `{"nodes": [{"id": "g1", "type": "github", "name": "GitHub 1", "start": true, "authenticated": true, "repository": "acme/api"}]}`
 
-	response := postRun(t, body)
+	response, _ := postRun(t, body)
 
 	if response.Code != http.StatusBadRequest ||
 		!strings.Contains(response.Body.String(), "github cannot be placed inside root") {
@@ -239,7 +284,7 @@ func TestRunRejectsGraphsTheEditorWouldNotAllow(t *testing.T) {
 }
 
 func TestRunRejectsMalformedJSON(t *testing.T) {
-	response := postRun(t, "{")
+	response, _ := postRun(t, "{")
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
@@ -287,7 +332,7 @@ func TestRunExecutesAGitHubBlocksActionsInSequence(t *testing.T) {
 		{"id": "a2", "type": "action", "action": "worktree", "name": "Create worktree", "parentId": "g1", "branch": "feature/login", "worktreePath": %q}`,
 		worktree), `{"id": "e1", "from": "a1", "to": "a2"}, {"id": "e2", "from": "a2", "to": "a3"}`)
 
-	run := decodeRun(t, postRun(t, body))
+	run := finishedRunOnly(t, body)
 
 	if run.Status != engine.Succeeded {
 		t.Fatalf("run = %+v", run)
@@ -322,7 +367,7 @@ func TestRunSkipsTheActionsAfterAFailedOne(t *testing.T) {
 		{"id": "a2", "type": "action", "action": "rebase", "name": "Rebase", "parentId": "g1"}`,
 		`{"id": "e1", "from": "a1", "to": "a2"}`)
 
-	run := decodeRun(t, postRun(t, body))
+	run := finishedRunOnly(t, body)
 
 	if run.Status != engine.Failed || run.Steps[0].Status != engine.Failed || run.Steps[1].Status != engine.Skipped {
 		t.Fatalf("run = %+v, want the worktree to fail and the rebase to be skipped", run)
@@ -339,7 +384,7 @@ func TestRunOnlyExecutesActionsReachableFromTheStartingAction(t *testing.T) {
 		{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},
 		{"id": "a2", "type": "action", "action": "worktree", "name": "Loose worktree", "parentId": "g1", "branch": "loose"}`, ``)
 
-	run := decodeRun(t, postRun(t, body))
+	run := finishedRunOnly(t, body)
 
 	if len(run.Steps) != 1 || run.Steps[0].Kind != "fetch" {
 		t.Fatalf("steps = %+v, want only the connected fetch", run.Steps)
@@ -375,7 +420,7 @@ func TestRunRejectsActionFlowsThatCannotRun(t *testing.T) {
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			response := postRun(t, actionFlow(t.TempDir(), testCase.actions, testCase.edges))
+			response, _ := postRun(t, actionFlow(t.TempDir(), testCase.actions, testCase.edges))
 
 			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), testCase.want) {
 				t.Fatalf("response = %d %q, want 400 containing %q", response.Code, response.Body.String(), testCase.want)
@@ -390,9 +435,72 @@ func TestActionsOnlyLiveInsideAGitHubBlock(t *testing.T) {
 		{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "p1", "start": true}
 	]}`
 
-	response := postRun(t, body)
+	response, _ := postRun(t, body)
 
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "action cannot be placed inside project") {
 		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestRunKeepsTheLogOfEveryStep(t *testing.T) {
+	clone, _ := projectClone(t)
+
+	record, handler := finishedRun(t, runBody(clone, startedGitHub))
+
+	response := get(t, handler, "/api/runs/"+record.ID+"/logs/g1")
+	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("log response = %d %q", response.Code, response.Header().Get("Content-Type"))
+	}
+	log := response.Body.String()
+	for _, want := range []string{"GitHub 1 started at ", "$ git fetch origin\n", "main       -> origin/main", "GitHub 1 succeeded in "} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("log = %q, want it to contain %q", log, want)
+		}
+	}
+}
+
+func TestRunAnswersAtOnceWithThePlannedSteps(t *testing.T) {
+	clone, _ := projectClone(t)
+
+	response, handler := postRun(t, runBody(clone, startedGitHub))
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	record := decodeRecord(t, response)
+	if record.ID == "" || record.Status != engine.Running || len(record.Steps) != 1 ||
+		record.Steps[0].TaskID != "g1" || record.Steps[0].Status != engine.Pending {
+		t.Fatalf("record = %+v", record)
+	}
+	awaitRun(t, handler, record.ID)
+}
+
+func TestRunsAreListedNewestFirst(t *testing.T) {
+	clone, _ := projectClone(t)
+	first, handler := finishedRun(t, runBody(clone, startedGitHub))
+
+	response := get(t, handler, "/api/runs")
+
+	var records []runs.Record
+	if err := json.NewDecoder(response.Body).Decode(&records); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || len(records) != 1 || records[0].ID != first.ID || records[0].Workflow != "workflow" {
+		t.Fatalf("list = %d %+v", response.Code, records)
+	}
+}
+
+func TestUnknownRunsAndLogsAreNotFound(t *testing.T) {
+	clone, _ := projectClone(t)
+	record, handler := finishedRun(t, runBody(clone, startedGitHub))
+
+	for _, path := range []string{
+		"/api/runs/20000101T000000Z-000000",
+		"/api/runs/" + record.ID + "/logs/a1",
+		"/api/runs/" + record.ID + "/logs/.hidden",
+	} {
+		if response := get(t, handler, path); response.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, response.Code)
+		}
 	}
 }

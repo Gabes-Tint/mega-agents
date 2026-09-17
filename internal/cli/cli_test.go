@@ -1,0 +1,309 @@
+package cli
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/Gabes-Tint/mega-agents/internal/gitops"
+)
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{
+		"-c", "user.name=Test", "-c", "user.email=test@example.com",
+		"-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false",
+	}, args...)...)
+	command.Dir = dir
+	command.Env = gitops.CleanEnvironment(os.Environ())
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// projectClone returns a clone of https://github.com/acme/api, rewritten
+// locally to a bare repository holding a commit the clone has not fetched.
+func projectClone(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	bare, seed, clone := filepath.Join(root, "remote.git"), filepath.Join(root, "seed"), filepath.Join(root, "clone")
+	runGit(t, root, "init", "--bare", "--quiet", bare)
+	runGit(t, root, "init", "--quiet", seed)
+	runGit(t, seed, "commit", "--quiet", "--allow-empty", "-m", "first")
+	runGit(t, seed, "push", "--quiet", bare, "HEAD:refs/heads/main")
+	runGit(t, root, "clone", "--quiet", bare, clone)
+	runGit(t, clone, "remote", "set-url", "origin", "https://github.com/acme/api")
+	runGit(t, clone, "config", "url."+bare+".insteadOf", "https://github.com/acme/api")
+	runGit(t, seed, "commit", "--quiet", "--allow-empty", "-m", "second")
+	runGit(t, seed, "push", "--quiet", bare, "HEAD:refs/heads/main")
+	return clone
+}
+
+type result struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+func run(t *testing.T, args ...string) result {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := Main(args, Env{
+		Stdout: &stdout, Stderr: &stderr,
+		Serve: func() error { return errors.New("serve was not expected") },
+	})
+	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
+}
+
+func writeWorkflow(t *testing.T, name string, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func fetchWorkflowYAML(clone string) string {
+	return fmt.Sprintf(`apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+metadata:
+  name: nightly-sync
+nodes:
+  api:
+    uses: project@v1
+    with:
+      path: %q
+    children:
+      github:
+        uses: github@v1
+        start: true
+        with:
+          authenticated: true
+        children:
+          fetch:
+            uses: git/fetch@v1
+            name: "Fetch"
+            start: true
+          worktree:
+            uses: git/worktree@v1
+            name: "Create worktree"
+            needs: [fetch]
+`, clone)
+}
+
+var runID = regexp.MustCompile(`Run (\d{8}T\d{6}Z-[0-9a-f]{6})`)
+
+func TestRunExecutesAWorkflowFileAndReportsEachStep(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	path := writeWorkflow(t, "sync.yaml", fetchWorkflowYAML(projectClone(t)))
+
+	got := run(t, "run", path)
+
+	if got.code != 1 {
+		t.Fatalf("code = %d, want 1 for a failed run\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
+	}
+	for _, want := range []string{
+		"started nightly-sync",
+		"✔ Fetch succeeded",
+		"✖ Create worktree failed: set the branch the worktree works on",
+		"failed",
+	} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, got.stdout)
+		}
+	}
+	if !runID.MatchString(got.stdout) {
+		t.Errorf("stdout names no run id:\n%s", got.stdout)
+	}
+}
+
+func TestRunSucceedsWithExitZero(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	workflow := strings.Replace(fetchWorkflowYAML(projectClone(t)), "            needs: [fetch]\n",
+		"            needs: [fetch]\n            with:\n              branch: nightly\n", 1)
+
+	got := run(t, "run", writeWorkflow(t, "sync.yml", workflow))
+
+	if got.code != 0 || !strings.Contains(got.stdout, "✔ Create worktree succeeded") {
+		t.Fatalf("code = %d\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
+	}
+}
+
+func TestRunAcceptsTheEditorsJSONGraph(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	graph := fmt.Sprintf(`{"name": "from-editor", "nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true}
+	]}`, projectClone(t))
+
+	got := run(t, "run", writeWorkflow(t, "graph.json", graph))
+
+	if got.code != 0 || !strings.Contains(got.stdout, "✔ GitHub 1 succeeded") || !strings.Contains(got.stdout, "started from-editor") {
+		t.Fatalf("code = %d\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
+	}
+}
+
+func TestRunRejectsWorkflowsThatCannotRun(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	cases := map[string]struct {
+		args []string
+		want string
+	}{
+		"no file":        {args: []string{"run"}, want: "usage: mega-agents run <workflow.yaml|workflow.json>"},
+		"missing file":   {args: []string{"run", "/nonexistent/flow.yaml"}, want: "cannot read /nonexistent/flow.yaml"},
+		"unknown format": {args: []string{"run", writeWorkflow(t, "flow.txt", "x")}, want: "use a .yaml, .yml or .json workflow"},
+		"bad json":       {args: []string{"run", writeWorkflow(t, "flow.json", "{")}, want: "is not a valid workflow graph"},
+		"bad yaml":       {args: []string{"run", writeWorkflow(t, "flow.yaml", "kind: Other\n")}, want: `kind "Other" is not Workflow`},
+		"no start": {
+			args: []string{"run", writeWorkflow(t, "flow.json", `{"nodes": [{"id": "p1", "type": "project", "name": "api"}]}`)},
+			want: "flag a GitHub block as the starting point",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := run(t, testCase.args...)
+
+			if got.code != 2 || !strings.Contains(got.stderr, testCase.want) {
+				t.Fatalf("code = %d, stderr = %q, want 2 and %q", got.code, got.stderr, testCase.want)
+			}
+		})
+	}
+}
+
+// recordedRun runs the fetch workflow once and returns its run id.
+func recordedRun(t *testing.T) string {
+	t.Helper()
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	got := run(t, "run", writeWorkflow(t, "sync.yaml", fetchWorkflowYAML(projectClone(t))))
+	match := runID.FindStringSubmatch(got.stdout)
+	if match == nil {
+		t.Fatalf("no run id in:\n%s", got.stdout)
+	}
+	return match[1]
+}
+
+func TestRunsListsRecordedRuns(t *testing.T) {
+	id := recordedRun(t)
+
+	got := run(t, "runs")
+
+	if got.code != 0 || !strings.Contains(got.stdout, id) || !strings.Contains(got.stdout, "failed") ||
+		!strings.Contains(got.stdout, "nightly-sync") {
+		t.Fatalf("code = %d\nstdout:\n%s\nstderr:\n%s", got.code, got.stdout, got.stderr)
+	}
+}
+
+func TestRunsWithNothingRecorded(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+
+	got := run(t, "runs")
+
+	if got.code != 0 || !strings.Contains(got.stdout, "No runs recorded yet") {
+		t.Fatalf("code = %d, stdout = %q", got.code, got.stdout)
+	}
+}
+
+func TestRunsShowDescribesEveryStep(t *testing.T) {
+	id := recordedRun(t)
+
+	got := run(t, "runs", "show", id)
+
+	for _, want := range []string{
+		"Run " + id, "nightly-sync", "failed",
+		"fetch  Fetch  fetch  succeeded",
+		"worktree  Create worktree  worktree  failed",
+		"set the branch the worktree works on",
+		"remote: origin",
+	} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, got.stdout)
+		}
+	}
+}
+
+func TestLogsPrintsOneStepByIDOrName(t *testing.T) {
+	id := recordedRun(t)
+
+	for _, step := range []string{"fetch", "Fetch"} {
+		got := run(t, "logs", id, step)
+
+		if got.code != 0 || !strings.Contains(got.stdout, "$ git fetch origin") || strings.Contains(got.stdout, "worktree") {
+			t.Fatalf("logs %s: code = %d\nstdout:\n%s\nstderr:\n%s", step, got.code, got.stdout, got.stderr)
+		}
+	}
+}
+
+func TestLogsPrintsEveryStepInOrder(t *testing.T) {
+	id := recordedRun(t)
+
+	got := run(t, "logs", id)
+
+	fetch := strings.Index(got.stdout, "== Fetch (fetch) succeeded ==")
+	worktree := strings.Index(got.stdout, "== Create worktree (worktree) failed ==")
+	if got.code != 0 || fetch < 0 || worktree < fetch || !strings.Contains(got.stdout, "Create worktree failed in") {
+		t.Fatalf("code = %d\nstdout:\n%s", got.code, got.stdout)
+	}
+}
+
+func TestInspectionCommandsExplainMistakes(t *testing.T) {
+	id := recordedRun(t)
+	cases := map[string]struct {
+		args []string
+		code int
+		want string
+	}{
+		"show without id":  {args: []string{"runs", "show"}, code: 2, want: "usage: mega-agents runs show <run-id>"},
+		"unknown subcmd":   {args: []string{"runs", "delete"}, code: 2, want: "usage: mega-agents runs [show <run-id>]"},
+		"unknown run":      {args: []string{"runs", "show", "20000101T000000Z-000000"}, code: 1, want: "run 20000101T000000Z-000000 not found"},
+		"logs without id":  {args: []string{"logs"}, code: 2, want: "usage: mega-agents logs <run-id> [step]"},
+		"logs unknown run": {args: []string{"logs", "nope"}, code: 1, want: "run nope not found"},
+		"unknown step":     {args: []string{"logs", id, "deploy"}, code: 1, want: `run ` + id + ` has no step "deploy"`},
+		"unknown command":  {args: []string{"deploy"}, code: 2, want: `unknown command "deploy"`},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := run(t, testCase.args...)
+
+			if got.code != testCase.code || !strings.Contains(got.stderr, testCase.want) {
+				t.Fatalf("code = %d, stderr = %q, want %d and %q", got.code, got.stderr, testCase.code, testCase.want)
+			}
+		})
+	}
+}
+
+func TestHelpListsTheCommands(t *testing.T) {
+	got := run(t, "help")
+
+	for _, want := range []string{"serve", "run <workflow", "runs", "runs show <run-id>", "logs <run-id> [step]"} {
+		if got.code != 0 || !strings.Contains(got.stdout, want) {
+			t.Fatalf("help lacks %q:\n%s", want, got.stdout)
+		}
+	}
+}
+
+func TestNoArgumentsServesTheEditor(t *testing.T) {
+	served := false
+	code := Main(nil, Env{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, Serve: func() error {
+		served = true
+		return nil
+	}})
+
+	if code != 0 || !served {
+		t.Fatalf("code = %d, served = %v", code, served)
+	}
+	var stderr bytes.Buffer
+	if code := Main([]string{"serve"}, Env{Stdout: &bytes.Buffer{}, Stderr: &stderr, Serve: func() error {
+		return errors.New("port in use")
+	}}); code != 1 || !strings.Contains(stderr.String(), "port in use") {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+}

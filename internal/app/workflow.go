@@ -167,6 +167,11 @@ func (emitter *workflowEmitter) emitNode(
 		uses = "git/" + node.Action
 	}
 	builder.WriteString(fmt.Sprintf("%s  uses: %s@v1\n", indent, uses))
+	if node.Name != identifier {
+		// The identifier is a slug of the name; the name itself is kept so an
+		// imported workflow shows the same labels.
+		builder.WriteString(fmt.Sprintf("%s  name: %s\n", indent, yamlString(node.Name)))
+	}
 	var needs []string
 	for _, edge := range emitter.request.Edges {
 		if edge.To == node.ID {

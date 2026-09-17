@@ -35,12 +35,31 @@ Open <http://localhost:8080> (status endpoint: `/api/status`).
 For frontend development with hot reload: `make dev-frontend`. Re-run
 `make build` after frontend changes and restart the server.
 
+## Command line
+
+The same binary runs workflows headless and inspects recorded runs:
+
+```sh
+./bin/mega-agents run workflow.yaml     # a workflow exported from the editor
+./bin/mega-agents run graph.json        # or the editor's JSON graph
+./bin/mega-agents runs                  # recorded runs, newest first
+./bin/mega-agents runs show <run-id>    # each step's status, error and details
+./bin/mega-agents logs <run-id> [step]  # every step's log, or one by id or name
+```
+
+Every run, whether started from the editor or the command line, keeps its
+record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
+`~/.mega-agents/runs`). In the editor, select a block after a run and choose
+**Show logs**, or use **Logs** beside a step in the run result.
+
 ## Checks
 
 - `make verify` — types, Go and frontend tests with coverage, formatting,
   lint, static analysis, CI-doc sync, size budgets, and the embedded build.
 - `make gates` — repository policy executables under `scripts/gates/`.
-- `make smoke` — launches the app and probes the status endpoint.
+- `make smoke` — launches the app, probes the status endpoint, and runs the
+  `runs` command against an empty home.
+- `make e2e` — Playwright specs against the dev server and a real Go backend.
 - `make gate-self-test` — proves the gates reject bad fixtures.
 
 When `Makefile`, `.github/workflows/*.yml`, or `scripts/gates/*` changes,

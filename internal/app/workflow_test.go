@@ -233,7 +233,7 @@ func TestWorkflowYAMLNestsChildrenInsideParents(t *testing.T) {
 	}
 	if !strings.Contains(
 		body,
-		"      github-1:\n        uses: github@v1\n        layout:\n          x: 10\n          y: 10\n          w: 160\n          h: 64\n        children:\n          github-app-1:\n            uses: githubapp@v1\n",
+		"      github-1:\n        uses: github@v1\n        name: \"GitHub 1\"\n        layout:\n          x: 10\n          y: 10\n          w: 160\n          h: 64\n        children:\n          github-app-1:\n            uses: githubapp@v1\n            name: \"GitHub App 1\"\n",
 	) {
 		t.Errorf("expected the app nested inside its GitHub object, got:\n%s", body)
 	}
@@ -256,7 +256,7 @@ func TestWorkflowYAMLNestsDeeplyStackedContainers(t *testing.T) {
 	body := response.Body.String()
 	if !strings.Contains(
 		body,
-		"  my-agent:\n    uses: project@v1\n    layout:\n      x: 0\n      y: 0\n      w: 160\n      h: 64\n    children:\n      github-1:\n        uses: github@v1\n        layout:\n          x: 10\n          y: 10\n          w: 160\n          h: 64\n        children:\n          github-app-1:\n            uses: githubapp@v1\n",
+		"  my-agent:\n    uses: project@v1\n    layout:\n      x: 0\n      y: 0\n      w: 160\n      h: 64\n    children:\n      github-1:\n        uses: github@v1\n        name: \"GitHub 1\"\n        layout:\n          x: 10\n          y: 10\n          w: 160\n          h: 64\n        children:\n          github-app-1:\n            uses: githubapp@v1\n            name: \"GitHub App 1\"\n",
 	) {
 		t.Errorf("expected the app nested inside a GitHub inside the project, got:\n%s", body)
 	}
@@ -357,7 +357,7 @@ func TestWorkflowYAMLNestsForgeInsideProjectWithIndentedConfig(t *testing.T) {
 	body := response.Body.String()
 	if !strings.Contains(
 		body,
-		"    children:\n      gitlab-1:\n        uses: gitlab@v1\n        with:\n          repository: \"https://gitlab.com/example/project\"\n",
+		"    children:\n      gitlab-1:\n        uses: gitlab@v1\n        name: \"GitLab 1\"\n        with:\n          repository: \"https://gitlab.com/example/project\"\n",
 	) {
 		t.Errorf("expected forge config indented inside the nested object, got:\n%s", body)
 	}
@@ -384,7 +384,7 @@ func TestWorkflowYAMLKeepsNeedsOnNestedNodes(t *testing.T) {
 	body := response.Body.String()
 	if !strings.Contains(
 		body,
-		"          github-app-2:\n            uses: githubapp@v1\n            needs:\n              - github-app-1\n",
+		"          github-app-2:\n            uses: githubapp@v1\n            name: \"GitHub App 2\"\n            needs:\n              - github-app-1\n",
 	) {
 		t.Errorf("expected the nested node to keep its needs, got:\n%s", body)
 	}
@@ -431,9 +431,9 @@ func TestWorkflowYAMLExportsGitActionsAsVersionedGitBlocks(t *testing.T) {
 	}
 	body := response.Body.String()
 	expectations := []string{
-		"          create-worktree:\n            uses: git/worktree@v1\n            start: true\n            with:\n" +
+		"          create-worktree:\n            uses: git/worktree@v1\n            name: \"Create worktree\"\n            start: true\n            with:\n" +
 			"              branch: \"feature/login\"\n              base: \"origin/main\"\n              worktreePath: \"/tmp/login\"\n",
-		"          rebase:\n            uses: git/rebase@v1\n            needs:\n              - create-worktree\n            with:\n" +
+		"          rebase:\n            uses: git/rebase@v1\n            name: \"Rebase\"\n            needs:\n              - create-worktree\n            with:\n" +
 			"              onto: \"origin/release\"\n",
 	}
 	for _, expected := range expectations {

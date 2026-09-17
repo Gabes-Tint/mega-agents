@@ -1,11 +1,15 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recorder builds tasks that log their execution order and hand their
@@ -18,7 +22,7 @@ type recorder struct {
 func (r *recorder) task(id string, needs []Need, run func([]Input) (Result, error)) Task {
 	return Task{
 		ID: id, Needs: needs,
-		Run: func(_ context.Context, inputs []Input) (Result, error) {
+		Run: func(_ context.Context, inputs []Input, _ io.Writer) (Result, error) {
 			r.order = append(r.order, id)
 			if r.inputs == nil {
 				r.inputs = map[string][]Input{}
@@ -55,7 +59,7 @@ func TestRunExecutesDependenciesBeforeDependents(t *testing.T) {
 		r.task("worktree", []Need{{TaskID: "fetch"}}, emits("workspace", "created")),
 	}
 
-	run, err := Execute(context.Background(), tasks, nil)
+	run, err := Execute(context.Background(), tasks, Options{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -79,7 +83,7 @@ func TestRunKeepsDeclarationOrderAmongIndependentTasks(t *testing.T) {
 		r.task("c", []Need{{TaskID: "a"}}, emits("", nil)),
 	}
 
-	if _, err := Execute(context.Background(), tasks, nil); err != nil {
+	if _, err := Execute(context.Background(), tasks, Options{}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if !reflect.DeepEqual(r.order, []string{"b", "a", "c"}) {
@@ -96,7 +100,7 @@ func TestRunSkipsEverythingDownstreamOfAFailure(t *testing.T) {
 		r.task("independent", nil, emits("", nil)),
 	}
 
-	run, err := Execute(context.Background(), tasks, nil)
+	run, err := Execute(context.Background(), tasks, Options{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -120,7 +124,7 @@ func TestRunSkipsADependentWhoseNeededPortWasNotEmitted(t *testing.T) {
 		r.task("fix", []Need{{TaskID: "router", Port: "rejected"}}, emits("", nil)),
 	}
 
-	run, err := Execute(context.Background(), tasks, nil)
+	run, err := Execute(context.Background(), tasks, Options{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -151,7 +155,7 @@ func TestRunReportsProgressAsStepsChange(t *testing.T) {
 		seen = append(seen, strings.Join(line, ","))
 	}
 
-	if _, err := Execute(context.Background(), tasks, observe); err != nil {
+	if _, err := Execute(context.Background(), tasks, Options{Observe: observe}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	want := []string{
@@ -169,12 +173,12 @@ func TestRunReportsProgressAsStepsChange(t *testing.T) {
 func TestRunKeepsAStepsDetailsEvenWhenItFails(t *testing.T) {
 	tasks := []Task{{
 		ID: "agent",
-		Run: func(context.Context, []Input) (Result, error) {
+		Run: func(context.Context, []Input, io.Writer) (Result, error) {
 			return Result{Details: map[string]any{"reply": "not json"}}, errors.New("reply does not match the schema")
 		},
 	}}
 
-	run, err := Execute(context.Background(), tasks, nil)
+	run, err := Execute(context.Background(), tasks, Options{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -184,7 +188,7 @@ func TestRunKeepsAStepsDetailsEvenWhenItFails(t *testing.T) {
 }
 
 func TestRunRejectsInvalidPlans(t *testing.T) {
-	ok := func(context.Context, []Input) (Result, error) { return Result{}, nil }
+	ok := func(context.Context, []Input, io.Writer) (Result, error) { return Result{}, nil }
 	cases := map[string]struct {
 		tasks []Task
 		want  string
@@ -211,9 +215,12 @@ func TestRunRejectsInvalidPlans(t *testing.T) {
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := Execute(context.Background(), testCase.tasks, nil)
+			_, err := Execute(context.Background(), testCase.tasks, Options{})
 			if err == nil || !strings.Contains(err.Error(), testCase.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, testCase.want)
+			}
+			if err := Validate(testCase.tasks); err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("validate err = %v, want it to contain %q", err, testCase.want)
 			}
 		})
 	}
@@ -222,21 +229,77 @@ func TestRunRejectsInvalidPlans(t *testing.T) {
 func TestRunStopsSchedulingWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tasks := []Task{
-		{ID: "first", Run: func(context.Context, []Input) (Result, error) {
+		{ID: "first", Run: func(context.Context, []Input, io.Writer) (Result, error) {
 			cancel()
 			return Result{}, nil
 		}},
-		{ID: "second", Needs: []Need{{TaskID: "first"}}, Run: func(context.Context, []Input) (Result, error) {
+		{ID: "second", Needs: []Need{{TaskID: "first"}}, Run: func(context.Context, []Input, io.Writer) (Result, error) {
 			t.Fatal("a cancelled run started another task")
 			return Result{}, nil
 		}},
 	}
 
-	run, err := Execute(ctx, tasks, nil)
+	run, err := Execute(ctx, tasks, Options{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if got := statuses(run); got["second"] != Skipped || run.Status != Failed {
 		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestRunGivesEachTaskItsOwnLog(t *testing.T) {
+	logs := map[string]*bytes.Buffer{}
+	tasks := []Task{
+		{ID: "fetch", Name: "Fetch", Run: func(_ context.Context, _ []Input, log io.Writer) (Result, error) {
+			fmt.Fprintln(log, "$ git fetch origin")
+			return Result{}, nil
+		}},
+		{ID: "worktree", Name: "Create worktree", Needs: []Need{{TaskID: "fetch"}}, Run: func(_ context.Context, _ []Input, log io.Writer) (Result, error) {
+			fmt.Fprintln(log, "$ git worktree add")
+			return Result{}, errors.New("path occupied")
+		}},
+		{ID: "rebase", Name: "Rebase", Needs: []Need{{TaskID: "worktree"}}, Run: func(context.Context, []Input, io.Writer) (Result, error) {
+			t.Fatal("a skipped task ran")
+			return Result{}, nil
+		}},
+	}
+	options := Options{Log: func(taskID string) io.Writer {
+		logs[taskID] = &bytes.Buffer{}
+		return logs[taskID]
+	}}
+
+	if _, err := Execute(context.Background(), tasks, options); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	fetch := logs["fetch"].String()
+	if !strings.Contains(fetch, "Fetch started") || !strings.Contains(fetch, "$ git fetch origin\n") ||
+		!strings.Contains(fetch, "Fetch succeeded in ") {
+		t.Fatalf("fetch log = %q", fetch)
+	}
+	if worktree := logs["worktree"].String(); !strings.Contains(worktree, "$ git worktree add\n") ||
+		!strings.Contains(worktree, "Create worktree failed in ") || !strings.Contains(worktree, "path occupied") {
+		t.Fatalf("worktree log = %q", worktree)
+	}
+	if rebase := logs["rebase"].String(); !strings.Contains(rebase, "Rebase skipped: Create worktree failed") {
+		t.Fatalf("rebase log = %q", rebase)
+	}
+}
+
+func TestRunTimesEachStep(t *testing.T) {
+	now := time.Date(2026, 9, 16, 23, 0, 0, 0, time.UTC)
+	clock := func() time.Time {
+		now = now.Add(time.Second)
+		return now
+	}
+	tasks := []Task{{ID: "fetch", Run: func(context.Context, []Input, io.Writer) (Result, error) { return Result{}, nil }}}
+
+	run, err := Execute(context.Background(), tasks, Options{Now: clock})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	step := run.Steps[0]
+	if step.StartedAt != "2026-09-16T23:00:01Z" || step.FinishedAt != "2026-09-16T23:00:02Z" {
+		t.Fatalf("step = %+v", step)
 	}
 }

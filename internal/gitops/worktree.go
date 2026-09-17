@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Gabes-Tint/mega-agents/internal/megahome"
 )
 
 // Workspace is a prepared worktree: the resource an agent implements in. It
@@ -114,13 +116,9 @@ func commitOf(ctx context.Context, dir string, ref string) (string, error) {
 // defaultWorktreePath keeps worktrees outside the project folder, so they
 // never show up as untracked files in the project's own checkout.
 func defaultWorktreePath(repository string, branch string) (string, error) {
-	home := os.Getenv("MEGA_AGENTS_HOME")
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("cannot resolve a folder for the worktree; set its path: %w", err)
-		}
-		home = filepath.Join(userHome, ".mega-agents")
+	home, err := megahome.Dir()
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve a folder for the worktree; set its path: %w", err)
 	}
 	owner, name, _ := strings.Cut(repository, "/")
 	return filepath.Join(home, "worktrees", owner, name, strings.ReplaceAll(branch, "/", "-")), nil

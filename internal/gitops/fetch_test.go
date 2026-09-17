@@ -218,3 +218,27 @@ func TestCleanEnvironmentDropsRepositoryVariables(t *testing.T) {
 		t.Fatalf("cleaned = %v", cleaned)
 	}
 }
+
+func TestGitCommandsAreWrittenToTheContextLog(t *testing.T) {
+	clone, seed := githubClone(t, "https://github.com/acme/api.git")
+	runGit(t, seed, "commit", "--quiet", "--allow-empty", "-m", "second")
+	runGit(t, seed, "push", "--quiet", filepath.Join(filepath.Dir(seed), "remote.git"), "HEAD:refs/heads/main")
+	var log strings.Builder
+
+	if _, err := Fetch(WithLog(context.Background(), &log), clone, "acme/api"); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if !strings.Contains(log.String(), "$ git fetch origin\n") || !strings.Contains(log.String(), "main       -> origin/main") {
+		t.Fatalf("log = %q, want the fetch command and its output", log.String())
+	}
+}
+
+func TestAFailingGitCommandLogsItsExitStatus(t *testing.T) {
+	var log strings.Builder
+
+	_, _ = DetectGitHubRepository(WithLog(context.Background(), &log), t.TempDir())
+
+	if !strings.Contains(log.String(), "$ git rev-parse --is-inside-work-tree\n") || !strings.Contains(log.String(), "exit status 128") {
+		t.Fatalf("log = %q", log.String())
+	}
+}

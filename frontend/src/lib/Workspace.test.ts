@@ -1705,4 +1705,189 @@ describe("graph builder workspace", () => {
     expect(result).toHaveTextContent("Branch: feature/login");
     vi.unstubAllGlobals();
   });
+
+  // A fake backend answering by "METHOD path"; each route answers in turn
+  // from its list and repeats its last answer.
+  function fakeBackend(
+    routes: Record<string, Array<() => Response | Promise<Response>>>,
+  ) {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const key = `${init?.method ?? "GET"} ${input}`;
+      calls.push(key);
+      const answers = routes[key];
+      if (!answers) return new Response("not found", { status: 404 });
+      const answer = answers.length > 1 ? answers.shift()! : answers[0]!;
+      return answer();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return calls;
+  }
+
+  const step = (status: string, extra: Record<string, unknown> = {}) => ({
+    nodeId: "g1",
+    name: "GitHub 1",
+    action: "fetch",
+    status,
+    ...extra,
+  });
+
+  const record = (status: string, steps: unknown[]) => () =>
+    Response.json({ id: "run-1", workflow: "workflow", status, steps });
+
+  async function selectedGitHubId(): Promise<string> {
+    let id = "";
+    await fireEvent.click(screen.getByText("GitHub 1"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as {
+          nodes: Array<{ id: string; type: string }>;
+        };
+        id = body.nodes.find((node) => node.type === "github")?.id ?? "";
+        return new Response("stop", { status: 400 });
+      }),
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await waitFor(() => expect(id).not.toBe(""));
+    return id;
+  }
+
+  test("follows a started run until it finishes, updating the canvas", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    const id = await selectedGitHubId();
+    const github = screen.getByRole("button", { name: "GitHub 1" });
+    const calls = fakeBackend({
+      "POST /api/runs": [
+        () =>
+          Response.json(
+            {
+              id: "run-1",
+              status: "running",
+              steps: [{ ...step("pending"), nodeId: id }],
+            },
+            { status: 202 },
+          ),
+      ],
+      "GET /api/runs/run-1": [
+        record("running", [{ ...step("running"), nodeId: id }]),
+        record("succeeded", [
+          {
+            ...step("succeeded"),
+            nodeId: id,
+            details: { remote: "origin" },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await waitFor(() => expect(github).toHaveClass("status-running"));
+    expect(screen.getByRole("button", { name: "Running…" })).toBeDisabled();
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
+    expect(github).toHaveClass("status-succeeded");
+    expect(result).toHaveTextContent("Remote: origin");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Run flow" })).toBeEnabled(),
+    );
+    expect(calls.filter((call) => call === "GET /api/runs/run-1")).toHaveLength(
+      2,
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("reports a lost connection while following a run", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [record("running", [step("running")])],
+      "GET /api/runs/run-1": [() => Promise.reject(new Error("offline"))],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() =>
+      expect(result).toHaveTextContent("Lost track of run run-1"),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Run flow" })).toBeEnabled(),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("shows a block's log from its properties after a run", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    expect(screen.queryByRole("button", { name: "Show logs" })).toBeNull();
+    const id = await selectedGitHubId();
+    const calls = fakeBackend({
+      "POST /api/runs": [record("failed", [{ ...step("failed"), nodeId: id }])],
+      [`GET /api/runs/run-1/logs/${id}`]: [
+        () => new Response("$ git fetch origin\nfatal: no route\n"),
+      ],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Run result" }),
+      ).toHaveTextContent("Run failed"),
+    );
+
+    await fireEvent.click(screen.getByText("GitHub 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Show logs" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Logs: GitHub 1",
+    });
+    await waitFor(() => expect(dialog).toHaveTextContent("fatal: no route"));
+    expect(calls).toContain(`GET /api/runs/run-1/logs/${id}`);
+    vi.unstubAllGlobals();
+  });
+
+  test("shows a step's log from the run result", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [record("succeeded", [step("succeeded")])],
+      "GET /api/runs/run-1/logs/g1": [() => new Response("GitHub 1 started")],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Logs of GitHub 1" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Logs: GitHub 1",
+    });
+    await waitFor(() => expect(dialog).toHaveTextContent("GitHub 1 started"));
+    await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    vi.unstubAllGlobals();
+  });
+
+  test("explains a log that cannot be loaded", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [record("skipped", [step("skipped")])],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Logs of GitHub 1" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Logs: GitHub 1",
+    });
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent("No log recorded for this step"),
+    );
+    vi.unstubAllGlobals();
+  });
 });

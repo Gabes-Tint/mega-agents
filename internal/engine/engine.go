@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"strings"
+	"time"
 )
 
 type Status string
@@ -48,7 +50,9 @@ type Task struct {
 	Name  string
 	Kind  string
 	Needs []Need
-	Run   func(ctx context.Context, inputs []Input) (Result, error)
+	// Run does the work, writing what it does to log: the commands it runs
+	// and their output, for whoever inspects the step afterwards.
+	Run func(ctx context.Context, inputs []Input, log io.Writer) (Result, error)
 }
 
 type Step struct {
@@ -58,6 +62,9 @@ type Step struct {
 	Status  Status         `json:"status"`
 	Error   string         `json:"error,omitempty"`
 	Details map[string]any `json:"details,omitempty"`
+	// StartedAt and FinishedAt are RFC 3339 UTC times; empty until reached.
+	StartedAt  string `json:"startedAt,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
 }
 
 type Run struct {
@@ -68,11 +75,20 @@ type Run struct {
 // Observer receives a snapshot of the run each time a step changes status.
 type Observer func(Run)
 
+// Options customize one execution. Every field is optional.
+type Options struct {
+	Observe Observer
+	// Log returns the writer that keeps a task's log; nil discards logs.
+	Log func(taskID string) io.Writer
+	// Now is the clock steps are timed with; nil uses the system clock.
+	Now func() time.Time
+}
+
 // Execute validates the plan, then runs its tasks one at a time in dependency
 // order, keeping declaration order among tasks that are ready together. It
 // returns an error only for a plan that cannot run; task failures are
 // recorded on their steps.
-func Execute(ctx context.Context, tasks []Task, observe Observer) (Run, error) {
+func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 	order, err := schedule(tasks)
 	if err != nil {
 		return Run{}, err
@@ -85,31 +101,53 @@ func Execute(ctx context.Context, tasks []Task, observe Observer) (Run, error) {
 	}
 	outputs := make(map[string]map[string]any, len(tasks))
 	notify := func() {
-		if observe != nil {
-			observe(snapshot(run))
+		if options.Observe != nil {
+			options.Observe(snapshot(run))
 		}
+	}
+	now := options.Now
+	if now == nil {
+		now = time.Now
+	}
+	stamp := func() (time.Time, string) {
+		at := now().UTC()
+		return at, at.Format(time.RFC3339)
 	}
 	notify()
 	for _, i := range order {
 		task, step := tasks[i], &run.Steps[i]
+		log := io.Discard
+		if options.Log != nil {
+			if writer := options.Log(task.ID); writer != nil {
+				log = writer
+			}
+		}
+		label := labelOf(task)
 		inputs, reason := gather(task, run.Steps, index, outputs)
 		if reason == "" && ctx.Err() != nil {
 			reason = "the run was cancelled"
 		}
 		if reason != "" {
 			step.Status, step.Error = Skipped, reason
+			fmt.Fprintf(log, "%s skipped: %s\n", label, reason)
 			notify()
 			continue
 		}
-		step.Status = Running
+		started, startedAt := stamp()
+		step.Status, step.StartedAt = Running, startedAt
+		fmt.Fprintf(log, "%s started at %s\n", label, startedAt)
 		notify()
-		result, err := task.Run(ctx, inputs)
-		step.Details = result.Details
+		result, err := task.Run(ctx, inputs, log)
+		finished, finishedAt := stamp()
+		step.Details, step.FinishedAt = result.Details, finishedAt
+		elapsed := finished.Sub(started).Round(time.Millisecond)
 		if err != nil {
 			step.Status, step.Error = Failed, err.Error()
+			fmt.Fprintf(log, "%s failed in %s: %s\n", label, elapsed, err)
 		} else {
 			step.Status = Succeeded
 			outputs[task.ID] = result.Outputs
+			fmt.Fprintf(log, "%s succeeded in %s\n", label, elapsed)
 		}
 		notify()
 	}
@@ -148,6 +186,13 @@ func gather(task Task, steps []Step, index map[string]int, outputs map[string]ma
 		inputs = append(inputs, Input{TaskID: need.TaskID, Port: need.Port, Value: value})
 	}
 	return inputs, ""
+}
+
+// Validate reports why a plan cannot run: no tasks, duplicate ids, unknown
+// dependencies or a cycle. Execute performs the same check.
+func Validate(tasks []Task) error {
+	_, err := schedule(tasks)
+	return err
 }
 
 // schedule orders tasks so every need comes first, choosing the earliest

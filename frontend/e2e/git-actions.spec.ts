@@ -65,6 +65,37 @@ test.describe("Git actions inside a GitHub block", () => {
     expect(git(worktreePath, "branch", "--show-current")).toBe("feature/login");
   });
 
+  test("keeps the log of each action for the block's properties", async ({
+    page,
+  }) => {
+    const github = await projectWithGitHub(page, fixture.clone);
+    await page.getByLabel("Already authenticated (OAuth)").check();
+    await page.getByLabel("Starting point").check();
+    await addAction(page, github, "Fetch");
+    await addAction(page, github, "Create worktree");
+    await page.getByLabel("Branch").fill("feature/logs");
+    await page
+      .getByLabel("Worktree path")
+      .fill(join(fixture.root, "worktrees", "logs"));
+
+    await page.getByRole("button", { name: "Run flow" }).click();
+    await expect(
+      page.getByRole("region", { name: "Run result" }),
+    ).toContainText("Run succeeded", { timeout: 15_000 });
+
+    await selectBlock(page.getByRole("button", { name: "Fetch", exact: true }));
+    await page.getByRole("button", { name: "Show logs" }).click();
+    const fetchLog = page.getByRole("dialog", { name: "Logs: Fetch" });
+    await expect(fetchLog).toContainText("$ git fetch origin");
+    await expect(fetchLog).toContainText("Fetch succeeded in");
+    await fetchLog.getByRole("button", { name: "Close" }).click();
+
+    await page.getByRole("button", { name: "Logs of Create worktree" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Logs: Create worktree" }),
+    ).toContainText("$ git worktree add");
+  });
+
   test("marks a failed action and skips the actions after it", async ({
     page,
   }) => {

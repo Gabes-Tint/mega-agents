@@ -31,6 +31,7 @@ export default tseslint.config(
         HTMLElement: "readonly",
         HTMLInputElement: "readonly",
         PointerEvent: "readonly",
+        setTimeout: "readonly",
         URL: "readonly",
         Window: "readonly",
       },
