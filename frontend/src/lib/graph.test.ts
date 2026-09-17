@@ -14,6 +14,7 @@ import {
   rejectedDropHint,
   shortNodeId,
   GIT_ACTIONS,
+  BLOCK_HUES,
   workflowSlug,
   type NodeType,
 } from "./graph.svelte.js";
@@ -1359,5 +1360,32 @@ describe("deleting blocks", () => {
     graph.removeNode("missing");
 
     expect(graph.nodes).toHaveLength(1);
+  });
+});
+
+describe("block colors", () => {
+  const TYPES: NodeType[] = [
+    "agent",
+    "project",
+    "github",
+    "gitlab",
+    "githubapp",
+    "action",
+    "jsonschema",
+    "router",
+    "command",
+  ];
+
+  test("every block type has its own hue, far from the others", () => {
+    for (const type of TYPES) {
+      for (const other of TYPES) {
+        if (type === other) continue;
+        const gap = Math.abs(BLOCK_HUES[type] - BLOCK_HUES[other]) % 360;
+        expect(
+          Math.min(gap, 360 - gap),
+          `${type} vs ${other}`,
+        ).toBeGreaterThanOrEqual(25);
+      }
+    }
   });
 });

@@ -2797,3 +2797,22 @@ describe("deleting blocks", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("block colors", () => {
+  test("a block and its palette entry carry the hue of their type", async () => {
+    render(Workspace);
+    await dropComponent("Project");
+
+    const block = screen.getByRole("button", { name: "Project 1" });
+    const entry = screen.getByRole("button", { name: "Project" });
+    const agentEntry = screen.getByRole("button", { name: "Agent" });
+
+    expect(block.style.getPropertyValue("--block-hue")).not.toBe("");
+    expect(entry.style.getPropertyValue("--block-hue")).toBe(
+      block.style.getPropertyValue("--block-hue"),
+    );
+    expect(agentEntry.style.getPropertyValue("--block-hue")).not.toBe(
+      block.style.getPropertyValue("--block-hue"),
+    );
+  });
+});

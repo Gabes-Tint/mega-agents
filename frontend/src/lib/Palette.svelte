@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    BLOCK_HUES,
     PALETTE,
     type GraphStore,
     type NodeType,
@@ -40,6 +41,7 @@
           <button
             type="button"
             class="block-{item.type}"
+            style:--block-hue={BLOCK_HUES[item.type]}
             draggable="true"
             ondragstart={(event) => startDrag(event, item)}
           >
@@ -112,7 +114,7 @@
     width: 0.7rem;
     height: 0.7rem;
     border-radius: 3px;
-    background: var(--block-accent, var(--text-faint));
+    background: var(--block-accent);
   }
 
   .tip {

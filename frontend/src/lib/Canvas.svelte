@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    BLOCK_HUES,
     canExistTopLevel,
     canHostChild,
     GraphStore,
@@ -405,6 +406,7 @@
       class:drop-no={previewing && previewTargetId === node.id && !previewValid}
       aria-pressed={node.id === graph.selectedId}
       draggable="true"
+      style:--block-hue={BLOCK_HUES[node.type]}
       style:left="{graph.absolutePosition(node).x}px"
       style:top="{graph.absolutePosition(node).y}px"
       style:width="{node.w}px"
@@ -522,9 +524,9 @@
     justify-content: flex-start;
     gap: 0;
     padding: 0;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--block-border);
     border-radius: var(--radius-lg);
-    background: var(--surface);
+    background: var(--block-body);
     color: var(--text);
     font: inherit;
     text-align: left;
@@ -534,8 +536,8 @@
   }
 
   .node:hover:not(:disabled) {
-    background: var(--surface);
-    border-color: var(--edge);
+    background: var(--block-body);
+    border-color: var(--block-accent);
   }
 
   .node-title {
@@ -544,7 +546,7 @@
     gap: 0.4rem;
     padding: 0.4rem 0.65rem;
     font-weight: 600;
-    background: var(--block-soft, var(--surface-sunken));
+    background: var(--block-soft);
     white-space: nowrap;
   }
 
@@ -554,13 +556,13 @@
     width: 0.55rem;
     height: 0.55rem;
     border-radius: 3px;
-    background: var(--block-accent, var(--text-faint));
+    background: var(--block-accent);
   }
 
   .node-separator {
     display: block;
     height: 1px;
-    background: var(--border);
+    background: var(--block-border);
   }
 
   .start-flag {

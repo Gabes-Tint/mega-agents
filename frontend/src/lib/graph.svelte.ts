@@ -147,6 +147,21 @@ export const PALETTE: readonly PaletteItem[] = [
   { type: "command", label: "Command" },
 ];
 
+// Hue (OKLCH degrees) that colors each block type on the canvas and in the
+// palette, spread around the wheel so neighbours never look alike. The
+// stylesheet derives each theme's tints from it.
+export const BLOCK_HUES: Record<NodeType, number> = {
+  agent: 295,
+  project: 245,
+  action: 205,
+  jsonschema: 165,
+  command: 125,
+  router: 80,
+  gitlab: 45,
+  githubapp: 10,
+  github: 335,
+};
+
 // Single source of truth for where a block may go, agreed with the product
 // owner. Keys are the block being dropped; the arrays are every target that
 // accepts it, including the canvas root as a pseudo target. Anything absent
