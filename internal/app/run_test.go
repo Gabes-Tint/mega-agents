@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Gabes-Tint/mega-agents/internal/engine"
 	"github.com/Gabes-Tint/mega-agents/internal/gitops"
 )
 
@@ -73,12 +74,12 @@ func postRun(t *testing.T, body string) *httptest.ResponseRecorder {
 	return response
 }
 
-func decodeRun(t *testing.T, response *httptest.ResponseRecorder) RunResponse {
+func decodeRun(t *testing.T, response *httptest.ResponseRecorder) engine.Run {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
 	}
-	var run RunResponse
+	var run engine.Run
 	if err := json.NewDecoder(response.Body).Decode(&run); err != nil {
 		t.Fatalf("decode run: %v", err)
 	}
@@ -94,8 +95,8 @@ func TestRunFetchesTheStartingGitHubBlockInItsProjectPath(t *testing.T) {
 		t.Fatalf("run = %+v, want one succeeded step", run)
 	}
 	step := run.Steps[0]
-	if step.NodeID != "g1" || step.Name != "GitHub 1" || step.Action != "fetch" ||
-		step.Status != "succeeded" || step.Remote != "origin" || step.Error != "" {
+	if step.TaskID != "g1" || step.Name != "GitHub 1" || step.Kind != "fetch" ||
+		step.Status != "succeeded" || step.Details["remote"] != "origin" || step.Error != "" {
 		t.Fatalf("step = %+v", step)
 	}
 	if got := runGit(t, clone, "rev-parse", "refs/remotes/origin/main"); got != pushed {
@@ -113,12 +114,12 @@ func TestRunReportsAFailedStepWithTheReason(t *testing.T) {
 		"not authenticated": {
 			path:   notAClone,
 			github: strings.Replace(startedGitHub, `"authenticated": true`, `"authenticated": false`, 1),
-			want:   `Check "Already authenticated"`,
+			want:   `check "Already authenticated"`,
 		},
 		"missing project path": {
 			path:   "",
 			github: startedGitHub,
-			want:   "Set the path on the project",
+			want:   "set the path on the project",
 		},
 		"relative project path": {
 			path:   "api",
@@ -151,7 +152,7 @@ func TestRunLoadsAnEmptyRepositoryFromTheProject(t *testing.T) {
 
 	run := decodeRun(t, postRun(t, runBody(clone, github)))
 
-	if run.Status != "succeeded" || len(run.Steps) != 1 || run.Steps[0].Repository != "acme/api" {
+	if run.Status != "succeeded" || len(run.Steps) != 1 || run.Steps[0].Details["repository"] != "acme/api" {
 		t.Fatalf("run = %+v, want one succeeded step for acme/api", run)
 	}
 	if got := runGit(t, clone, "rev-parse", "refs/remotes/origin/main"); got != pushed {
@@ -261,5 +262,137 @@ func TestRunRequiresAJSONContentType(t *testing.T) {
 	}
 	if got := runGit(t, clone, "rev-parse", "refs/remotes/origin/main"); got != before || got == pushed {
 		t.Fatalf("origin/main moved to %s; a rejected run must not fetch", got)
+	}
+}
+
+// actionFlow is a project holding a started GitHub block whose own actions
+// are the given nodes and sequence edges.
+func actionFlow(projectPath string, actions string, edges string) string {
+	return fmt.Sprintf(`{
+		"nodes": [
+			{"id": "p1", "type": "project", "name": "api", "path": %q},
+			{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true},
+			%s
+		],
+		"edges": [%s]
+	}`, projectPath, actions, edges)
+}
+
+func TestRunExecutesAGitHubBlocksActionsInSequence(t *testing.T) {
+	clone, pushed := projectClone(t)
+	worktree := filepath.Join(t.TempDir(), "login")
+	body := actionFlow(clone, fmt.Sprintf(`
+		{"id": "a3", "type": "action", "action": "rebase", "name": "Rebase", "parentId": "g1"},
+		{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},
+		{"id": "a2", "type": "action", "action": "worktree", "name": "Create worktree", "parentId": "g1", "branch": "feature/login", "worktreePath": %q}`,
+		worktree), `{"id": "e1", "from": "a1", "to": "a2"}, {"id": "e2", "from": "a2", "to": "a3"}`)
+
+	run := decodeRun(t, postRun(t, body))
+
+	if run.Status != engine.Succeeded {
+		t.Fatalf("run = %+v", run)
+	}
+	var kinds []string
+	for _, step := range run.Steps {
+		if step.Status == engine.Succeeded {
+			kinds = append(kinds, step.Kind)
+		}
+	}
+	if strings.Join(kinds, ",") != "rebase,fetch,worktree" || len(run.Steps) != 3 {
+		t.Fatalf("steps = %+v, want all three actions to succeed", run.Steps)
+	}
+	created := run.Steps[2].Details
+	if created["path"] != worktree || created["branch"] != "feature/login" || created["baseRevision"] != pushed {
+		t.Fatalf("worktree details = %+v, want the branch cut from the fetched %s", created, pushed)
+	}
+	// The worktree starts from what fetch brought in, which proves the fetch
+	// ran before it even though the rebase was declared first.
+	if got := runGit(t, worktree, "rev-parse", "HEAD"); got != pushed {
+		t.Fatalf("worktree HEAD = %s, want %s", got, pushed)
+	}
+	if run.Steps[0].Details["path"] != worktree {
+		t.Fatalf("rebase details = %+v, want the workspace it rebased", run.Steps[0].Details)
+	}
+}
+
+func TestRunSkipsTheActionsAfterAFailedOne(t *testing.T) {
+	clone, _ := projectClone(t)
+	body := actionFlow(clone, `
+		{"id": "a1", "type": "action", "action": "worktree", "name": "Create worktree", "parentId": "g1", "start": true},
+		{"id": "a2", "type": "action", "action": "rebase", "name": "Rebase", "parentId": "g1"}`,
+		`{"id": "e1", "from": "a1", "to": "a2"}`)
+
+	run := decodeRun(t, postRun(t, body))
+
+	if run.Status != engine.Failed || run.Steps[0].Status != engine.Failed || run.Steps[1].Status != engine.Skipped {
+		t.Fatalf("run = %+v, want the worktree to fail and the rebase to be skipped", run)
+	}
+	if !strings.Contains(run.Steps[0].Error, "set the branch") {
+		t.Fatalf("error = %q", run.Steps[0].Error)
+	}
+}
+
+func TestRunOnlyExecutesActionsReachableFromTheStartingAction(t *testing.T) {
+	clone, _ := projectClone(t)
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	body := actionFlow(clone, `
+		{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},
+		{"id": "a2", "type": "action", "action": "worktree", "name": "Loose worktree", "parentId": "g1", "branch": "loose"}`, ``)
+
+	run := decodeRun(t, postRun(t, body))
+
+	if len(run.Steps) != 1 || run.Steps[0].Kind != "fetch" {
+		t.Fatalf("steps = %+v, want only the connected fetch", run.Steps)
+	}
+}
+
+func TestRunRejectsActionFlowsThatCannotRun(t *testing.T) {
+	cases := map[string]struct {
+		actions string
+		edges   string
+		want    string
+	}{
+		"no starting action": {
+			actions: `{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1"}`,
+			want:    "flag the first action of GitHub 1 as its starting point",
+		},
+		"rebase without a workspace": {
+			actions: `{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},
+				{"id": "a2", "type": "action", "action": "rebase", "name": "Rebase", "parentId": "g1"}`,
+			edges: `{"id": "e1", "from": "a1", "to": "a2"}`,
+			want:  "Rebase needs a workspace; connect a Create worktree action before it",
+		},
+		"unknown action": {
+			actions: `{"id": "a1", "type": "action", "action": "push", "name": "Push", "parentId": "g1", "start": true}`,
+			want:    `unknown Git action "push"`,
+		},
+		"cycle": {
+			actions: `{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "g1", "start": true},
+				{"id": "a2", "type": "action", "action": "fetch", "name": "Again", "parentId": "g1"}`,
+			edges: `{"id": "e1", "from": "a1", "to": "a2"}, {"id": "e2", "from": "a2", "to": "a1"}`,
+			want:  "cycle",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			response := postRun(t, actionFlow(t.TempDir(), testCase.actions, testCase.edges))
+
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), testCase.want) {
+				t.Fatalf("response = %d %q, want 400 containing %q", response.Code, response.Body.String(), testCase.want)
+			}
+		})
+	}
+}
+
+func TestActionsOnlyLiveInsideAGitHubBlock(t *testing.T) {
+	body := `{"nodes": [
+		{"id": "p1", "type": "project", "name": "api"},
+		{"id": "a1", "type": "action", "action": "fetch", "name": "Fetch", "parentId": "p1", "start": true}
+	]}`
+
+	response := postRun(t, body)
+
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "action cannot be placed inside project") {
+		t.Fatalf("response = %d %q", response.Code, response.Body.String())
 	}
 }

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import { GraphStore, isForgeType, shortNodeId } from "./graph.svelte.js";
+  import {
+    GIT_ACTIONS,
+    GraphStore,
+    isForgeType,
+    shortNodeId,
+    type ActionField,
+    type GitAction,
+  } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -12,6 +19,27 @@
 
   let browsing = $state<Browsing | null>(null);
   let dialogOpen = $state(false);
+  let newAction = $state<GitAction>("fetch");
+
+  // Configuration each Git action accepts, in the order the panel shows it.
+  const ACTION_FIELDS: Record<
+    GitAction,
+    { field: ActionField; label: string; placeholder: string }[]
+  > = {
+    fetch: [],
+    worktree: [
+      { field: "branch", label: "Branch", placeholder: "feature/name" },
+      { field: "base", label: "Base", placeholder: "remote default branch" },
+      {
+        field: "worktreePath",
+        label: "Worktree path",
+        placeholder: "~/.mega-agents/worktrees/…",
+      },
+    ],
+    rebase: [
+      { field: "onto", label: "Onto", placeholder: "the workspace base" },
+    ],
+  };
   let loadSequence = 0;
 
   async function loadDirectory(path: string): Promise<void> {
@@ -149,6 +177,55 @@
           Already authenticated (OAuth)
         </label>
       {/if}
+      {#if node.type === "github"}
+        <h3 id="actions-heading">Actions</h3>
+        <ol aria-labelledby="actions-heading" class="action-list">
+          {#each graph.actionSequence(node.id) as action, index (action.id)}
+            <li>
+              <button type="button" onclick={() => graph.select(action.id)}>
+                {index + 1}. {action.name}
+              </button>
+            </li>
+          {/each}
+        </ol>
+        <label>
+          New action
+          <select bind:value={newAction}>
+            {#each GIT_ACTIONS as option (option.action)}
+              <option value={option.action}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        <button
+          type="button"
+          onclick={() => graph.addAction(node.id, newAction)}
+        >
+          Add action
+        </button>
+      {/if}
+      {#if node.type === "action" && node.action}
+        <p>
+          Git action: {GIT_ACTIONS.find(
+            (option) => option.action === node.action,
+          )?.label}
+        </p>
+        {#each ACTION_FIELDS[node.action] as input (input.field)}
+          <label>
+            {input.label}
+            <input
+              type="text"
+              placeholder={input.placeholder}
+              value={node[input.field] ?? ""}
+              oninput={(event) =>
+                graph.setActionField(
+                  node.id,
+                  input.field,
+                  event.currentTarget.value,
+                )}
+            />
+          </label>
+        {/each}
+      {/if}
       {#if node.type === "githubapp"}
         <label>
           App ID
@@ -249,7 +326,25 @@
     color: #5b7a71;
   }
 
-  input {
+  h3 {
+    font-size: 0.8rem;
+    color: #5b7a71;
+    margin: 0.75rem 0 0.25rem;
+  }
+
+  .action-list {
+    margin: 0 0 0.5rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .action-list button {
+    margin-bottom: 0.25rem;
+    text-align: left;
+  }
+
+  input,
+  select {
     padding: 0.4rem 0.5rem;
     border: 1px solid #b8ccc4;
     border-radius: 0.375rem;

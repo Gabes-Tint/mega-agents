@@ -1,33 +1,5 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
-
-const canvas = (page: Page) =>
-  page.getByRole("region", { name: "Graph canvas" });
-
-// Drives a real HTML5 drag through the browser input pipeline (mousedown,
-// dragstart, dragover, drop), unlike synthetic event dispatch.
-async function mouseDrag(
-  page: Page,
-  source: Locator,
-  target: Locator,
-  steps = 12,
-) {
-  const from = await source.boundingBox();
-  const to = await target.boundingBox();
-  const sx = from.x + from.width / 2;
-  const sy = from.y + from.height / 2;
-  const dx = to.x + to.width / 2;
-  const dy = to.y + to.height / 2;
-  await page.mouse.move(sx, sy);
-  await page.mouse.down();
-  for (let step = 1; step <= steps; step++) {
-    await page.mouse.move(
-      sx + ((dx - sx) * step) / steps,
-      sy + ((dy - sy) * step) / steps,
-    );
-    await page.waitForTimeout(25);
-  }
-  await page.mouse.up();
-}
+import { expect, test } from "@playwright/test";
+import { canvas, mouseDrag } from "./fixtures";
 
 test.describe("graph builder workspace", () => {
   test.beforeEach(async ({ page }) => {

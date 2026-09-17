@@ -36,6 +36,12 @@ type WorkflowNodeInput struct {
 	Authenticated  bool    `json:"authenticated,omitempty"`
 	AppID          string  `json:"appId,omitempty"`
 	PrivateKeyPath string  `json:"privateKeyPath,omitempty"`
+	// Git action blocks nested inside a GitHub block.
+	Action       string `json:"action,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Base         string `json:"base,omitempty"`
+	WorktreePath string `json:"worktreePath,omitempty"`
+	Onto         string `json:"onto,omitempty"`
 }
 
 type WorkflowRequest struct {
@@ -50,6 +56,7 @@ var knownComponentTypes = map[string]bool{
 	"github":    true,
 	"gitlab":    true,
 	"githubapp": true,
+	"action":    true,
 }
 
 // containmentMatrix mirrors the frontend CONTAINMENT_MATRIX: for each
@@ -62,6 +69,7 @@ var containmentMatrix = map[string]map[string]bool{
 	"github":    {"project": true},
 	"gitlab":    {"project": true},
 	"githubapp": {"github": true},
+	"action":    {"github": true},
 }
 
 func containmentAllows(target string, childType string) bool {
@@ -152,7 +160,13 @@ func (emitter *workflowEmitter) emitNode(
 	indent string,
 ) {
 	builder.WriteString(fmt.Sprintf("%s%s:\n", indent, identifier))
-	builder.WriteString(fmt.Sprintf("%s  uses: %s@v1\n", indent, node.Type))
+	uses := node.Type
+	if node.Type == "action" {
+		// Git actions are local Git capabilities provided through their
+		// GitHub block, so they export under the git block family.
+		uses = "git/" + node.Action
+	}
+	builder.WriteString(fmt.Sprintf("%s  uses: %s@v1\n", indent, uses))
 	var needs []string
 	for _, edge := range emitter.request.Edges {
 		if edge.To == node.ID {
@@ -176,6 +190,13 @@ func (emitter *workflowEmitter) emitNode(
 	}
 	if node.Path != "" {
 		with = append(with, fmt.Sprintf("%s    path: %s", indent, yamlString(node.Path)))
+	}
+	for _, field := range []struct{ key, value string }{
+		{"branch", node.Branch}, {"base", node.Base}, {"worktreePath", node.WorktreePath}, {"onto", node.Onto},
+	} {
+		if field.value != "" {
+			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))
+		}
 	}
 	if node.AppID != "" {
 		with = append(with, fmt.Sprintf("%s    appId: %s", indent, yamlString(node.AppID)))

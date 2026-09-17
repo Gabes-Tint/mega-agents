@@ -8,17 +8,24 @@
     nodeId: string;
     name: string;
     action: string;
-    status: "succeeded" | "failed";
-    repository?: string;
-    remote?: string;
-    output?: string;
+    status: string;
     error?: string;
+    details?: Record<string, unknown>;
   }
 
   interface RunResult {
-    status: "succeeded" | "failed";
+    status: string;
     steps: RunStep[];
   }
+
+  // Step details shown as labelled lines, in this order.
+  const DETAIL_LABELS: [string, string][] = [
+    ["repository", "Repository"],
+    ["remote", "Remote"],
+    ["path", "Path"],
+    ["branch", "Branch"],
+    ["base", "Base"],
+  ];
 
   const graph = new GraphStore();
   let yamlError = $state("");
@@ -64,6 +71,7 @@
     running = true;
     runResult = null;
     runError = "";
+    graph.showRun([]);
     try {
       const response = await fetch("/api/runs", {
         method: "POST",
@@ -78,6 +86,7 @@
         return;
       }
       runResult = (await response.json()) as RunResult;
+      graph.showRun(runResult.steps);
     } catch {
       runError = "Cannot reach the backend";
     } finally {
@@ -118,16 +127,15 @@
                 {step.name}: {step.action}
                 {step.status}
               </strong>
-              {#if step.repository}
-                <span>Repository: {step.repository}</span>
-              {/if}
-              {#if step.remote}
-                <span>Remote: {step.remote}</span>
-              {/if}
+              {#each DETAIL_LABELS as [key, label] (key)}
+                {#if step.details?.[key]}
+                  <span>{label}: {step.details[key]}</span>
+                {/if}
+              {/each}
               {#if step.error}
                 <pre class="failed">{step.error}</pre>
-              {:else if step.output}
-                <pre>{step.output}</pre>
+              {:else if step.details?.output}
+                <pre>{step.details.output}</pre>
               {/if}
             </li>
           {/each}

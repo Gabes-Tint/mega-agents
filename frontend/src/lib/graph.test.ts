@@ -13,6 +13,7 @@ import {
   isForgeType,
   rejectedDropHint,
   shortNodeId,
+  GIT_ACTIONS,
   type NodeType,
 } from "./graph.svelte.js";
 
@@ -824,6 +825,7 @@ describe("canHostChild", () => {
     ["github", { root: false, project: true, github: false, agent: false }],
     ["gitlab", { root: false, project: true, github: false, agent: false }],
     ["githubapp", { root: false, project: false, github: true, agent: false }],
+    ["action", { root: false, project: false, github: true, agent: false }],
   ] as const;
 
   for (const [childType, targets] of matrix) {
@@ -872,5 +874,175 @@ describe("root-level and hint rules", () => {
     expect(rejectedDropHint("githubapp", "project")).toBe(
       "A GitHub App cannot be placed inside a project box.",
     );
+  });
+});
+
+describe("Git actions inside a GitHub block", () => {
+  function githubInProject(): { graph: GraphStore; githubId: string } {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    graph.resizeNode(project.id, 600, 500);
+    const github = graph.addNode("github", 20, 20, project.id);
+    return { graph, githubId: github.id };
+  }
+
+  test("offers fetch, create worktree, and rebase", () => {
+    expect(GIT_ACTIONS).toEqual([
+      { action: "fetch", label: "Fetch" },
+      { action: "worktree", label: "Create worktree" },
+      { action: "rebase", label: "Rebase" },
+    ]);
+  });
+
+  test("the first action nests inside the GitHub block as its starting point", () => {
+    const { graph, githubId } = githubInProject();
+
+    const action = graph.addAction(githubId, "fetch");
+
+    expect(action).toMatchObject({
+      type: "action",
+      action: "fetch",
+      name: "Fetch",
+      parentId: githubId,
+      start: true,
+    });
+    expect(graph.selectedId).toBe(action?.id);
+  });
+
+  test("each later action follows the previous one with an arrow", () => {
+    const { graph, githubId } = githubInProject();
+
+    const fetch = graph.addAction(githubId, "fetch");
+    const worktree = graph.addAction(githubId, "worktree");
+    const rebase = graph.addAction(githubId, "rebase");
+
+    expect(worktree?.start).toBeFalsy();
+    expect(graph.edges.map((edge) => [edge.from, edge.to])).toEqual([
+      [fetch?.id, worktree?.id],
+      [worktree?.id, rebase?.id],
+    ]);
+    expect(worktree!.y).toBeGreaterThan(fetch!.y + fetch!.h);
+    expect(rebase!.y).toBeGreaterThan(worktree!.y + worktree!.h);
+  });
+
+  test("the GitHub block grows to show its whole sequence", () => {
+    const { graph, githubId } = githubInProject();
+    const github = graph.nodes.find((node) => node.id === githubId)!;
+
+    graph.addAction(githubId, "fetch");
+    const last = graph.addAction(githubId, "worktree")!;
+
+    expect(github.h).toBeGreaterThanOrEqual(last.y + last.h);
+    expect(github.w).toBeGreaterThanOrEqual(last.x + last.w);
+  });
+
+  test("the containing project grows along with its GitHub block", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const github = graph.addNode("github", 20, 20, project.id);
+
+    graph.addAction(github.id, "fetch");
+    graph.addAction(github.id, "worktree");
+
+    expect(project.h).toBeGreaterThanOrEqual(github.y + github.h);
+    expect(project.w).toBeGreaterThanOrEqual(github.x + github.w);
+  });
+
+  test("only a GitHub block holds actions", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+
+    expect(graph.addAction(project.id, "fetch")).toBeUndefined();
+    expect(graph.addAction("missing", "fetch")).toBeUndefined();
+    expect(graph.nodes).toHaveLength(1);
+  });
+
+  test("lists a block's actions in run order, loose ones last", () => {
+    const { graph, githubId } = githubInProject();
+    const fetch = graph.addAction(githubId, "fetch")!;
+    const worktree = graph.addAction(githubId, "worktree")!;
+    const loose = graph.addNode("action", 300, 300, githubId);
+    graph.edges.reverse();
+
+    expect(graph.actionSequence(githubId).map((node) => node.id)).toEqual([
+      fetch.id,
+      worktree.id,
+      loose.id,
+    ]);
+  });
+
+  test("an action's output may leave its GitHub block toward a block beside it", () => {
+    const { graph, githubId } = githubInProject();
+    const github = graph.nodes.find((node) => node.id === githubId)!;
+    const worktree = graph.addAction(githubId, "worktree")!;
+    const agent = graph.addNode("agent", 300, 20, github.parentId);
+
+    expect(graph.connect(worktree.id, agent.id)).toBe(true);
+    expect(graph.connect(agent.id, worktree.id)).toBe(false);
+  });
+
+  test("an action's output cannot reach into another project", () => {
+    const { graph, githubId } = githubInProject();
+    const worktree = graph.addAction(githubId, "worktree")!;
+    const other = graph.addNode("project", 800, 0);
+    const agent = graph.addNode("agent", 10, 10, other.id);
+
+    expect(graph.connect(worktree.id, agent.id)).toBe(false);
+  });
+
+  test("updates an action's configuration", () => {
+    const { graph, githubId } = githubInProject();
+    const worktree = graph.addAction(githubId, "worktree")!;
+
+    graph.setActionField(worktree.id, "branch", "feature/login");
+    graph.setActionField(worktree.id, "base", "origin/main");
+    graph.setActionField(worktree.id, "worktreePath", "/tmp/login");
+    graph.setActionField(worktree.id, "onto", "origin/release");
+    graph.setActionField("missing", "branch", "ignored");
+
+    expect(worktree).toMatchObject({
+      branch: "feature/login",
+      base: "origin/main",
+      worktreePath: "/tmp/login",
+      onto: "origin/release",
+    });
+  });
+});
+
+describe("run status on the canvas", () => {
+  test("shows each step's status on its block", () => {
+    const graph = new GraphStore();
+
+    graph.showRun([
+      { nodeId: "a", status: "succeeded" },
+      { nodeId: "b", status: "failed" },
+    ]);
+
+    expect(graph.statusOf("a")).toBe("succeeded");
+    expect(graph.statusOf("b")).toBe("failed");
+    expect(graph.statusOf("c")).toBeUndefined();
+  });
+
+  test("a GitHub block rolls up the status of its actions", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const github = graph.addNode("github", 10, 10, project.id);
+    const fetch = graph.addAction(github.id, "fetch")!;
+    const worktree = graph.addAction(github.id, "worktree")!;
+    const rollUp = (statuses: string[]) => {
+      graph.showRun([
+        { nodeId: fetch.id, status: statuses[0]! },
+        { nodeId: worktree.id, status: statuses[1]! },
+      ]);
+      return graph.statusOf(github.id);
+    };
+
+    expect(rollUp(["succeeded", "succeeded"])).toBe("succeeded");
+    expect(rollUp(["succeeded", "running"])).toBe("running");
+    expect(rollUp(["failed", "skipped"])).toBe("failed");
+    expect(rollUp(["succeeded", "pending"])).toBe("running");
+    expect(rollUp(["pending", "pending"])).toBe("pending");
+    graph.showRun([]);
+    expect(graph.statusOf(github.id)).toBeUndefined();
   });
 });

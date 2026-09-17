@@ -412,3 +412,33 @@ func TestWorkflowYAMLExportsTheAuthenticatedForgeFlag(t *testing.T) {
 		t.Errorf("expected only the authenticated block to export the flag, got:\n%s", body)
 	}
 }
+
+func TestWorkflowYAMLExportsGitActionsAsVersionedGitBlocks(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	response := postWorkflow(t, handler, `{
+		"nodes": [
+			{"id": "n1", "type": "project", "name": "api", "x": 0, "y": 0, "w": 400, "h": 300},
+			{"id": "n2", "type": "github", "name": "GitHub 1", "x": 20, "y": 10, "w": 200, "h": 240, "parentId": "n1"},
+			{"id": "n3", "type": "action", "action": "worktree", "name": "Create worktree", "x": 12, "y": 40, "w": 160, "h": 64, "parentId": "n2", "start": true, "branch": "feature/login", "base": "origin/main", "worktreePath": "/tmp/login"},
+			{"id": "n4", "type": "action", "action": "rebase", "name": "Rebase", "x": 12, "y": 128, "w": 160, "h": 64, "parentId": "n2", "onto": "origin/release"}
+		],
+		"edges": [{"id": "e1", "from": "n3", "to": "n4"}]
+	}`)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	expectations := []string{
+		"          create-worktree:\n            uses: git/worktree@v1\n            start: true\n            with:\n" +
+			"              branch: \"feature/login\"\n              base: \"origin/main\"\n              worktreePath: \"/tmp/login\"\n",
+		"          rebase:\n            uses: git/rebase@v1\n            needs:\n              - create-worktree\n            with:\n" +
+			"              onto: \"origin/release\"\n",
+	}
+	for _, expected := range expectations {
+		if !strings.Contains(body, expected) {
+			t.Errorf("expected YAML to contain:\n%s\ngot:\n%s", expected, body)
+		}
+	}
+}

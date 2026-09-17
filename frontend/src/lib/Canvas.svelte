@@ -391,7 +391,7 @@
   {#each graph.nodes as node (node.id)}
     <button
       type="button"
-      class="node"
+      class="node status-{graph.statusOf(node.id) ?? 'idle'}"
       class:selected={node.id === graph.selectedId}
       class:drop-ok={previewing && previewTargetId === node.id && previewValid}
       class:drop-no={previewing && previewTargetId === node.id && !previewValid}
@@ -552,6 +552,24 @@
 
   .canvas.preview-invalid {
     cursor: not-allowed;
+  }
+
+  .node.status-running {
+    border-color: #c28a1d;
+  }
+
+  .node.status-succeeded {
+    border-color: #3f8f5f;
+    background: #f3faf6;
+  }
+
+  .node.status-failed {
+    border-color: #a03030;
+    background: #fdf6f6;
+  }
+
+  .node.status-skipped {
+    opacity: 0.6;
   }
 
   .node.drop-ok {

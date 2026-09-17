@@ -1,4 +1,22 @@
-export type NodeType = "agent" | "project" | "github" | "gitlab" | "githubapp";
+export type NodeType =
+  "agent" | "project" | "github" | "gitlab" | "githubapp" | "action";
+
+export type GitAction = "fetch" | "worktree" | "rebase";
+
+export type ActionField = "branch" | "base" | "worktreePath" | "onto";
+
+// Git actions a GitHub block runs as its own internal sequence. They are
+// added from the block's properties rather than dragged from the palette.
+export const GIT_ACTIONS: readonly { action: GitAction; label: string }[] = [
+  { action: "fetch", label: "Fetch" },
+  { action: "worktree", label: "Create worktree" },
+  { action: "rebase", label: "Rebase" },
+];
+
+export interface RunStepStatus {
+  nodeId: string;
+  status: string;
+}
 
 // The canvas root as a pseudo target so the containment matrix covers
 // top-level drops in the same table as nested drops.
@@ -33,12 +51,23 @@ export interface GraphNode {
   authenticated?: boolean;
   appId?: string;
   privateKeyPath?: string;
+  action?: GitAction;
+  branch?: string;
+  base?: string;
+  worktreePath?: string;
+  onto?: string;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
 export const DEFAULT_NODE_HEIGHT = 64;
 export const MIN_NODE_WIDTH = 120;
 export const MIN_NODE_HEIGHT = 48;
+
+// Layout of a GitHub block's action sequence: below the block header, one
+// action under the other with room for the arrow between them.
+const ACTION_INSET = 12;
+const ACTION_TOP = 40;
+const ACTION_GAP = 24;
 
 export const PALETTE: readonly PaletteItem[] = [
   { type: "agent", label: "Agent" },
@@ -58,12 +87,13 @@ export const CONTAINMENT_MATRIX: Record<NodeType, readonly DropTarget[]> = {
   github: ["project"],
   gitlab: ["project"],
   githubapp: ["github"],
+  action: ["github"],
 };
 
 // Boxes that can host children: every target that appears as a parent in
 // the containment matrix.
 export const CONTAINER_TYPES: readonly NodeType[] = (
-  ["agent", "project", "github", "gitlab", "githubapp"] as NodeType[]
+  ["agent", "project", "github", "gitlab", "githubapp", "action"] as NodeType[]
 ).filter((type) =>
   Object.values(CONTAINMENT_MATRIX).some((targets) => targets.includes(type)),
 );
@@ -111,6 +141,7 @@ const TARGET_LABELS: Record<NodeType, string> = {
   github: "GitHub",
   gitlab: "GitLab",
   githubapp: "GitHub App",
+  action: "Git action",
 };
 
 // Human-readable list of the targets a block may be dropped into, used to
@@ -167,6 +198,7 @@ export class GraphStore {
   // is protected while a drag is in flight, so the type travels through the
   // store to power live dragover validation on the canvas.
   draggingType = $state<NodeType | null>(null);
+  runStatuses = $state<Record<string, string>>({});
 
   get selected(): GraphNode | undefined {
     return this.nodes.find((node) => node.id === this.selectedId);
@@ -211,7 +243,9 @@ export class GraphStore {
     };
     this.nodes.push(node);
     this.selectedId = node.id;
-    return node;
+    // The store holds a reactive proxy of the node; hand that back so later
+    // changes through the store are visible to the caller.
+    return this.nodes.at(-1) ?? node;
   }
 
   select(id: string | null): void {
@@ -300,7 +334,16 @@ export class GraphStore {
     const from = this.nodes.find((candidate) => candidate.id === fromId);
     const to = this.nodes.find((candidate) => candidate.id === toId);
     if (!from || !to || fromId === toId) return false;
-    if ((from.parentId ?? null) !== (to.parentId ?? null)) return false;
+    // A Git action's output also leaves its GitHub block toward the blocks
+    // beside that GitHub block, such as an agent that takes the workspace.
+    const provider =
+      from.type === "action"
+        ? this.nodes.find((candidate) => candidate.id === from.parentId)
+        : undefined;
+    const sameLevel = (from.parentId ?? null) === (to.parentId ?? null);
+    const besideProvider =
+      provider !== undefined && provider.parentId === to.parentId;
+    if (!sameLevel && !besideProvider) return false;
     if (
       this.edges.some(
         (edge) =>
@@ -398,6 +441,96 @@ export class GraphStore {
   setAuthenticated(id: string, authenticated: boolean): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node.authenticated = authenticated;
+  }
+
+  // Appends an action to the GitHub block's sequence: the first becomes the
+  // starting point and each later one follows the previous with an arrow.
+  // The block and its ancestors grow so the sequence stays inside them.
+  addAction(githubId: string, action: GitAction): GraphNode | undefined {
+    const github = this.nodes.find((node) => node.id === githubId);
+    if (github?.type !== "github") return undefined;
+    const sequence = this.actionSequence(githubId);
+    const previous = sequence.at(-1);
+    const label =
+      GIT_ACTIONS.find((candidate) => candidate.action === action)?.label ??
+      action;
+    const node: GraphNode = {
+      id: crypto.randomUUID(),
+      type: "action",
+      action,
+      name: label,
+      x: ACTION_INSET,
+      y: previous ? previous.y + previous.h + ACTION_GAP : ACTION_TOP,
+      w: DEFAULT_NODE_WIDTH,
+      h: DEFAULT_NODE_HEIGHT,
+      parentId: githubId,
+      start: previous === undefined,
+    };
+    this.nodes.push(node);
+    const added = this.nodes.at(-1) ?? node;
+    if (previous) this.connect(previous.id, added.id);
+    this.growToFit(added);
+    this.selectedId = added.id;
+    return added;
+  }
+
+  // The GitHub block's actions from its starting action along their arrows,
+  // followed by actions not reachable that way in their creation order.
+  actionSequence(githubId: string): GraphNode[] {
+    const actions = this.nodes.filter(
+      (node) => node.parentId === githubId && node.type === "action",
+    );
+    const ordered: GraphNode[] = [];
+    let current = actions.find((node) => node.start);
+    while (current && !ordered.includes(current)) {
+      ordered.push(current);
+      const from = current.id;
+      const next = this.edges.find(
+        (edge) =>
+          edge.from === from &&
+          actions.some((candidate) => candidate.id === edge.to),
+      );
+      current = actions.find((candidate) => candidate.id === next?.to);
+    }
+    return [...ordered, ...actions.filter((node) => !ordered.includes(node))];
+  }
+
+  private growToFit(child: GraphNode): void {
+    let node = child;
+    let parent = this.nodes.find((candidate) => candidate.id === node.parentId);
+    while (parent) {
+      parent.w = Math.max(parent.w, node.x + node.w + ACTION_INSET);
+      parent.h = Math.max(parent.h, node.y + node.h + ACTION_INSET);
+      node = parent;
+      parent = this.nodes.find((candidate) => candidate.id === node.parentId);
+    }
+  }
+
+  setActionField(id: string, field: ActionField, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node[field] = value;
+  }
+
+  // Replaces the statuses shown on the canvas with a run's steps.
+  showRun(steps: readonly RunStepStatus[]): void {
+    this.runStatuses = Object.fromEntries(
+      steps.map((step) => [step.nodeId, step.status]),
+    );
+  }
+
+  // A block's own step status, or for a block without a step of its own the
+  // roll-up of its children: failed wins, then any work in progress.
+  statusOf(id: string): string | undefined {
+    const own = this.runStatuses[id];
+    if (own) return own;
+    const statuses = this.nodes
+      .filter((node) => node.parentId === id)
+      .map((node) => this.statusOf(node.id))
+      .filter((status): status is string => status !== undefined);
+    if (statuses.length === 0) return undefined;
+    if (statuses.includes("failed")) return "failed";
+    if (statuses.every((status) => status === statuses[0])) return statuses[0];
+    return "running";
   }
 
   setAppId(id: string, appId: string): void {

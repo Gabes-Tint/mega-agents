@@ -339,9 +339,11 @@ describe("graph builder workspace", () => {
             name: "GitHub 1",
             action: "fetch",
             status: "succeeded",
-            repository: "acme/api",
-            remote: "origin",
-            output: "From github.com:acme/api",
+            details: {
+              repository: "acme/api",
+              remote: "origin",
+              output: "From github.com:acme/api",
+            },
           },
         ],
       }),
@@ -1567,5 +1569,140 @@ describe("graph builder workspace", () => {
     expect(connect).not.toBePressed();
     await fireEvent.click(screen.getByText("Project 2"));
     expect(canvas().querySelectorAll(".edge-line")).toHaveLength(0);
+  });
+
+  async function githubWithActions(...labels: string[]): Promise<void> {
+    await dropComponent("Project", 400, 400);
+    await dropComponent("GitHub", 410, 410);
+    for (const label of labels) {
+      await fireEvent.click(screen.getByText("GitHub 1"));
+      await fireEvent.change(screen.getByLabelText("New action"), {
+        target: { value: label },
+      });
+      await fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    }
+  }
+
+  test("adds Git actions to a GitHub block as a sequence", async () => {
+    render(Workspace);
+
+    await githubWithActions("fetch", "worktree", "rebase");
+
+    for (const name of ["Fetch", "Create worktree", "Rebase"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(2);
+    await fireEvent.click(screen.getByText("GitHub 1"));
+    const sequence = screen.getByRole("list", { name: "Actions" });
+    expect(sequence).toHaveTextContent("1. Fetch");
+    expect(sequence).toHaveTextContent("2. Create worktree");
+    expect(sequence).toHaveTextContent("3. Rebase");
+  });
+
+  test("selects an action from its GitHub block's sequence", async () => {
+    render(Workspace);
+    await githubWithActions("fetch", "worktree");
+    await fireEvent.click(screen.getByText("GitHub 1"));
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "2. Create worktree" }),
+    );
+
+    expect(screen.getByText("Git action: Create worktree")).toBeInTheDocument();
+  });
+
+  test("configures the branch, base, and path of a worktree action", async () => {
+    render(Workspace);
+    await githubWithActions("worktree");
+
+    const fields = {
+      Branch: "feature/login",
+      Base: "origin/main",
+      "Worktree path": "/tmp/login",
+    };
+    for (const [label, value] of Object.entries(fields)) {
+      await fireEvent.input(screen.getByLabelText(label), {
+        target: { value },
+      });
+    }
+    await fireEvent.click(screen.getByText("GitHub 1"));
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Create worktree" }),
+    );
+
+    for (const [label, value] of Object.entries(fields)) {
+      expect(screen.getByLabelText(label)).toHaveValue(value);
+    }
+    expect(screen.queryByLabelText("Onto")).not.toBeInTheDocument();
+  });
+
+  test("configures what a rebase action rebases onto", async () => {
+    render(Workspace);
+    await githubWithActions("worktree", "rebase");
+
+    await fireEvent.input(screen.getByLabelText("Onto"), {
+      target: { value: "origin/release" },
+    });
+
+    expect(screen.getByLabelText("Onto")).toHaveValue("origin/release");
+    expect(screen.queryByLabelText("Branch")).not.toBeInTheDocument();
+  });
+
+  test("only GitHub blocks offer actions", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+
+    expect(screen.queryByRole("button", { name: "Add action" })).toBeNull();
+    await dropComponent("GitLab", 410, 410);
+    expect(screen.queryByRole("button", { name: "Add action" })).toBeNull();
+  });
+
+  test("shows each action's run status on the canvas and rolls it up", async () => {
+    render(Workspace);
+    await githubWithActions("fetch", "worktree");
+    const fetchNode = screen.getByRole("button", { name: "Fetch" });
+    const worktreeNode = screen.getByRole("button", {
+      name: "Create worktree",
+    });
+    const githubNode = screen.getByRole("button", { name: "GitHub 1" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          nodes: Array<{ id: string; action?: string }>;
+        };
+        const idOf = (action: string) =>
+          body.nodes.find((node) => node.action === action)?.id;
+        return Response.json({
+          status: "failed",
+          steps: [
+            {
+              nodeId: idOf("fetch"),
+              name: "Fetch",
+              action: "fetch",
+              status: "succeeded",
+            },
+            {
+              nodeId: idOf("worktree"),
+              name: "Create worktree",
+              action: "worktree",
+              status: "failed",
+              error: "set the branch the worktree works on",
+              details: { path: "/tmp/login", branch: "feature/login" },
+            },
+          ],
+        });
+      }),
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    await waitFor(() => expect(fetchNode).toHaveClass("status-succeeded"));
+    expect(worktreeNode).toHaveClass("status-failed");
+    expect(githubNode).toHaveClass("status-failed");
+    const result = screen.getByRole("region", { name: "Run result" });
+    expect(result).toHaveTextContent("Path: /tmp/login");
+    expect(result).toHaveTextContent("Branch: feature/login");
+    vi.unstubAllGlobals();
   });
 });

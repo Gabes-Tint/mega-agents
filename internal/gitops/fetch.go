@@ -33,29 +33,31 @@ type DetectedRepository struct {
 // credential helper) and never prompts, so a missing login fails instead of
 // hanging the run. The checkout and local branches are left untouched.
 func Fetch(ctx context.Context, dir string, repository string) (FetchResult, error) {
-	var detected DetectedRepository
-	if strings.TrimSpace(repository) == "" {
-		var err error
-		if detected, err = DetectGitHubRepository(ctx, dir); err != nil {
-			return FetchResult{}, err
-		}
-	} else {
-		want, err := ParseGitHubRepository(repository)
-		if err != nil {
-			return FetchResult{}, err
-		}
-		if err := requireRepositoryDir(ctx, dir); err != nil {
-			return FetchResult{}, err
-		}
-		if detected, err = matchingRemote(ctx, dir, want); err != nil {
-			return FetchResult{}, err
-		}
+	detected, err := resolveRemote(ctx, dir, repository)
+	if err != nil {
+		return FetchResult{}, err
 	}
 	output, err := git(ctx, dir, "fetch", detected.Remote)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("git fetch %s failed: %w", detected.Remote, err)
 	}
 	return FetchResult{Repository: detected.Repository, Remote: detected.Remote, Output: output}, nil
+}
+
+// resolveRemote finds the remote of the clone in dir that points at the
+// repository, or at the clone's own GitHub repository when none is named.
+func resolveRemote(ctx context.Context, dir string, repository string) (DetectedRepository, error) {
+	if strings.TrimSpace(repository) == "" {
+		return DetectGitHubRepository(ctx, dir)
+	}
+	want, err := ParseGitHubRepository(repository)
+	if err != nil {
+		return DetectedRepository{}, err
+	}
+	if err := requireRepositoryDir(ctx, dir); err != nil {
+		return DetectedRepository{}, err
+	}
+	return matchingRemote(ctx, dir, want)
 }
 
 // DetectGitHubRepository reports the GitHub repository of the clone in dir:
