@@ -281,6 +281,20 @@
                 graph.setActionIssue(node.id, event.currentTarget.value)}
             />
           </label>
+          <label>
+            Labels to ignore
+            <input
+              type="text"
+              placeholder="none"
+              value={node.ignoreLabels?.join(", ") ?? ""}
+              oninput={(event) =>
+                graph.setActionIgnoreLabels(node.id, event.currentTarget.value)}
+            />
+          </label>
+          <p class="hint">
+            Comma-separated. The step fails if the issue has one of these
+            labels.
+          </p>
         {/if}
         {#if node.action === "commit" || node.action === "pullrequest"}
           <p class="hint">

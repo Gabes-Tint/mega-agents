@@ -941,6 +941,20 @@ describe("Git actions inside a GitHub block", () => {
     graph.setActionIssue("missing", "1");
   });
 
+  test("a new Read issue ignores paused, draft and needs-attention issues", () => {
+    const { graph, githubId } = githubInProject();
+    const issue = graph.addAction(githubId, "issue")!;
+    const commit = graph.addAction(githubId, "commit")!;
+
+    expect(issue.ignoreLabels).toEqual(["paused", "draft", "needs-attention"]);
+    expect(commit.ignoreLabels).toBeUndefined();
+    graph.setActionIgnoreLabels(issue.id, " paused,wip , ");
+    expect(issue.ignoreLabels).toEqual(["paused", "wip", ""]);
+    graph.setActionIgnoreLabels(issue.id, "");
+    expect(issue.ignoreLabels).toEqual([]);
+    graph.setActionIgnoreLabels("missing", "draft");
+  });
+
   test("the first action nests inside the GitHub block as its starting point", () => {
     const { graph, githubId } = githubInProject();
 

@@ -34,6 +34,7 @@ nodes:
             start: true
             with:
               issue: 1
+              ignoreLabels: ["paused", "draft", "needs-attention"]
             layout:
               x: 12
               y: 40

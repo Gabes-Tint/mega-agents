@@ -2702,6 +2702,10 @@ describe("graph builder workspace", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Read issue" }));
     expect(screen.getByLabelText("Issue number")).toHaveValue(7);
+    const labels = screen.getByLabelText("Labels to ignore");
+    expect(labels).toHaveValue("paused, draft, needs-attention");
+    await fireEvent.input(labels, { target: { value: "paused, " } });
+    expect(labels).toHaveValue("paused, ");
     await fireEvent.click(screen.getByRole("button", { name: "Commit" }));
     expect(screen.getByLabelText("Commit message")).toHaveValue(
       "Implement {{workspace.branch}}",

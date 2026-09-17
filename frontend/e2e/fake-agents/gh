@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
-// A stand-in for the GitHub CLI in browser tests: issue #7 exists, and a
-// pull request opens as #42.
-const [command, subcommand] = process.argv.slice(2);
+// A stand-in for the GitHub CLI in browser tests: issue #7 exists, issue #8
+// is labeled "paused", and a pull request opens as #42.
+const [command, subcommand, number] = process.argv.slice(2);
 if (command === "issue" && subcommand === "view") {
+  const paused = number === "8";
   console.log(
     JSON.stringify({
-      number: 7,
+      number: paused ? 8 : 7,
       title: "Add a changelog",
       body: "Write CHANGELOG.md",
-      url: "https://github.com/acme/api/issues/7",
-      labels: [],
+      url: `https://github.com/acme/api/issues/${paused ? 8 : 7}`,
+      labels: paused ? [{ name: "paused" }] : [],
       comments: [],
     }),
   );

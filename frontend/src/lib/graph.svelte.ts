@@ -159,6 +159,8 @@ export interface GraphNode {
   title?: string;
   body?: string;
   issue?: number;
+  // Labels that stop Read issue from reading an issue.
+  ignoreLabels?: string[];
   maxIterations?: number;
   untilNode?: string;
   untilPort?: string;
@@ -871,6 +873,9 @@ export class GraphStore {
       h: DEFAULT_NODE_HEIGHT,
       parentId: githubId,
       start: previous === undefined,
+      ...(action === "issue" && {
+        ignoreLabels: ["paused", "draft", "needs-attention"],
+      }),
     };
     this.nodes.push(node);
     const added = this.nodes.at(-1) ?? node;
@@ -1005,6 +1010,14 @@ export class GraphStore {
   setActionIssue(id: string, value: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node.issue = value === "" ? undefined : Number(value);
+  }
+
+  // Keeps blank entries while typing; the backend skips them.
+  setActionIgnoreLabels(id: string, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node)
+      node.ignoreLabels =
+        value === "" ? [] : value.split(",").map((label) => label.trim());
   }
 
   setActionField(id: string, field: ActionField, value: string): void {

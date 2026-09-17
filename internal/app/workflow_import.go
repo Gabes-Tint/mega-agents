@@ -146,6 +146,13 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		case "waitForAny":
 			node.WaitForAny = value == true
 			continue
+		case "ignoreLabels":
+			labels, ok := importedLabels(value)
+			if !ok {
+				return WorkflowNodeInput{}, fmt.Errorf("%s setting %q must be a list of labels", identifier, key)
+			}
+			node.IgnoreLabels = labels
+			continue
 		case "cases":
 			cases, err := importedCases(value)
 			if err != nil {
@@ -185,6 +192,22 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		*target = fmt.Sprint(value)
 	}
 	return node, nil
+}
+
+func importedLabels(value any) ([]string, bool) {
+	entries, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	labels := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		switch entry.(type) {
+		case []any, map[string]any, nil:
+			return nil, false
+		}
+		labels = append(labels, fmt.Sprint(entry))
+	}
+	return labels, true
 }
 
 func importedCases(value any) ([]router.Case, error) {

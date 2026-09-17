@@ -107,6 +107,22 @@ func ReadIssue(ctx context.Context, repository string, number int) (map[string]a
 	return issue, nil
 }
 
+// IgnoredLabel returns the first of an issue's labels that matches one of
+// the labels to ignore, compared without case as GitHub does, or "".
+func IgnoredLabel(issue map[string]any, ignore []string) string {
+	labels, _ := issue["labels"].([]any)
+	for _, entry := range labels {
+		label, _ := entry.(map[string]any)
+		name, _ := label["name"].(string)
+		for _, ignored := range ignore {
+			if ignored = strings.TrimSpace(ignored); ignored != "" && strings.EqualFold(name, ignored) {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
 func gh(ctx context.Context, dir string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "gh", args...)
 	command.Dir = dir

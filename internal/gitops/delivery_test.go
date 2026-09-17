@@ -145,6 +145,32 @@ func TestReadIssueReturnsItsFields(t *testing.T) {
 	}
 }
 
+func TestIgnoredLabelNamesTheFirstLabelToIgnore(t *testing.T) {
+	issue := map[string]any{"labels": []any{
+		map[string]any{"name": "story"}, map[string]any{"name": "Needs-Attention"}, map[string]any{"name": "paused"},
+	}}
+	cases := map[string]struct {
+		ignore []string
+		want   string
+	}{
+		"no labels to ignore":         {ignore: nil, want: ""},
+		"none of the issue's labels":  {ignore: []string{"draft"}, want: ""},
+		"blank entries are no labels": {ignore: []string{"", "  "}, want: ""},
+		"in the issue's order":        {ignore: []string{"paused", "needs-attention"}, want: "Needs-Attention"},
+		"with spaces around":          {ignore: []string{" paused "}, want: "paused"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := IgnoredLabel(issue, testCase.ignore); got != testCase.want {
+				t.Fatalf("IgnoredLabel = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+	if got := IgnoredLabel(map[string]any{}, []string{"paused"}); got != "" {
+		t.Fatalf("an issue without labels matched %q", got)
+	}
+}
+
 func TestFetchesAndPushesOfOneRepositoryDoNotCollide(t *testing.T) {
 	clone, seed := githubClone(t, "https://github.com/acme/api.git")
 	runGit(t, clone, "config", "user.name", "Test")

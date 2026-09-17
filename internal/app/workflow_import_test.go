@@ -19,6 +19,8 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 			{ID: "a1", Type: "action", Action: "worktree", Name: "Create worktree", X: 12, Y: 40, W: 160, H: 64,
 				ParentID: "g1", Start: true, Branch: "feature/login", Base: "origin/main", WorktreePath: "/tmp/login"},
 			{ID: "a2", Type: "action", Action: "rebase", Name: "Rebase", X: 12, Y: 128, W: 160, H: 64, ParentID: "g1", Onto: "origin/next"},
+			{ID: "i1", Type: "action", Action: "issue", Name: "Read issue", X: 12, Y: 216, W: 160, H: 64, ParentID: "g1",
+				Issue: 7, IgnoreLabels: []string{"paused", "needs attention"}},
 			{ID: "x1", Type: "githubapp", Name: "App", X: 1, Y: 2, W: 3, H: 4, ParentID: "g1", AppID: "42", PrivateKeyPath: "/k.pem"},
 			{ID: "g2", Type: "agent", Name: "Agent 1", X: 240, Y: 10, W: 160, H: 64, ParentID: "p1",
 				Backend: "opencode", Model: "opencode-go/glm-5.3-flash", Effort: "high",
@@ -50,7 +52,7 @@ func TestImportedYAMLRebuildsTheExportedGraph(t *testing.T) {
 		t.Errorf("name = %q", imported.Name)
 	}
 	// Identifiers replace editor ids, so compare with the ids exported.
-	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
+	rename := map[string]string{"p1": "api", "g1": "github-1", "a1": "create-worktree", "a2": "rebase", "i1": "read-issue", "x1": "app", "g2": "agent-1", "s1": "check", "f1": "fixer", "r1": "route"}
 	var want []WorkflowNodeInput
 	for _, node := range request.Nodes {
 		node.ID = rename[node.ID]
@@ -102,6 +104,14 @@ func TestImportRejectsDocumentsThatAreNotWorkflows(t *testing.T) {
 		"bad cases": {
 			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: router@v1\n    with:\n      cases: yes\n",
 			want: `x setting "cases" must be a list of name and expression`,
+		},
+		"labels that are not a list": {
+			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: git/issue@v1\n    with:\n      ignoreLabels: paused\n",
+			want: `x setting "ignoreLabels" must be a list of labels`,
+		},
+		"a label that is not text": {
+			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: git/issue@v1\n    with:\n      ignoreLabels: [[paused]]\n",
+			want: `x setting "ignoreLabels" must be a list of labels`,
 		},
 		"unknown setting": {
 			yaml: "apiVersion: megaagents.dev/v1alpha1\nkind: Workflow\nnodes:\n  x:\n    uses: project@v1\n    with:\n      colour: red\n",

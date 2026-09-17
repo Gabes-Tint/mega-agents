@@ -12,7 +12,8 @@ import (
 )
 
 // fakeGH puts a gh first on PATH that records each call's arguments and
-// answers issue views with issue #7 and pull request creation with #42.
+// answers issue views with issue #7 (issue #8 is labeled "Paused") and pull
+// request creation with #42.
 func fakeGHCLI(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
@@ -21,7 +22,12 @@ here="$(dirname "$0")"
 printf '%s\n' "$@" >> "$here/calls"
 echo "--" >> "$here/calls"
 case "$1 $2" in
-  "issue view") echo '{"number":7,"title":"Add a changelog","body":"Write CHANGELOG.md","url":"https://github.com/acme/api/issues/7","labels":[],"comments":[]}' ;;
+  "issue view")
+    if [ "$3" = 8 ]; then
+      echo '{"number":8,"title":"Later","body":"","url":"https://github.com/acme/api/issues/8","labels":[{"name":"Paused"}],"comments":[]}'
+    else
+      echo '{"number":7,"title":"Add a changelog","body":"Write CHANGELOG.md","url":"https://github.com/acme/api/issues/7","labels":[],"comments":[]}'
+    fi ;;
   "pr create") echo "https://github.com/acme/api/pull/42" ;;
   *) echo "unexpected gh $*" >&2; exit 1 ;;
 esac
@@ -83,6 +89,31 @@ func TestAnIssueBecomesAPullRequest(t *testing.T) {
 	calls, _ := os.ReadFile(filepath.Join(gh, "calls"))
 	if !strings.Contains(string(calls), "pr\ncreate\n--repo\nacme/api\n--head\nissue-7\n--base\nmain\n--title\nClose issue on issue-7\n") {
 		t.Fatalf("gh calls =\n%s", calls)
+	}
+}
+
+func TestReadIssueFailsOnAnIssueWithALabelToIgnore(t *testing.T) {
+	fakeGHCLI(t)
+	clone, _ := projectClone(t)
+	flow := func(settings string) string {
+		return fmt.Sprintf(`{"nodes": [
+			{"id": "p1", "type": "project", "name": "api", "path": %q},
+			{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true},
+			{"id": "i1", "type": "action", "action": "issue", "name": "Read issue", "parentId": "g1", "start": true, "issue": 8%s}
+		], "edges": []}`, clone, settings)
+	}
+
+	ignored := finishedRunOnly(t, flow(`, "ignoreLabels": ["draft", "paused"]`))
+
+	if ignored.Status != engine.Failed ||
+		ignored.Steps[0].Error != `issue #8 is labeled "Paused", one of the labels to ignore` {
+		t.Fatalf("record = %+v", ignored)
+	}
+	// A workflow saved before the setting existed ignores no labels.
+	for _, settings := range []string{"", `, "ignoreLabels": []`, `, "ignoreLabels": ["draft"]`} {
+		if record := finishedRunOnly(t, flow(settings)); record.Status != engine.Succeeded {
+			t.Fatalf("with %q: record = %+v", settings, record)
+		}
 	}
 }
 

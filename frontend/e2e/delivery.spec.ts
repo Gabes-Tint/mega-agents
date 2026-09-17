@@ -101,4 +101,45 @@ test.describe("GitHub delivery", () => {
     );
     expect(pushed).toContain("refs/heads/issue-7");
   });
+
+  test("Read issue fails on an issue with a label to ignore", async ({
+    page,
+  }) => {
+    await mouseDrag(
+      page,
+      page.getByRole("button", { name: "Project" }),
+      canvas(page),
+    );
+    const project = page.getByRole("button", { name: "Project 1" });
+    await page.getByLabel("Path").fill(fixture.clone);
+    const box = await project.boundingBox();
+    const palette = await page
+      .getByRole("button", { name: "GitHub", exact: true })
+      .boundingBox();
+    if (!box || !palette) throw new Error("not visible");
+    await page.mouse.move(palette.x + 20, palette.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 30, box.y + 45, { steps: 10 });
+    await page.mouse.up();
+    const github = page.getByRole("button", { name: "GitHub 1" });
+    await page.getByLabel("Already authenticated (OAuth)").check();
+    await page.getByLabel("Starting point").check();
+    await addAction(page, github, "Read issue");
+    const labels = page.getByLabel("Labels to ignore");
+    await expect(labels).toHaveValue("paused, draft, needs-attention");
+    // The fake GitHub CLI labels issue #8 "paused".
+    await page.getByLabel("Issue number").fill("8");
+
+    await page.getByRole("button", { name: "Run flow" }).click();
+
+    const result = page.getByRole("region", { name: "Run result" });
+    await expect(result).toContainText("Run failed", { timeout: 15_000 });
+    await expect(result).toContainText(
+      'issue #8 is labeled "paused", one of the labels to ignore',
+    );
+
+    await labels.fill("draft");
+    await page.getByRole("button", { name: "Run flow" }).click();
+    await expect(result).toContainText("Run succeeded", { timeout: 15_000 });
+  });
 });
