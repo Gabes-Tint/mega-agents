@@ -525,7 +525,11 @@ func (planner runPlanner) actionTask(node WorkflowNodeInput) (engine.Task, error
 						return engine.Result{}, err
 					}
 					for _, skipped := range picked.Skipped {
-						fmt.Fprintf(log, "Skipped issue #%d, labeled %q\n", skipped.Number, skipped.Label)
+						if skipped.Assignee != "" {
+							fmt.Fprintf(log, "Skipped issue #%d, assigned to @%s\n", skipped.Number, skipped.Assignee)
+						} else {
+							fmt.Fprintf(log, "Skipped issue #%d, labeled %q\n", skipped.Number, skipped.Label)
+						}
 					}
 					fmt.Fprintf(log, "📌 Picked the next available issue #%d\n", picked.Number)
 					number = picked.Number

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // A stand-in for the GitHub CLI in browser tests: issue #7 exists, issue #8
-// is labeled "paused", the open issues are #8 and #9 (without labels), and a
+// is labeled "paused", issue #6 is assigned to hubot, the open issues are #6,
+// #8 and #9 (without labels or assignees), the current user is octocat, and a
 // pull request opens as #42.
 const [command, subcommand, number] = process.argv.slice(2);
 if (command === "issue" && subcommand === "view") {
@@ -18,10 +19,13 @@ if (command === "issue" && subcommand === "view") {
 } else if (command === "issue" && subcommand === "list") {
   console.log(
     JSON.stringify([
-      { number: 9, labels: [] },
-      { number: 8, labels: [{ name: "paused" }] },
+      { number: 9, labels: [], assignees: [] },
+      { number: 8, labels: [{ name: "paused" }], assignees: [] },
+      { number: 6, labels: [], assignees: [{ login: "hubot" }] },
     ]),
   );
+} else if (command === "api" && subcommand === "user") {
+  console.log("octocat");
 } else if (command === "pr" && subcommand === "create") {
   console.log("https://github.com/acme/api/pull/42");
 } else {

@@ -111,11 +111,12 @@ func ReadIssue(ctx context.Context, repository string, number int) (map[string]a
 // nextIssueLimit is how many of the oldest open issues NextIssue considers.
 const nextIssueLimit = 100
 
-// SkippedIssue is an older open issue NextIssue passed over and the label
-// to ignore that it carries.
+// SkippedIssue is an older open issue NextIssue passed over: either the
+// label to ignore that it carries or the somebody else it is assigned to.
 type SkippedIssue struct {
-	Number int
-	Label  string
+	Number   int
+	Label    string
+	Assignee string
 }
 
 // PickedIssue is the issue NextIssue chose and the older ones it skipped.
@@ -125,11 +126,17 @@ type PickedIssue struct {
 }
 
 // NextIssue picks the next available issue: the oldest open issue, the one
-// with the lowest number, without a label to ignore. Pull requests are not
-// issues to the GitHub CLI, so they never count.
+// with the lowest number, without a label to ignore and not assigned to
+// somebody else: assigned to nobody, or also to the authenticated gh user.
+// Pull requests are not issues
+// to the GitHub CLI, so they never count.
 func NextIssue(ctx context.Context, repository string, ignore []string) (PickedIssue, error) {
+	login, err := gh(ctx, "", "api", "user", "--jq", ".login")
+	if err != nil {
+		return PickedIssue{}, fmt.Errorf("gh api user failed: %w", err)
+	}
 	output, err := gh(ctx, "", "issue", "list", "--repo", repository, "--state", "open",
-		"--search", "sort:created-asc", "--limit", strconv.Itoa(nextIssueLimit), "--json", "number,labels")
+		"--search", "sort:created-asc", "--limit", strconv.Itoa(nextIssueLimit), "--json", "number,labels,assignees")
 	if err != nil {
 		return PickedIssue{}, fmt.Errorf("gh issue list failed: %w", err)
 	}
@@ -148,10 +155,35 @@ func NextIssue(ctx context.Context, repository string, ignore []string) (PickedI
 			picked.Skipped = append(picked.Skipped, SkippedIssue{Number: number(issue), Label: label})
 			continue
 		}
+		if assignee := somebodyElse(issue, login); assignee != "" {
+			picked.Skipped = append(picked.Skipped, SkippedIssue{Number: number(issue), Assignee: assignee})
+			continue
+		}
 		picked.Number = number(issue)
 		return picked, nil
 	}
-	return PickedIssue{}, fmt.Errorf("no open issue without the labels to ignore in %s", repository)
+	return PickedIssue{}, fmt.Errorf(
+		"no open issue without the labels to ignore that isn't assigned to somebody else in %s", repository,
+	)
+}
+
+// somebodyElse returns the first assignee of an issue assigned only to
+// others than login, or "" when it is unassigned or assigned to login too.
+// Logins compare without case as GitHub does.
+func somebodyElse(issue map[string]any, login string) string {
+	assignees, _ := issue["assignees"].([]any)
+	first := ""
+	for _, entry := range assignees {
+		assignee, _ := entry.(map[string]any)
+		name, _ := assignee["login"].(string)
+		if strings.EqualFold(name, login) {
+			return ""
+		}
+		if first == "" {
+			first = name
+		}
+	}
+	return first
 }
 
 // IgnoredLabel returns the first of an issue's labels that matches one of

@@ -284,7 +284,7 @@
           </label>
           <p class="hint">
             0 reads the next available issue: the oldest open one without a
-            label to ignore.
+            label to ignore and not assigned to somebody else.
           </p>
           <label>
             Labels to ignore

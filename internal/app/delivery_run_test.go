@@ -13,7 +13,8 @@ import (
 
 // fakeGH puts a gh first on PATH that records each call's arguments and
 // answers issue views with issue #7 (issue #8 is labeled "Paused", issue #9
-// has no labels), lists the open issues #9 and #8, and answers pull request
+// has no labels, issue #6 is assigned to hubot), lists the open issues #9, #8
+// and #6, answers that the current user is octocat, and answers pull request
 // creation with #42.
 func fakeGHCLI(t *testing.T) string {
 	t.Helper()
@@ -23,10 +24,13 @@ here="$(dirname "$0")"
 printf '%s\n' "$@" >> "$here/calls"
 echo "--" >> "$here/calls"
 case "$1 $2" in
+  "api user") echo octocat ;;
   "issue list")
-    echo '[{"number":9,"labels":[]},{"number":8,"labels":[{"name":"Paused"}]}]' ;;
+    echo '[{"number":9,"labels":[],"assignees":[]},{"number":8,"labels":[{"name":"Paused"}],"assignees":[]},{"number":6,"labels":[],"assignees":[{"login":"hubot"}]}]' ;;
   "issue view")
-    if [ "$3" = 9 ]; then
+    if [ "$3" = 6 ]; then
+      echo '{"number":6,"title":"Taken","body":"","url":"https://github.com/acme/api/issues/6","labels":[],"assignees":[{"login":"hubot"}],"comments":[]}'
+    elif [ "$3" = 9 ]; then
       echo '{"number":9,"title":"Write docs","body":"","url":"https://github.com/acme/api/issues/9","labels":[],"comments":[]}'
     elif [ "$3" = 8 ]; then
       echo '{"number":8,"title":"Later","body":"","url":"https://github.com/acme/api/issues/8","labels":[{"name":"Paused"}],"comments":[]}'
@@ -149,12 +153,33 @@ func TestReadIssueWithoutANumberReadsTheNextAvailableIssue(t *testing.T) {
 		}
 		log := get(t, handler, "/api/runs/"+record.ID+"/logs/i1").Body.String()
 		if !strings.Contains(log, "📌 Picked the next available issue #9\n") ||
-			!strings.Contains(log, `Skipped issue #8, labeled "Paused"`) {
+			!strings.Contains(log, `Skipped issue #8, labeled "Paused"`) ||
+			!strings.Contains(log, "Skipped issue #6, assigned to @hubot\n") {
 			t.Fatalf("with %q: log =\n%s", number, log)
 		}
 	}
 	calls, _ := os.ReadFile(filepath.Join(gh, "calls"))
 	if !strings.Contains(string(calls), "issue\nview\n9\n--repo\nacme/api\n") {
+		t.Fatalf("gh calls =\n%s", calls)
+	}
+}
+
+func TestReadIssueWithAFixedNumberReadsAnIssueAssignedToSomebodyElse(t *testing.T) {
+	gh := fakeGHCLI(t)
+	clone, _ := projectClone(t)
+	body := fmt.Sprintf(`{"nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "g1", "type": "github", "name": "GitHub 1", "parentId": "p1", "start": true, "authenticated": true, "repository": "acme/api"},
+		{"id": "i1", "type": "action", "action": "issue", "name": "Read issue", "parentId": "g1", "start": true, "issue": 6}
+	], "edges": []}`, clone)
+
+	record := finishedRunOnly(t, body)
+
+	if record.Status != engine.Succeeded || record.Steps[0].Details["issue"].(map[string]any)["number"] != 6.0 {
+		t.Fatalf("record = %+v", record)
+	}
+	calls, _ := os.ReadFile(filepath.Join(gh, "calls"))
+	if string(calls) != "issue\nview\n6\n--repo\nacme/api\n--json\nnumber,title,body,url,labels,comments\n--\n" {
 		t.Fatalf("gh calls =\n%s", calls)
 	}
 }

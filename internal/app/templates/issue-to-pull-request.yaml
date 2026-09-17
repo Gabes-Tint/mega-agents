@@ -33,7 +33,7 @@ nodes:
             name: "Read issue"
             start: true
             with:
-              issue: 1
+              issue: 0
             layout:
               x: 12
               y: 40

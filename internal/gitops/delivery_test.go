@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -146,50 +147,119 @@ func TestReadIssueReturnsItsFields(t *testing.T) {
 	}
 }
 
-func TestNextIssuePicksTheOldestOpenIssueWithoutALabelToIgnore(t *testing.T) {
+// ghAnswer is what a fake gh prints for one command and how it exits.
+type ghAnswer struct {
+	output string
+	exit   int
+}
+
+// fakeGHCommands installs a gh that answers each command, keyed by its first
+// two arguments such as "issue list", and records every call's arguments.
+func fakeGHCommands(t *testing.T, answers map[string]ghAnswer) string {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\nhere=\"$(dirname \"$0\")\"\nprintf '%s\\n' \"$@\" >> \"$here/calls\"\necho -- >> \"$here/calls\"\ncase \"$1 $2\" in\n"
+	for command, answer := range answers {
+		file := filepath.Join(bin, strings.ReplaceAll(command, " ", "-")+".out")
+		if err := os.WriteFile(file, []byte(answer.output+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		script += fmt.Sprintf("  %q) cat %q; exit %d ;;\n", command, file, answer.exit)
+	}
+	script += "  *) echo \"unexpected gh $*\" >&2; exit 1 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return bin
+}
+
+var me = ghAnswer{output: "octocat"}
+
+func TestNextIssuePicksTheOldestOpenIssueWithoutALabelToIgnoreOrSomebodyElse(t *testing.T) {
 	// Listed out of order: the lowest number is the oldest issue.
-	bin := fakeGH(t, `[
-		{"number":12,"title":"Later","labels":[]},
-		{"number":5,"title":"Paused","labels":[{"name":"Paused"}]},
-		{"number":9,"title":"Next","labels":[{"name":"story"}]},
-		{"number":3,"title":"Draft","labels":[{"name":"story"},{"name":"draft"}]}
-	]`, 0)
+	bin := fakeGHCommands(t, map[string]ghAnswer{"api user": me, "issue list": {output: `[
+		{"number":12,"labels":[],"assignees":[]},
+		{"number":5,"labels":[{"name":"Paused"}],"assignees":[]},
+		{"number":10,"labels":[],"assignees":[{"login":"octocat"}]},
+		{"number":7,"labels":[{"name":"story"}],"assignees":[{"login":"hubot"},{"login":"octocat"}]},
+		{"number":4,"labels":[],"assignees":[{"login":"hubot"}]},
+		{"number":3,"labels":[{"name":"story"},{"name":"draft"}],"assignees":[]}
+	]`}})
 
 	next, err := NextIssue(context.Background(), "acme/api", []string{"paused", "draft"})
 
-	if err != nil || next.Number != 9 {
+	// #7 is assigned to the current user too, so it is not somebody else's.
+	if err != nil || next.Number != 7 {
 		t.Fatalf("next = %+v, %v", next, err)
 	}
-	want := []SkippedIssue{{Number: 3, Label: "draft"}, {Number: 5, Label: "Paused"}}
+	want := []SkippedIssue{{Number: 3, Label: "draft"}, {Number: 4, Assignee: "hubot"}, {Number: 5, Label: "Paused"}}
 	if !reflect.DeepEqual(next.Skipped, want) {
 		t.Fatalf("skipped = %+v, want %+v", next.Skipped, want)
 	}
-	args, _ := os.ReadFile(filepath.Join(bin, "args"))
-	if !strings.HasPrefix(string(args), "issue\nlist\n--repo\nacme/api\n--state\nopen\n--search\nsort:created-asc\n--limit\n100\n--json\nnumber,labels\n") {
-		t.Fatalf("args = %q", args)
+	calls, _ := os.ReadFile(filepath.Join(bin, "calls"))
+	if string(calls) != "api\nuser\n--jq\n.login\n--\n"+
+		"issue\nlist\n--repo\nacme/api\n--state\nopen\n--search\nsort:created-asc\n--limit\n100\n--json\nnumber,labels,assignees\n--\n" {
+		t.Fatalf("calls = %q", calls)
+	}
+}
+
+func TestNextIssuePicksAnUnassignedIssueOrOneAssignedToTheCurrentUser(t *testing.T) {
+	for want, list := range map[int]string{
+		8: `[{"number":8,"labels":[],"assignees":[]}]`,
+		9: `[{"number":9,"labels":[],"assignees":[{"login":"OctoCat"}]}]`,
+	} {
+		fakeGHCommands(t, map[string]ghAnswer{"api user": me, "issue list": {output: list}})
+
+		next, err := NextIssue(context.Background(), "acme/api", nil)
+
+		if err != nil || next.Number != want || next.Skipped != nil {
+			t.Fatalf("next = %+v, %v, want #%d", next, err, want)
+		}
 	}
 }
 
 func TestNextIssueFailsWhenNoOpenIssueQualifies(t *testing.T) {
-	fakeGH(t, `[{"number":5,"title":"Paused","labels":[{"name":"paused"}]}]`, 0)
-	if _, err := NextIssue(context.Background(), "acme/api", []string{"paused"}); err == nil ||
-		err.Error() != "no open issue without the labels to ignore in acme/api" {
-		t.Fatalf("err = %v", err)
+	const none = "no open issue without the labels to ignore that isn't assigned to somebody else in acme/api"
+	cases := map[string]struct {
+		answers map[string]ghAnswer
+		ignore  []string
+		want    string
+	}{
+		"every issue skipped": {
+			answers: map[string]ghAnswer{"api user": me, "issue list": {output: `[
+				{"number":5,"labels":[{"name":"paused"}],"assignees":[]},
+				{"number":6,"labels":[],"assignees":[{"login":"hubot"}]}
+			]`}},
+			ignore: []string{"paused"}, want: none,
+		},
+		"no open issues": {
+			answers: map[string]ghAnswer{"api user": me, "issue list": {output: `[]`}},
+			want:    none,
+		},
+		"no current user": {
+			answers: map[string]ghAnswer{"api user": {output: "gh auth login required", exit: 1}},
+			want:    "gh api user failed: gh auth login required",
+		},
+		"list fails": {
+			answers: map[string]ghAnswer{"api user": me, "issue list": {output: "could not resolve to a Repository", exit: 1}},
+			want:    "gh issue list failed: could not resolve to a Repository",
+		},
+		"list is not JSON": {
+			answers: map[string]ghAnswer{"api user": me, "issue list": {output: "not json"}},
+			want:    "gh issue list printed no issues",
+		},
 	}
-	fakeGH(t, `[]`, 0)
-	if _, err := NextIssue(context.Background(), "acme/api", nil); err == nil ||
-		err.Error() != "no open issue without the labels to ignore in acme/api" {
-		t.Fatalf("err = %v", err)
-	}
-	fakeGH(t, "could not resolve to a Repository", 1)
-	if _, err := NextIssue(context.Background(), "acme/api", nil); err == nil ||
-		!strings.Contains(err.Error(), "gh issue list failed: could not resolve to a Repository") {
-		t.Fatalf("err = %v", err)
-	}
-	fakeGH(t, "not json", 0)
-	if _, err := NextIssue(context.Background(), "acme/api", nil); err == nil ||
-		!strings.Contains(err.Error(), "gh issue list printed no issues") {
-		t.Fatalf("err = %v", err)
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			fakeGHCommands(t, testCase.answers)
+
+			_, err := NextIssue(context.Background(), "acme/api", testCase.ignore)
+
+			if err == nil || !strings.HasPrefix(err.Error(), testCase.want) {
+				t.Fatalf("err = %v, want %q", err, testCase.want)
+			}
+		})
 	}
 }
 

@@ -2761,7 +2761,7 @@ describe("graph builder workspace", () => {
     expect(screen.getByLabelText("Issue number")).toHaveValue(0);
     expect(
       screen.getByText(
-        "0 reads the next available issue: the oldest open one without a label to ignore.",
+        "0 reads the next available issue: the oldest open one without a label to ignore and not assigned to somebody else.",
       ),
     ).toBeInTheDocument();
     await fireEvent.input(screen.getByLabelText("Issue number"), {

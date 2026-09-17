@@ -168,7 +168,7 @@ test.describe("GitHub delivery", () => {
     await expect(page.getByLabel("Issue number")).toHaveValue("0");
     await expect(
       page.getByText(
-        "0 reads the next available issue: the oldest open one without a label to ignore.",
+        "0 reads the next available issue: the oldest open one without a label to ignore and not assigned to somebody else.",
       ),
     ).toBeVisible();
 
@@ -177,12 +177,14 @@ test.describe("GitHub delivery", () => {
     await expect(
       page.getByRole("region", { name: "Run result" }),
     ).toContainText("Run succeeded", { timeout: 15_000 });
-    // The fake GitHub CLI lists #8, labeled "paused", and #9 without labels.
+    // The fake GitHub CLI lists #6, assigned to hubot, #8, labeled "paused",
+    // and #9 without labels or assignees.
     await selectBlock(
       page.getByRole("button", { name: "Read issue", exact: true }),
     );
     await page.getByRole("button", { name: "Show logs" }).click();
     const log = page.getByRole("dialog", { name: "Logs: Read issue" });
+    await expect(log).toContainText("Skipped issue #6, assigned to @hubot");
     await expect(log).toContainText('Skipped issue #8, labeled "paused"');
     await expect(log).toContainText("📌 Picked the next available issue #9");
     await expect(log).toContainText("$ gh issue view 9");
