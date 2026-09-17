@@ -1,0 +1,214 @@
+/* Design tokens for the editor. The light palette is the base; the dark one
+   applies when the theme toggle stamps data-theme="dark" on the root. */
+:root {
+  color-scheme: light;
+  --font-ui:
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-sunken: #f7f8fa;
+  --surface-hover: #eceef2;
+  --border: #e1e4ea;
+  --border-strong: #c9ced8;
+  --text: #1c2026;
+  --text-muted: #5f6775;
+  --text-faint: #8b93a1;
+  --accent: #3f5bd9;
+  --accent-hover: #3249b8;
+  --accent-text: #ffffff;
+  --focus: rgb(63 91 217 / 0.35);
+  --canvas: #fafbfc;
+  --canvas-dot: #d9dde4;
+  --edge: #8a93a3;
+  --shadow: 0 1px 2px rgb(20 24 31 / 0.06), 0 2px 8px rgb(20 24 31 / 0.05);
+  --shadow-lifted: 0 8px 24px rgb(20 24 31 / 0.14);
+  --overlay: rgb(20 24 31 / 0.4);
+
+  --ok: #1f8a55;
+  --ok-soft: #e5f5ec;
+  --fail: #c93a3a;
+  --fail-soft: #fcebeb;
+  --warn: #a86b00;
+  --warn-soft: #fdf3dc;
+  --info: #2f6fd0;
+  --info-soft: #e7effb;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #171a20;
+  --surface-sunken: #13151a;
+  --surface-hover: #22262e;
+  --border: #262a33;
+  --border-strong: #363b46;
+  --text: #e4e7ec;
+  --text-muted: #9ba3b0;
+  --text-faint: #6c7482;
+  --accent: #7d92ff;
+  --accent-hover: #97a8ff;
+  --accent-text: #0f1115;
+  --focus: rgb(125 146 255 / 0.4);
+  --canvas: #121419;
+  --canvas-dot: #252932;
+  --edge: #707a8a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
+  --shadow-lifted: 0 10px 28px rgb(0 0 0 / 0.5);
+  --overlay: rgb(0 0 0 / 0.55);
+
+  --ok: #4cc38a;
+  --ok-soft: #13291f;
+  --fail: #ff7a7a;
+  --fail-soft: #331a1c;
+  --warn: #f0b429;
+  --warn-soft: #30260f;
+  --info: #6aa5ff;
+  --info-soft: #152236;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Base controls, kept at zero specificity so components can refine them. */
+:where(button, .trigger, .close-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 1.9rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+:where(button, .trigger, .close-button):hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+:where(button):disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+:where(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+}
+
+:where(input[type="checkbox"]) {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+:where(textarea) {
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+:where(
+  button,
+  input,
+  select,
+  textarea,
+  a,
+  .trigger,
+  .close-button
+):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+:where(pre, code) {
+  font-family: var(--font-mono);
+}
+
+/* Bits renders dialogs in a portal, outside every component's scope. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--overlay);
+}
+
+.log-viewer,
+.browser {
+  position: fixed;
+  z-index: 21;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: min(48rem, 92vw);
+  max-height: 80vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  padding: 1rem;
+  box-shadow: var(--shadow-lifted);
+}
+
+.browser {
+  width: min(24rem, 92vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  display: block;
+}
+
+.dialog-title {
+  margin: 0 0 0.25rem;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trigger {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -2,10 +2,21 @@
   import {
     PALETTE,
     type GraphStore,
+    type NodeType,
     type PaletteItem,
   } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
+
+  // Where the work happens, then what does the work.
+  const GROUPS: { title: string; types: readonly NodeType[] }[] = [
+    { title: "Sources", types: ["project", "github", "gitlab", "githubapp"] },
+    { title: "Steps", types: ["agent", "command", "jsonschema", "router"] },
+  ];
+
+  function itemsOf(types: readonly NodeType[]): PaletteItem[] {
+    return PALETTE.filter((item) => types.includes(item.type));
+  }
 
   function startDrag(event: DragEvent, item: PaletteItem) {
     if (!event.dataTransfer) return;
@@ -21,35 +32,53 @@
 
 <aside aria-label="Component palette" ondragend={endDrag}>
   <h2>Components</h2>
-  <ul>
-    {#each PALETTE as item (item.type)}
-      <li>
-        <button
-          type="button"
-          draggable="true"
-          ondragstart={(event) => startDrag(event, item)}
-        >
-          {item.label}
-        </button>
-      </li>
-    {/each}
-  </ul>
+  {#each GROUPS as group (group.title)}
+    <h3>{group.title}</h3>
+    <ul>
+      {#each itemsOf(group.types) as item (item.type)}
+        <li>
+          <button
+            type="button"
+            class="block-{item.type}"
+            draggable="true"
+            ondragstart={(event) => startDrag(event, item)}
+          >
+            <span class="swatch" aria-hidden="true"></span>
+            {item.label}
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/each}
+  <p class="tip">Drag a component onto the canvas.</p>
 </aside>
 
 <style>
   aside {
-    padding: 0.75rem;
-    background: #eef4f1;
-    border-right: 1px solid #d5e0db;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-height: 0;
+    padding: 0.75rem 0.6rem;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
     overflow-y: auto;
   }
 
   h2 {
-    font-size: 0.85rem;
+    margin: 0 0 0.25rem 0.35rem;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #5b7a71;
-    margin: 0 0 0.75rem;
+    color: var(--text-muted);
+  }
+
+  h3 {
+    margin: 0.6rem 0 0.2rem 0.35rem;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-faint);
   }
 
   ul {
@@ -57,22 +86,39 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 0.5rem;
+    gap: 0.1rem;
   }
 
   button {
+    justify-content: flex-start;
     width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    color: #17342c;
-    font: inherit;
-    text-align: left;
+    gap: 0.55rem;
+    border-color: transparent;
+    background: transparent;
     cursor: grab;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--border);
+    background: var(--surface-sunken);
   }
 
   button:active {
     cursor: grabbing;
+  }
+
+  .swatch {
+    flex: none;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 3px;
+    background: var(--block-accent, var(--text-faint));
+  }
+
+  .tip {
+    margin: auto 0.35rem 0;
+    padding-top: 1rem;
+    font-size: 12px;
+    color: var(--text-faint);
   }
 </style>

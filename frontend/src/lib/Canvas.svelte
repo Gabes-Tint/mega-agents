@@ -354,7 +354,7 @@
         refY="4"
         orient="auto"
       >
-        <path d="M0 0 L8 4 L0 8 Z" fill="#5b7a71" />
+        <path class="edge-arrow" d="M0 0 L8 4 L0 8 Z" />
       </marker>
     </defs>
     {#each graph.edges as edge (edge.id)}
@@ -399,7 +399,7 @@
   {#each graph.nodes as node (node.id)}
     <button
       type="button"
-      class="node status-{graph.statusOf(node.id) ?? 'idle'}"
+      class="node block-{node.type} status-{graph.statusOf(node.id) ?? 'idle'}"
       class:selected={node.id === graph.selectedId}
       class:drop-ok={previewing && previewTargetId === node.id && previewValid}
       class:drop-no={previewing && previewTargetId === node.id && !previewValid}
@@ -446,8 +446,8 @@
     position: relative;
     overflow: auto;
     background:
-      radial-gradient(#d9e5e0 1px, transparent 1px) 0 0 / 1.5rem 1.5rem,
-      #fbfdfc;
+      radial-gradient(var(--canvas-dot) 1px, transparent 1px) 0 0 / 20px 20px,
+      var(--canvas);
   }
 
   /* Above the blocks: arrows between blocks nested in a container would
@@ -463,13 +463,22 @@
   }
 
   .edge-line {
-    stroke: #5b7a71;
-    stroke-width: 2;
+    stroke: var(--edge);
+    stroke-width: 1.5;
+  }
+
+  .edge-arrow {
+    fill: var(--edge);
   }
 
   .edge-port {
-    fill: #5b7a71;
-    font-size: 0.7rem;
+    fill: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: 4px;
+    stroke-linejoin: round;
   }
 
   .hint {
@@ -477,24 +486,26 @@
     inset: 0;
     display: grid;
     place-content: center;
-    color: #7d968d;
+    color: var(--text-faint);
     pointer-events: none;
     margin: 0;
   }
 
   .drop-hint {
-    position: absolute;
+    position: sticky;
     left: 50%;
     bottom: 1rem;
+    z-index: 3;
+    width: fit-content;
     transform: translateX(-50%);
     margin: 0;
     padding: 0.4rem 0.75rem;
-    border: 1px solid #e0b4b4;
-    border-radius: 0.375rem;
-    background: #fdf6f6;
-    color: #a03030;
-    font-size: 0.85rem;
+    border: 1px solid var(--fail);
+    border-radius: var(--radius);
+    background: var(--fail-soft);
+    color: var(--fail);
     pointer-events: none;
+    box-shadow: var(--shadow);
   }
 
   .node {
@@ -502,44 +513,62 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
+    justify-content: flex-start;
+    gap: 0;
     padding: 0;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.5rem;
-    background: #ffffff;
-    color: #17342c;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--text);
     font: inherit;
     text-align: left;
     overflow: hidden;
     cursor: pointer;
-    box-shadow: 0 1px 2px rgb(23 52 44 / 0.12);
+    box-shadow: var(--shadow);
+  }
+
+  .node:hover:not(:disabled) {
+    background: var(--surface);
+    border-color: var(--edge);
   }
 
   .node-title {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.45rem 0.75rem;
+    gap: 0.4rem;
+    padding: 0.4rem 0.65rem;
     font-weight: 600;
-    background: #f0f6f3;
+    background: var(--block-soft, var(--surface-sunken));
     white-space: nowrap;
+  }
+
+  .node-title::before {
+    content: "";
+    flex: none;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 3px;
+    background: var(--block-accent, var(--text-faint));
   }
 
   .node-separator {
     display: block;
     height: 1px;
-    background: #b8ccc4;
+    background: var(--border);
   }
 
   .start-flag {
-    color: #ff3e00;
+    color: var(--ok);
+    font-size: 10px;
   }
 
   .node-id {
     margin-left: auto;
     align-self: center;
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 10px;
     font-weight: 400;
-    color: #7d968d;
+    color: var(--text-faint);
     letter-spacing: 0.02em;
   }
 
@@ -550,21 +579,22 @@
     width: 14px;
     height: 14px;
     touch-action: none;
-    border-radius: 0 0 0.4rem 0;
     cursor: nwse-resize;
     background: linear-gradient(
       135deg,
       transparent 0 45%,
-      #b8ccc4 45% 55%,
+      var(--border-strong) 45% 55%,
       transparent 55% 70%,
-      #b8ccc4 70% 80%,
+      var(--border-strong) 70% 80%,
       transparent 80%
     );
   }
 
   .node.selected {
-    border-color: #ff3e00;
-    box-shadow: 0 0 0 2px rgb(255 62 0 / 0.35);
+    border-color: var(--accent);
+    box-shadow:
+      0 0 0 3px var(--focus),
+      var(--shadow);
   }
 
   .canvas.preview-invalid {
@@ -572,30 +602,31 @@
   }
 
   .node.status-running {
-    border-color: #c28a1d;
+    border-color: var(--info);
+    box-shadow: 0 0 0 3px var(--info-soft);
   }
 
   .node.status-succeeded {
-    border-color: #3f8f5f;
-    background: #f3faf6;
+    border-color: var(--ok);
+    box-shadow: 0 0 0 3px var(--ok-soft);
   }
 
   .node.status-failed {
-    border-color: #a03030;
-    background: #fdf6f6;
+    border-color: var(--fail);
+    box-shadow: 0 0 0 3px var(--fail-soft);
   }
 
   .node.status-skipped {
-    opacity: 0.6;
+    opacity: 0.55;
   }
 
   .node.drop-ok {
-    border-color: #3f8f5f;
-    box-shadow: 0 0 0 2px rgb(63 143 95 / 0.35);
+    border-color: var(--ok);
+    box-shadow: 0 0 0 3px var(--ok-soft);
   }
 
   .node.drop-no {
-    border-color: #a03030;
-    box-shadow: 0 0 0 2px rgb(160 48 48 / 0.35);
+    border-color: var(--fail);
+    box-shadow: 0 0 0 3px var(--fail-soft);
   }
 </style>

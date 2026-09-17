@@ -594,164 +594,102 @@
 
 <style>
   aside {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-height: 0;
     padding: 0.75rem;
-    background: #eef4f1;
-    border-left: 1px solid #d5e0db;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
     overflow-y: auto;
   }
 
   h2 {
-    font-size: 0.85rem;
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #5b7a71;
-    margin: 0 0 0.75rem;
+    color: var(--text-muted);
   }
 
   .node-id {
-    font-size: 0.7rem;
-    color: #5b7a71;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
     letter-spacing: 0.02em;
   }
 
   p {
-    margin: 0 0 0.75rem;
+    margin: 0;
+    color: var(--text-muted);
   }
 
   label {
     display: grid;
     gap: 0.25rem;
-    font-size: 0.85rem;
-    color: #5b7a71;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  /* A checkbox reads as one line: box, then its label. */
+  label:has(> input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text);
   }
 
   h3 {
-    font-size: 0.8rem;
-    color: #5b7a71;
-    margin: 0.75rem 0 0.25rem;
-  }
-
-  textarea {
-    resize: vertical;
-    font-family: ui-monospace, monospace;
-    font-size: 0.8rem;
+    margin: 0.5rem 0 0;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
   }
 
   .error {
-    color: #a03030;
-    font-size: 0.8rem;
+    color: var(--fail);
+    font-size: 12px;
   }
 
   .hint {
-    font-size: 0.75rem;
-    color: #5b7a71;
+    font-size: 12px;
+    color: var(--text-faint);
   }
 
   .action-list {
-    margin: 0 0 0.5rem;
+    margin: 0;
     padding: 0;
     list-style: none;
+    display: grid;
+    gap: 0.2rem;
   }
 
   .action-list button {
-    margin-bottom: 0.25rem;
-    text-align: left;
-  }
-
-  input,
-  select,
-  textarea {
-    padding: 0.4rem 0.5rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    font: inherit;
-    color: #17342c;
+    justify-content: flex-start;
   }
 
   button {
     width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    color: #17342c;
-    font: inherit;
-    cursor: pointer;
-    margin-bottom: 0.75rem;
   }
 
   button[aria-pressed="true"] {
-    border-color: #ff3e00;
-    box-shadow: 0 0 0 2px rgb(255 62 0 / 0.35);
-  }
-
-  /* Bits renders Dialog.Trigger, Dialog.Title, Dialog.Close, Dialog.Overlay,
-     and Dialog.Content outside this component's scoped tree, so their styles
-     must be global. The trigger and close button share the scoped button look
-     above. */
-  :global(.trigger) {
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    color: #17342c;
-    font: inherit;
-    cursor: pointer;
-    margin-bottom: 0.75rem;
-  }
-
-  :global(.close-button) {
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    color: #17342c;
-    font: inherit;
-    cursor: pointer;
-    margin-bottom: 0;
-  }
-
-  :global(.dialog-title) {
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #5b7a71;
-    margin: 0 0 0.5rem;
-  }
-
-  :global(.backdrop) {
-    position: fixed;
-    inset: 0;
-    background: rgb(23 52 44 / 0.35);
-  }
-
-  :global(.browser) {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(20rem, 90vw);
-    max-height: 60vh;
-    overflow-y: auto;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    padding: 0.75rem;
+    border-color: var(--accent);
+    background: var(--focus);
   }
 
   .path {
     display: block;
-    font-size: 0.75rem;
-    color: #5b7a71;
-    word-break: break-all;
     margin-bottom: 0.5rem;
-  }
-
-  .error {
-    color: #a03030;
-    font-size: 0.8rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: var(--radius);
+    background: var(--surface-sunken);
+    font-size: 12px;
+    color: var(--text-muted);
+    word-break: break-all;
   }
 
   ul {
@@ -759,16 +697,21 @@
     margin: 0 0 0.5rem;
     padding: 0;
     display: grid;
-    gap: 0.25rem;
+    gap: 0.2rem;
   }
 
   .directory {
-    text-align: left;
-    margin-bottom: 0;
+    justify-content: flex-start;
   }
 
   .browser-actions {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .browser-actions button,
+  .browser-actions :global(.close-button) {
+    width: auto;
+    flex: 1;
   }
 </style>

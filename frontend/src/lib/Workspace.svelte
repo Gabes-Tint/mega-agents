@@ -8,6 +8,10 @@
   import Palette from "./Palette.svelte";
   import Canvas from "./Canvas.svelte";
   import PropertiesPanel from "./PropertiesPanel.svelte";
+  import ThemeToggle from "./ThemeToggle.svelte";
+
+  // What the backend said about itself, shown in the status bar.
+  let { status = "" }: { status?: string } = $props();
 
   interface RunStep {
     nodeId: string;
@@ -422,49 +426,25 @@
 </script>
 
 <div class="workspace">
-  <div class="toolbar">
-    <div class="actions">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="7" height="7" rx="2" />
+        <rect x="11.5" y="11.5" width="7" height="7" rx="2" />
+        <path d="M8.5 5h3a2 2 0 0 1 2 2v4.5" />
+      </svg>
+      <h1>Mega Agents</h1>
+    </div>
+    <input
+      type="text"
+      class="workflow-name"
+      aria-label="Workflow name"
+      bind:value={graph.workflowName}
+    />
+    <div class="group" role="group" aria-label="Workflow file actions">
       <button
         type="button"
-        class="run"
-        disabled={running}
-        onclick={() => void runFlow()}
-      >
-        {running ? "Running…" : "Run flow"}
-      </button>
-      {#if running && runResult?.id && runResult.status === "running"}
-        <button type="button" onclick={() => void cancelRun()}>
-          Cancel run
-        </button>
-      {/if}
-      <button
-        type="button"
-        onclick={() => {
-          historyDialog = true;
-          void listRuns();
-        }}
-      >
-        Runs…
-      </button>
-      <button type="button" onclick={() => void downloadYaml()}>
-        Download YAML
-      </button>
-      <label class="workflow-name">
-        Workflow name
-        <input type="text" bind:value={graph.workflowName} />
-      </label>
-      <button type="button" onclick={() => void saveWorkflow()}>Save</button>
-      <button
-        type="button"
-        onclick={() => {
-          openDialog = true;
-          void listWorkflows();
-        }}
-      >
-        Open…
-      </button>
-      <button
-        type="button"
+        class="ghost"
         onclick={() => {
           templateDialog = true;
           void listTemplates();
@@ -472,7 +452,20 @@
       >
         Templates…
       </button>
-      <label class="import">
+      <button
+        type="button"
+        class="ghost"
+        onclick={() => {
+          openDialog = true;
+          void listWorkflows();
+        }}
+      >
+        Open…
+      </button>
+      <button type="button" class="ghost" onclick={() => void saveWorkflow()}
+        >Save</button
+      >
+      <label class="import ghost-like">
         Import YAML
         <input
           type="file"
@@ -483,88 +476,41 @@
           }}
         />
       </label>
-      <span class="file-status" role="status" aria-label="Workflow file"
-        >{fileStatus}</span
-      >
+      <button type="button" class="ghost" onclick={() => void downloadYaml()}>
+        Download YAML
+      </button>
     </div>
-    {#if yamlError}
-      <p class="yaml-error">{yamlError}</p>
-    {/if}
-    <section class="run-result" aria-label="Run result" aria-live="polite">
-      {#if runError}
-        <p class="yaml-error">{runError}</p>
-      {:else if runResult}
-        <p class="run-status {runResult.status}">
-          Run {runResult.status}
-          {#if runResult.retryOf}
-            <span>Retry of {runResult.retryOf}</span>
-          {/if}
-          {#if runUsage(runResult)}
-            <span>{runUsage(runResult)}</span>
-          {/if}
-        </p>
-        {#if runResult.id && !running && ["failed", "cancelled", "interrupted"].includes(runResult.status)}
-          <button type="button" onclick={() => void retryRun()}>
-            Retry from failure
-          </button>
-        {/if}
-        <ul>
-          {#each runResult.steps as step (step.nodeId)}
-            <li>
-              <strong class={step.status}>
-                {step.name}: {step.action}
-                {step.status}
-              </strong>
-              {#if runResult.id}
-                <button
-                  type="button"
-                  class="log-link"
-                  aria-label="Logs of {step.name}"
-                  onclick={() => graph.openLog(step.nodeId)}
-                >
-                  Logs
-                </button>
-              {/if}
-              {#if usageOf(step)}
-                {@const usage = usageOf(step)!}
-                <span
-                  >Cost: ${usage.costUsd.toFixed(4)} · {usage.inputTokens} in / {usage.outputTokens}
-                  out</span
-                >
-              {/if}
-              {#if step.details && "valid" in step.details}
-                <span>Valid: {String(step.details.valid)}</span>
-              {/if}
-              {#each DETAIL_LABELS as [key, label] (key)}
-                {#if step.details?.[key] !== undefined && step.details?.[key] !== ""}
-                  <span>{label}: {step.details[key]}</span>
-                {/if}
-              {/each}
-              {#if step.error}
-                <pre class="failed">{step.error}</pre>
-              {:else if step.details?.output}
-                <pre>{step.details.output}</pre>
-              {/if}
-              {#each fieldErrors(step.details) as fieldError (fieldError)}
-                <pre class="failed">{fieldError}</pre>
-              {/each}
-              {#if typeof step.details?.url === "string"}
-                <a href={step.details.url} target="_blank" rel="noreferrer"
-                  >{step.details.url}</a
-                >
-              {/if}
-              {#if step.details?.output && step.action === "command"}
-                <pre>{step.details.output}</pre>
-              {/if}
-              {#if step.details?.reply}
-                <pre>{step.details.reply}</pre>
-              {/if}
-            </li>
-          {/each}
-        </ul>
+    <div class="spacer"></div>
+    <div class="group" role="group" aria-label="Run actions">
+      <button
+        type="button"
+        class="ghost"
+        onclick={() => {
+          historyDialog = true;
+          void listRuns();
+        }}
+      >
+        Runs…
+      </button>
+      {#if running && runResult?.id && runResult.status === "running"}
+        <button type="button" class="danger" onclick={() => void cancelRun()}>
+          Cancel run
+        </button>
       {/if}
-    </section>
-  </div>
+      <button
+        type="button"
+        class="run"
+        disabled={running}
+        onclick={() => void runFlow()}
+      >
+        <svg viewBox="0 0 12 12" aria-hidden="true"
+          ><path d="M3 1.8v8.4L10 6Z" /></svg
+        >
+        {running ? "Running…" : "Run flow"}
+      </button>
+      <ThemeToggle />
+    </div>
+  </header>
   <Dialog.Root
     open={graph.logNodeId !== null && !!runResult}
     onOpenChange={(open) => {
@@ -588,9 +534,9 @@
       <Dialog.Content class="log-viewer">
         <Dialog.Title class="dialog-title">Start from a template</Dialog.Title>
         {#if templates === null}
-          <p>Loading…</p>
+          <p class="muted">Loading…</p>
         {:else}
-          <ul class="saved-workflows">
+          <ul class="picker">
             {#each templates as template (template.name)}
               <li>
                 <button
@@ -613,11 +559,11 @@
       <Dialog.Content class="log-viewer">
         <Dialog.Title class="dialog-title">Run history</Dialog.Title>
         {#if pastRuns === null}
-          <p>Loading…</p>
+          <p class="muted">Loading…</p>
         {:else if pastRuns.length === 0}
-          <p>No runs recorded yet.</p>
+          <p class="muted">No runs recorded yet.</p>
         {:else}
-          <ul class="saved-workflows">
+          <ul class="picker">
             {#each pastRuns as pastRun (pastRun.id)}
               <li>
                 <button type="button" onclick={() => void openRun(pastRun.id)}
@@ -637,11 +583,11 @@
       <Dialog.Content class="log-viewer">
         <Dialog.Title class="dialog-title">Open workflow</Dialog.Title>
         {#if savedWorkflows === null}
-          <p>Loading…</p>
+          <p class="muted">Loading…</p>
         {:else if savedWorkflows.length === 0}
-          <p>No saved workflows yet.</p>
+          <p class="muted">No saved workflows yet.</p>
         {:else}
-          <ul class="saved-workflows">
+          <ul class="picker">
             {#each savedWorkflows as workflow (workflow.name)}
               <li>
                 <button
@@ -661,6 +607,106 @@
   <Palette {graph} />
   <Canvas {graph} />
   <PropertiesPanel {graph} />
+  <section class="panel" aria-label="Run result" aria-live="polite">
+    <div class="panel-header">
+      <h2>Run</h2>
+      {#if runResult && !runError}
+        <span class="run-status {runResult.status}">
+          <span class="dot" aria-hidden="true"></span>
+          Run {runResult.status}
+        </span>
+        {#if runResult.retryOf}
+          <span class="meta">Retry of {runResult.retryOf}</span>
+        {/if}
+        {#if runUsage(runResult)}
+          <span class="meta">{runUsage(runResult)}</span>
+        {/if}
+        {#if runResult.id && !running && ["failed", "cancelled", "interrupted"].includes(runResult.status)}
+          <button type="button" class="small" onclick={() => void retryRun()}>
+            Retry from failure
+          </button>
+        {/if}
+      {/if}
+    </div>
+    <div class="panel-body">
+      {#if yamlError}
+        <p class="error">{yamlError}</p>
+      {/if}
+      {#if runError}
+        <p class="error">{runError}</p>
+      {:else if runResult}
+        <ul class="steps">
+          {#each runResult.steps as step (step.nodeId)}
+            <li class="step {step.status}">
+              <div class="step-line">
+                <span class="dot" aria-hidden="true"></span>
+                <strong>
+                  {step.name}: {step.action}
+                  {step.status}
+                </strong>
+                {#if runResult.id}
+                  <button
+                    type="button"
+                    class="small ghost"
+                    aria-label="Logs of {step.name}"
+                    onclick={() => graph.openLog(step.nodeId)}
+                  >
+                    Logs
+                  </button>
+                {/if}
+              </div>
+              <div class="details">
+                {#if usageOf(step)}
+                  {@const usage = usageOf(step)!}
+                  <span
+                    >Cost: ${usage.costUsd.toFixed(4)} · {usage.inputTokens} in /
+                    {usage.outputTokens} out</span
+                  >
+                {/if}
+                {#if step.details && "valid" in step.details}
+                  <span>Valid: {String(step.details.valid)}</span>
+                {/if}
+                {#each DETAIL_LABELS as [key, label] (key)}
+                  {#if step.details?.[key] !== undefined && step.details?.[key] !== ""}
+                    <span>{label}: {step.details[key]}</span>
+                  {/if}
+                {/each}
+                {#if typeof step.details?.url === "string"}
+                  <a href={step.details.url} target="_blank" rel="noreferrer"
+                    >{step.details.url}</a
+                  >
+                {/if}
+              </div>
+              {#if step.error}
+                <pre class="failed">{step.error}</pre>
+              {:else if step.details?.output}
+                <pre>{step.details.output}</pre>
+              {/if}
+              {#each fieldErrors(step.details) as fieldError (fieldError)}
+                <pre class="failed">{fieldError}</pre>
+              {/each}
+              {#if step.details?.output && step.action === "command"}
+                <pre>{step.details.output}</pre>
+              {/if}
+              {#if step.details?.reply}
+                <pre>{step.details.reply}</pre>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {:else if !yamlError}
+        <p class="muted">
+          No run yet. Run flow executes the graph from its starting points.
+        </p>
+      {/if}
+    </div>
+  </section>
+  <footer class="statusbar">
+    <span class="backend">{status}</span>
+    <span class="file-status" role="status" aria-label="Workflow file"
+      >{fileStatus}</span
+    >
+  </footer>
 </div>
 
 <style>
@@ -668,157 +714,364 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: 200px 1fr 260px;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: 220px minmax(0, 1fr) 300px;
+    grid-template-rows: auto minmax(0, 1fr) clamp(7rem, 28vh, 18rem) auto;
+    grid-template-areas:
+      "top top top"
+      "palette canvas properties"
+      "palette panel properties"
+      "status status status";
   }
 
-  .toolbar {
-    grid-column: 1 / -1;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid #d5e0db;
+  .workspace > :global(aside[aria-label="Component palette"]) {
+    grid-area: palette;
   }
 
-  .toolbar button {
-    padding: 0.4rem 0.75rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    color: #17342c;
-    font: inherit;
-    cursor: pointer;
+  .workspace > :global(.canvas) {
+    grid-area: canvas;
   }
 
-  .actions {
+  .workspace > :global(aside[aria-label="Node properties"]) {
+    grid-area: properties;
+  }
+
+  .topbar {
+    grid-area: top;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.5rem 0.75rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
   }
 
-  .workflow-name,
-  .import {
+  .brand {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    font-size: 0.8rem;
-    color: #5b7a71;
+    gap: 0.45rem;
+    padding-right: 0.25rem;
   }
 
-  .workflow-name input {
-    padding: 0.3rem 0.4rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    font: inherit;
+  .logo {
+    width: 1.15rem;
+    height: 1.15rem;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.6;
   }
 
-  .import input {
-    max-width: 12rem;
-    font-size: 0.75rem;
-  }
-
-  .file-status {
-    font-size: 0.8rem;
-    color: #5b7a71;
-  }
-
-  .saved-workflows {
-    list-style: none;
+  h1 {
     margin: 0;
-    padding: 0;
-    display: grid;
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .workflow-name {
+    width: 12rem;
+    border-color: transparent;
+    background: var(--surface-sunken);
+    font-weight: 500;
+  }
+
+  .workflow-name:hover {
+    border-color: var(--border-strong);
+  }
+
+  .group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.25rem;
   }
 
-  .saved-workflows span {
-    margin-left: 0.5rem;
-    font-size: 0.75rem;
-    color: #5b7a71;
+  .spacer {
+    flex: 1;
   }
 
-  .toolbar button:disabled {
-    cursor: progress;
-    opacity: 0.6;
+  .ghost,
+  .ghost-like {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
   }
 
-  .toolbar .run {
-    border-color: #2f7a5f;
-    background: #2f7a5f;
-    color: #ffffff;
+  .ghost:hover,
+  .ghost-like:hover {
+    color: var(--text);
+  }
+
+  .import {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.9rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .import:hover {
+    background: var(--surface-hover);
+  }
+
+  .import:focus-within {
+    outline: 2px solid var(--accent);
+  }
+
+  /* The native file input stays in place for the label and tests but is
+     visually replaced by the label text. */
+  .import input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .run {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    padding-inline: 0.9rem;
+  }
+
+  .run:hover:not(:disabled) {
+    border-color: var(--accent-hover);
+    background: var(--accent-hover);
+  }
+
+  .run svg {
+    width: 0.7rem;
+    height: 0.7rem;
+    fill: currentColor;
+  }
+
+  .danger {
+    border-color: var(--fail);
+    color: var(--fail);
+    background: transparent;
+  }
+
+  .small {
+    min-height: 1.5rem;
+    padding: 0.1rem 0.5rem;
+    font-size: 12px;
+  }
+
+  .panel {
+    grid-area: panel;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .panel-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-header h2 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
   }
 
   .run-status {
-    margin: 0.5rem 0 0.25rem;
-    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-weight: 600;
   }
 
-  .run-result ul {
+  .dot {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+
+  .succeeded > .dot,
+  .succeeded > .step-line > .dot {
+    background: var(--ok);
+  }
+
+  .failed > .dot,
+  .failed > .step-line > .dot {
+    background: var(--fail);
+  }
+
+  .running > .dot,
+  .running > .step-line > .dot {
+    background: var(--info);
+  }
+
+  .cancelled > .dot,
+  .interrupted > .dot,
+  .cancelled > .step-line > .dot,
+  .interrupted > .step-line > .dot {
+    background: var(--warn);
+  }
+
+  .run-status.failed {
+    color: var(--fail);
+  }
+
+  .run-status.succeeded {
+    color: var(--ok);
+  }
+
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .step {
+    padding: 0.35rem 0.5rem;
+    border-radius: var(--radius);
+  }
+
+  .step:hover {
+    background: var(--surface-sunken);
+  }
+
+  .step-line {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .step-line strong {
+    font-weight: 550;
+  }
+
+  .step.failed .step-line strong {
+    color: var(--fail);
+  }
+
+  .details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.1rem 0.9rem;
+    padding-left: 1rem;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .details a {
+    color: var(--accent);
+  }
+
+  .panel pre {
+    margin: 0.3rem 0 0 1rem;
+    max-height: 8rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius);
+    background: var(--surface-sunken);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .panel pre.failed {
+    background: var(--fail-soft);
+    color: var(--fail);
+  }
+
+  .muted {
+    margin: 0;
+    color: var(--text-muted);
+  }
+
+  .error {
+    margin: 0 0 0.4rem;
+    color: var(--fail);
+  }
+
+  .statusbar {
+    grid-area: status;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    min-height: 1.5rem;
+    padding: 0 0.75rem;
+    border-top: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .picker {
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
     gap: 0.25rem;
-    font-size: 0.8rem;
-  }
-
-  .run-result span {
-    margin-left: 0.5rem;
-    color: #5b7a71;
-  }
-
-  .run-result pre {
-    margin: 0.25rem 0 0;
-    max-height: 8rem;
     overflow: auto;
-    white-space: pre-wrap;
-    font-size: 0.75rem;
-    color: #5b7a71;
   }
 
-  .succeeded {
-    color: #2f7a5f;
-  }
-
-  .run-result .failed,
-  .run-status.failed {
-    color: #a03030;
-  }
-
-  .log-link {
-    margin-left: 0.5rem;
-    padding: 0 0.4rem;
-    font-size: 0.75rem;
-  }
-
-  :global(.log-viewer) {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(48rem, 92vw);
-    max-height: 80vh;
+  .picker li {
     display: grid;
-    gap: 0.5rem;
-    border: 1px solid #b8ccc4;
-    border-radius: 0.375rem;
-    background: #ffffff;
-    padding: 0.75rem;
+    gap: 0.15rem;
+    padding: 0.35rem;
+    border-radius: var(--radius);
+  }
+
+  .picker li:hover {
+    background: var(--surface-sunken);
+  }
+
+  .picker button {
+    justify-content: flex-start;
+    width: fit-content;
+  }
+
+  .picker span {
+    padding-left: 0.2rem;
+    font-size: 12px;
+    color: var(--text-muted);
   }
 
   .log-text {
     margin: 0;
-    max-height: 60vh;
+    min-height: 0;
     overflow: auto;
     white-space: pre-wrap;
-    font-size: 0.75rem;
-    color: #17342c;
-    background: #f4f7f6;
-    padding: 0.5rem;
-  }
-
-  .yaml-error {
-    margin: 0.5rem 0 0;
-    color: #a03030;
-    font-size: 0.8rem;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.6rem 0.75rem;
   }
 </style>
