@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Gabes-Tint/mega-agents/internal/agents"
 	"github.com/Gabes-Tint/mega-agents/internal/runs"
 )
 
@@ -21,8 +22,14 @@ type DirectoriesResponse struct {
 }
 
 // NewHandler serves the editor and its API, recording runs under the Mega
-// Agents home.
+// Agents home. It never checks the agent backends: the server starts that
+// check and hands it to NewHandlerWithHealth.
 func NewHandler(assets fs.FS) http.Handler {
+	return NewHandlerWithHealth(assets, agents.NewHealthChecker())
+}
+
+// NewHandlerWithHealth serves the editor, reporting the given agent check.
+func NewHandlerWithHealth(assets fs.FS, health *agents.HealthChecker) http.Handler {
 	store, err := runs.DefaultStore()
 	if err != nil {
 		// Without a home there is nowhere to record runs; starting one then
@@ -35,11 +42,16 @@ func NewHandler(assets fs.FS) http.Handler {
 		workflows = WorkflowStore{Root: filepath.Join(os.TempDir(), "mega-agents-workflows-unavailable")}
 		log.Printf("saving workflows under %s: %v", workflows.Root, err)
 	}
-	return NewHandlerWithRuns(assets, Runs{Store: store}, workflows)
+	return newHandler(assets, Runs{Store: store}, workflows, health)
 }
 
 func NewHandlerWithRuns(assets fs.FS, service Runs, workflows WorkflowStore) http.Handler {
+	return newHandler(assets, service, workflows, agents.NewHealthChecker())
+}
+
+func newHandler(assets fs.FS, service Runs, workflows WorkflowStore, health *agents.HealthChecker) http.Handler {
 	mux := http.NewServeMux()
+	registerAgentHealthHandler(mux, health)
 	registerWorkflowYAMLHandler(mux)
 	registerProblemsHandler(mux)
 	registerWorkflowStoreHandler(mux, workflows)

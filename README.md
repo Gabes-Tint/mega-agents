@@ -165,6 +165,15 @@ Agents run with their CLI's non-interactive permission bypass inside the
 workspace, like the fitflow driver's workers; point them at worktrees, not at
 checkouts you care about.
 
+The status bar shows a logo for each backend: in color when it answered the
+startup check, greyed out when it did not (hover for why), pulsing while it is
+being checked. Click a logo to check again. When the server starts, each
+backend whose CLI is on `PATH` gets one tiny prompt (`Reply with exactly: ACK`)
+on its cheapest model (`haiku` for Claude Code, `opencode-go/glm-5.3-flash` for
+OpenCode, the default model for Codex and Grok), with a 60-second limit. That
+costs one small model turn per installed backend. Set
+`MEGA_AGENTS_SKIP_AGENT_CHECK=1` to turn it off.
+
 ## Checks
 
 - `make verify` — types, Go and frontend tests with coverage, formatting,

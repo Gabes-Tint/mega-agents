@@ -30,9 +30,13 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	// Each installed agent backend gets one tiny prompt in the background,
+	// so the status bar can show which ones answer.
+	health := app.AgentHealthFromEnvironment()
+	health.Start()
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           app.NewHandler(assets),
+		Handler:           app.NewHandlerWithHealth(assets, health),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()

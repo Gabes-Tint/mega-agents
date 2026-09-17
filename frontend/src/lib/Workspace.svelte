@@ -9,6 +9,7 @@
   import Palette from "./Palette.svelte";
   import Canvas from "./Canvas.svelte";
   import PropertiesPanel from "./PropertiesPanel.svelte";
+  import AgentHealth from "./AgentHealth.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import Splitter from "./Splitter.svelte";
   import {
@@ -905,6 +906,7 @@
       <span class="severity warning" aria-hidden="true"></span>
       {graph.problemCounts.warnings}
     </button>
+    <AgentHealth />
     <span class="backend">{status}</span>
     <span class="file-status" role="status" aria-label="Workflow file"
       >{fileStatus}</span

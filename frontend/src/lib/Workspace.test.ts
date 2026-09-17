@@ -313,7 +313,9 @@ describe("graph builder workspace", () => {
 
     await dropComponent("GitHub", 410, 410);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/git/repository"),
+    );
     vi.unstubAllGlobals();
   });
 

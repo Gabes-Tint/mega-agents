@@ -13,7 +13,8 @@ max_binary=${MAX_BINARY_BYTES:-33554432}
 # their property editors and run views, then the editor redesign (themes,
 # block deletion, palette explanations, a problems panel), then draw.io style
 # arrows (drag handles, output menu, arrow selection, deletion and
-# reconnection); re-baselined deliberately in review rather than trimming
+# reconnection) and agent health logos with their inline brand marks in the
+# status bar; re-baselined deliberately in review rather than trimming
 # features.
 max_javascript=${MAX_JAVASCRIPT_BYTES:-196736}
 max_css=${MAX_CSS_BYTES:-51200}
