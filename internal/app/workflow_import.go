@@ -128,10 +128,29 @@ func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowN
 		"repository": &node.Repository, "secretKey": &node.SecretKey, "path": &node.Path,
 		"appId": &node.AppID, "privateKeyPath": &node.PrivateKeyPath, "branch": &node.Branch,
 		"base": &node.Base, "worktreePath": &node.WorktreePath, "onto": &node.Onto,
+		"backend": &node.Backend, "model": &node.Model, "effort": &node.Effort, "prompt": &node.Prompt,
+		"outputSchema": &node.OutputSchema,
 	}
 	for key, value := range entry.With {
-		if key == "authenticated" {
+		switch key {
+		case "authenticated":
 			node.Authenticated = value == true
+			continue
+		case "retries", "timeoutMinutes":
+			number, ok := value.(int)
+			decimal, isFloat := value.(float64)
+			if !ok && !isFloat {
+				return WorkflowNodeInput{}, fmt.Errorf("%s setting %q must be a number", identifier, key)
+			}
+			if !isFloat {
+				decimal = float64(number)
+			}
+			if key == "retries" {
+				retries := int(decimal)
+				node.Retries = &retries
+			} else {
+				node.TimeoutMinutes = &decimal
+			}
 			continue
 		}
 		target, known := strings[key]

@@ -52,6 +52,31 @@ record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
 `~/.mega-agents/runs`). In the editor, select a block after a run and choose
 **Show logs**, or use **Logs** beside a step in the run result.
 
+## Blocks that run
+
+- **GitHub** flagged as a starting point runs its **Actions** in order:
+  *Fetch*, *Create worktree* (outputs a `workspace`), and *Rebase*. Without
+  actions it fetches. Runs use the machine's existing Git credentials.
+- **Agent** runs one conversation with a coding-agent CLI (Claude Code, Codex,
+  Grok or OpenCode) in the workspace connected to it, or in its project's
+  folder. Its prompt may use `{{workspace.path}}`, `{{workspace.branch}}`,
+  `{{workspace.base}}`, `{{workspace.repository}}`, and the results of
+  connected agents as `{{result}}` or `{{results.<agent>}}`. With an
+  **Output schema** (JSON Schema, strict subset) the reply is validated and
+  repaired on the same session up to **Retries** times. An agent flagged as a
+  starting point starts a run on its own.
+
+| Backend | CLI | Schema | Verified live |
+| --- | --- | --- | --- |
+| `claude` | `claude --print --output-format stream-json` | `--json-schema` | ✅ haiku |
+| `codex` | `codex exec --json` | `--output-schema` file | ✅ default model |
+| `opencode` | `opencode run --format json` | in the prompt, validated | ✅ `opencode-go/glm-5.3-flash` |
+| `grok` | `grok --output-format json` | `--json-schema` | ⬜ unit-tested only (no credits) |
+
+Agents run with their CLI's non-interactive permission bypass inside the
+workspace, like the fitflow driver's workers; point them at worktrees, not at
+checkouts you care about.
+
 ## Checks
 
 - `make verify` — types, Go and frontend tests with coverage, formatting,

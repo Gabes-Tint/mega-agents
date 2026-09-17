@@ -23,8 +23,8 @@ const runStepTimeout = 2 * time.Minute
 
 const workspacePort = "workspace"
 
-var errNoStartingGitHub = errors.New(
-	"flag a GitHub block as the starting point to run the flow",
+var errNoStartingBlock = errors.New(
+	"flag a GitHub block or an agent as the starting point to run the flow",
 )
 
 // gitActionLabels names each Git action a GitHub block can hold.
@@ -141,27 +141,34 @@ func planRun(request WorkflowRequest) ([]engine.Task, error) {
 	included := map[string]bool{}
 	var tasks []engine.Task
 	for _, node := range request.Nodes {
-		if node.Type != "github" || !node.Start {
-			continue
+		switch {
+		case node.Type == "agent" && node.Start:
+			planner.include(node.ID, included)
+		case node.Type == "github" && node.Start:
+			start, hasActions, err := planner.startingAction(node)
+			if err != nil {
+				return nil, err
+			}
+			if !hasActions {
+				tasks = append(tasks, planner.fetchTask(node, node))
+				continue
+			}
+			planner.include(start.ID, included)
 		}
-		start, hasActions, err := planner.startingAction(node)
-		if err != nil {
-			return nil, err
-		}
-		if !hasActions {
-			tasks = append(tasks, planner.fetchTask(node, node))
-			continue
-		}
-		planner.include(start.ID, included)
 	}
 	if len(tasks) == 0 && len(included) == 0 {
-		return nil, errNoStartingGitHub
+		return nil, errNoStartingBlock
 	}
 	for _, node := range request.Nodes {
 		if !included[node.ID] {
 			continue
 		}
-		task, err := planner.actionTask(node, included)
+		var task engine.Task
+		if node.Type == "agent" {
+			task, err = planner.agentTask(node, included)
+		} else {
+			task, err = planner.actionTask(node, included)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -189,9 +196,12 @@ func (planner runPlanner) startingAction(github WorkflowNodeInput) (WorkflowNode
 	return WorkflowNodeInput{}, false, nil
 }
 
+// executableTypes are the blocks a run executes when a start reaches them.
+var executableTypes = map[string]bool{"action": true, "agent": true}
+
 // include marks the node and every executable node its arrows reach.
 func (planner runPlanner) include(id string, included map[string]bool) {
-	if included[id] || planner.nodeByID[id].Type != "action" {
+	if included[id] || !executableTypes[planner.nodeByID[id].Type] {
 		return
 	}
 	included[id] = true

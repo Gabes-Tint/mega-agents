@@ -30,6 +30,10 @@
     ["path", "Path"],
     ["branch", "Branch"],
     ["base", "Base"],
+    ["backend", "Backend"],
+    ["model", "Model"],
+    ["sessionId", "Session"],
+    ["attempts", "Attempts"],
   ];
 
   const graph = new GraphStore();
@@ -211,6 +215,9 @@
                 <pre class="failed">{step.error}</pre>
               {:else if step.details?.output}
                 <pre>{step.details.output}</pre>
+              {/if}
+              {#if step.details?.reply}
+                <pre>{step.details.reply}</pre>
               {/if}
             </li>
           {/each}

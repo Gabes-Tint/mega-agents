@@ -13,6 +13,19 @@ export const GIT_ACTIONS: readonly { action: GitAction; label: string }[] = [
   { action: "rebase", label: "Rebase" },
 ];
 
+export type AgentField =
+  "backend" | "model" | "effort" | "prompt" | "outputSchema";
+
+export type AgentNumber = "retries" | "timeoutMinutes";
+
+// Coding-agent CLIs an Agent block can run, as the backend names them.
+export const AGENT_BACKENDS: readonly { backend: string; label: string }[] = [
+  { backend: "claude", label: "Claude Code" },
+  { backend: "codex", label: "Codex" },
+  { backend: "grok", label: "Grok" },
+  { backend: "opencode", label: "OpenCode" },
+];
+
 export interface RunStepStatus {
   nodeId: string;
   status: string;
@@ -56,6 +69,13 @@ export interface GraphNode {
   base?: string;
   worktreePath?: string;
   onto?: string;
+  backend?: string;
+  model?: string;
+  effort?: string;
+  prompt?: string;
+  outputSchema?: string;
+  retries?: number;
+  timeoutMinutes?: number;
 }
 
 export const DEFAULT_NODE_WIDTH = 160;
@@ -245,6 +265,7 @@ export class GraphStore {
       h: DEFAULT_NODE_HEIGHT,
       parentId: effectiveParent,
     };
+    if (type === "agent") node.backend = "claude";
     this.nodes.push(node);
     this.selectedId = node.id;
     // The store holds a reactive proxy of the node; hand that back so later
@@ -508,6 +529,17 @@ export class GraphStore {
       node = parent;
       parent = this.nodes.find((candidate) => candidate.id === node.parentId);
     }
+  }
+
+  setAgentField(id: string, field: AgentField, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node[field] = value;
+  }
+
+  // An empty field clears the setting so the backend default applies.
+  setAgentNumber(id: string, field: AgentNumber, value: string): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node[field] = value === "" ? undefined : Number(value);
   }
 
   setActionField(id: string, field: ActionField, value: string): void {

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
   import {
+    AGENT_BACKENDS,
     GIT_ACTIONS,
     GraphStore,
     isForgeType,
     shortNodeId,
     type ActionField,
+    type AgentField,
     type GitAction,
   } from "./graph.svelte.js";
 
@@ -20,6 +22,26 @@
   let browsing = $state<Browsing | null>(null);
   let dialogOpen = $state(false);
   let newAction = $state<GitAction>("fetch");
+
+  // Text settings of an Agent block, in the order the panel shows them.
+  const AGENT_TEXT: {
+    field: AgentField;
+    label: string;
+    placeholder: string;
+  }[] = [
+    { field: "model", label: "Model", placeholder: "the CLI's default" },
+    { field: "effort", label: "Effort", placeholder: "e.g. low, medium, high" },
+  ];
+
+  function schemaIsJSON(text: string | undefined): boolean {
+    if (!text?.trim()) return true;
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   // Configuration each Git action accepts, in the order the panel shows it.
   const ACTION_FIELDS: Record<
@@ -231,6 +253,103 @@
           </label>
         {/each}
       {/if}
+      {#if node.type === "agent"}
+        <label>
+          Backend
+          <select
+            value={node.backend ?? "claude"}
+            onchange={(event) =>
+              graph.setAgentField(
+                node.id,
+                "backend",
+                event.currentTarget.value,
+              )}
+          >
+            {#each AGENT_BACKENDS as option (option.backend)}
+              <option value={option.backend}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        {#each AGENT_TEXT as input (input.field)}
+          <label>
+            {input.label}
+            <input
+              type="text"
+              placeholder={input.placeholder}
+              value={node[input.field] ?? ""}
+              oninput={(event) =>
+                graph.setAgentField(
+                  node.id,
+                  input.field,
+                  event.currentTarget.value,
+                )}
+            />
+          </label>
+        {/each}
+        <label>
+          Prompt
+          <textarea
+            rows="5"
+            value={node.prompt ?? ""}
+            oninput={(event) =>
+              graph.setAgentField(node.id, "prompt", event.currentTarget.value)}
+          ></textarea>
+        </label>
+        <p class="hint">
+          Placeholders: {"{{workspace.path}}"}, {"{{workspace.branch}}"},
+          {"{{workspace.base}}"}, {"{{workspace.repository}}"} from a connected worktree;
+          {"{{result}}"} or {"{{results.<agent>}}"} from connected agents.
+        </p>
+        <label>
+          Output schema
+          <textarea
+            rows="4"
+            placeholder="optional JSON Schema the reply must satisfy"
+            value={node.outputSchema ?? ""}
+            oninput={(event) =>
+              graph.setAgentField(
+                node.id,
+                "outputSchema",
+                event.currentTarget.value,
+              )}
+          ></textarea>
+        </label>
+        {#if !schemaIsJSON(node.outputSchema)}
+          <p class="error" role="alert">The output schema is not valid JSON</p>
+        {/if}
+        <label>
+          Retries
+          <input
+            type="number"
+            min="0"
+            max="5"
+            placeholder="2"
+            value={node.retries ?? ""}
+            oninput={(event) =>
+              graph.setAgentNumber(
+                node.id,
+                "retries",
+                event.currentTarget.value,
+              )}
+          />
+        </label>
+        <label>
+          Timeout (minutes)
+          <input
+            type="number"
+            min="1"
+            max="240"
+            placeholder="30"
+            value={node.timeoutMinutes ?? ""}
+            oninput={(event) =>
+              graph.setAgentNumber(
+                node.id,
+                "timeoutMinutes",
+                event.currentTarget.value,
+              )}
+          />
+        </label>
+      {/if}
       {#if node.type === "githubapp"}
         <label>
           App ID
@@ -337,6 +456,17 @@
     margin: 0.75rem 0 0.25rem;
   }
 
+  textarea {
+    resize: vertical;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: #5b7a71;
+  }
+
   .action-list {
     margin: 0 0 0.5rem;
     padding: 0;
@@ -349,7 +479,8 @@
   }
 
   input,
-  select {
+  select,
+  textarea {
     padding: 0.4rem 0.5rem;
     border: 1px solid #b8ccc4;
     border-radius: 0.375rem;

@@ -42,6 +42,14 @@ type WorkflowNodeInput struct {
 	Base         string `json:"base,omitempty"`
 	WorktreePath string `json:"worktreePath,omitempty"`
 	Onto         string `json:"onto,omitempty"`
+	// Agent blocks.
+	Backend        string   `json:"backend,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	Effort         string   `json:"effort,omitempty"`
+	Prompt         string   `json:"prompt,omitempty"`
+	OutputSchema   string   `json:"outputSchema,omitempty"`
+	Retries        *int     `json:"retries,omitempty"`
+	TimeoutMinutes *float64 `json:"timeoutMinutes,omitempty"`
 }
 
 type WorkflowRequest struct {
@@ -198,10 +206,18 @@ func (emitter *workflowEmitter) emitNode(
 	}
 	for _, field := range []struct{ key, value string }{
 		{"branch", node.Branch}, {"base", node.Base}, {"worktreePath", node.WorktreePath}, {"onto", node.Onto},
+		{"backend", node.Backend}, {"model", node.Model}, {"effort", node.Effort}, {"prompt", node.Prompt},
+		{"outputSchema", node.OutputSchema},
 	} {
 		if field.value != "" {
 			with = append(with, fmt.Sprintf("%s    %s: %s", indent, field.key, yamlString(field.value)))
 		}
+	}
+	if node.Retries != nil {
+		with = append(with, fmt.Sprintf("%s    retries: %d", indent, *node.Retries))
+	}
+	if node.TimeoutMinutes != nil {
+		with = append(with, fmt.Sprintf("%s    timeoutMinutes: %g", indent, *node.TimeoutMinutes))
 	}
 	if node.AppID != "" {
 		with = append(with, fmt.Sprintf("%s    appId: %s", indent, yamlString(node.AppID)))

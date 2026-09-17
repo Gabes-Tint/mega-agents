@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
 
 // Browser suite for drag-and-drop, which jsdom cannot exercise, and for flows
@@ -9,6 +10,13 @@ import { defineConfig } from "@playwright/test";
 // session is never reused, and the backend keeps its worktrees in a temporary
 // Mega Agents home.
 const backendPort = 48_080;
+// Agent CLIs the backend runs are replaced by fakes, so no flow spends a
+// real model turn.
+const fakeAgents = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "e2e",
+  "fake-agents",
+);
 const frontendPort = 45_174;
 
 export default defineConfig({
@@ -25,6 +33,7 @@ export default defineConfig({
       url: `http://localhost:${backendPort}/api/status`,
       env: {
         PORT: String(backendPort),
+        PATH: `${fakeAgents}:${process.env.PATH ?? ""}`,
         MEGA_AGENTS_HOME: mkdtempSync(join(tmpdir(), "mega-agents-home-")),
       },
       reuseExistingServer: false,

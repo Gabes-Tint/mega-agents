@@ -165,7 +165,7 @@ func TestRunRejectsWorkflowsThatCannotRun(t *testing.T) {
 		"bad yaml":       {args: []string{"run", writeWorkflow(t, "flow.yaml", "kind: Other\n")}, want: `kind "Other" is not Workflow`},
 		"no start": {
 			args: []string{"run", writeWorkflow(t, "flow.json", `{"nodes": [{"id": "p1", "type": "project", "name": "api"}]}`)},
-			want: "flag a GitHub block as the starting point",
+			want: "flag a GitHub block or an agent as the starting point",
 		},
 	}
 	for name, testCase := range cases {

@@ -1046,3 +1046,27 @@ describe("run status on the canvas", () => {
     expect(graph.statusOf(github.id)).toBeUndefined();
   });
 });
+
+describe("agent configuration", () => {
+  test("a new agent starts on the Claude backend", () => {
+    const graph = new GraphStore();
+
+    expect(graph.addNode("agent", 0, 0).backend).toBe("claude");
+    expect(graph.addNode("project", 0, 0).backend).toBeUndefined();
+  });
+
+  test("updates an agent's text and number settings", () => {
+    const graph = new GraphStore();
+    const agent = graph.addNode("agent", 0, 0);
+
+    graph.setAgentField(agent.id, "prompt", "Review");
+    graph.setAgentNumber(agent.id, "retries", "3");
+    graph.setAgentNumber(agent.id, "timeoutMinutes", "");
+    graph.setAgentField("missing", "prompt", "ignored");
+    graph.setAgentNumber("missing", "retries", "1");
+
+    expect(agent.prompt).toBe("Review");
+    expect(agent.retries).toBe(3);
+    expect(agent.timeoutMinutes).toBeUndefined();
+  });
+});

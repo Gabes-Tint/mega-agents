@@ -267,7 +267,7 @@ func TestRunRequiresAStartingGitHubBlock(t *testing.T) {
 	response, _ := postRun(t, runBody(t.TempDir(), github))
 
 	if response.Code != http.StatusBadRequest ||
-		!strings.Contains(response.Body.String(), "flag a GitHub block as the starting point") {
+		!strings.Contains(response.Body.String(), "flag a GitHub block or an agent as the starting point") {
 		t.Fatalf("response = %d %q", response.Code, response.Body.String())
 	}
 }

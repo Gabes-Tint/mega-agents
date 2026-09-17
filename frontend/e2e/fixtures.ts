@@ -117,3 +117,25 @@ export async function addAction(page: Page, github: Locator, label: string) {
   await page.getByLabel("New action").selectOption({ label });
   await page.getByRole("button", { name: "Add action" }).click();
 }
+
+// Grows a block by dragging its corner handle.
+export async function enlarge(
+  page: Page,
+  block: Locator,
+  dx: number,
+  dy: number,
+) {
+  const handle = await block.locator(".resize-handle").boundingBox();
+  if (!handle) throw new Error("resize handle not visible");
+  await page.mouse.move(
+    handle.x + handle.width / 2,
+    handle.y + handle.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    handle.x + handle.width / 2 + dx,
+    handle.y + handle.height / 2 + dy,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+}

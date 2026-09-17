@@ -1890,4 +1890,121 @@ describe("graph builder workspace", () => {
     );
     vi.unstubAllGlobals();
   });
+
+  async function agentInProject(): Promise<void> {
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Agent", 410, 410);
+  }
+
+  test("configures an agent's backend, model, prompt, and limits", async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        posted.push(...(JSON.parse(String(init?.body)) as { nodes: [] }).nodes);
+        return new Response("stop", { status: 400 });
+      }),
+    );
+    render(Workspace);
+    await agentInProject();
+
+    expect(screen.getByLabelText("Backend")).toHaveValue("claude");
+    await fireEvent.change(screen.getByLabelText("Backend"), {
+      target: { value: "opencode" },
+    });
+    const text = {
+      Model: "opencode-go/glm-5.3-flash",
+      Effort: "high",
+      Prompt: "Implement {{workspace.branch}}",
+      "Output schema": '{"type": "object"}',
+    };
+    for (const [label, value] of Object.entries(text)) {
+      await fireEvent.input(screen.getByLabelText(label), {
+        target: { value },
+      });
+    }
+    await fireEvent.input(screen.getByLabelText("Retries"), {
+      target: { value: "1" },
+    });
+    await fireEvent.input(screen.getByLabelText("Timeout (minutes)"), {
+      target: { value: "45" },
+    });
+    await fireEvent.click(screen.getByText("Project 1"));
+    await fireEvent.click(screen.getByText("Agent 1"));
+
+    for (const [label, value] of Object.entries(text)) {
+      expect(screen.getByLabelText(label)).toHaveValue(value);
+    }
+    expect(screen.getByLabelText("Backend")).toHaveValue("opencode");
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await waitFor(() => expect(posted.length).toBeGreaterThan(0));
+    expect(posted.find((node) => node.type === "agent")).toMatchObject({
+      backend: "opencode",
+      model: "opencode-go/glm-5.3-flash",
+      effort: "high",
+      prompt: "Implement {{workspace.branch}}",
+      outputSchema: '{"type": "object"}',
+      retries: 1,
+      timeoutMinutes: 45,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  test("warns about an output schema that is not JSON", async () => {
+    render(Workspace);
+    await agentInProject();
+
+    await fireEvent.input(screen.getByLabelText("Output schema"), {
+      target: { value: '{"type": ' },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The output schema is not valid JSON",
+    );
+    await fireEvent.input(screen.getByLabelText("Output schema"), {
+      target: { value: "" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  test("lists the placeholders a prompt can use", async () => {
+    render(Workspace);
+    await agentInProject();
+
+    expect(screen.getByText(/\{\{workspace\.path\}\}/)).toBeInTheDocument();
+    expect(screen.getByText(/\{\{results\.<agent>\}\}/)).toBeInTheDocument();
+  });
+
+  test("shows an agent step's session, attempts, and reply", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [
+        record("succeeded", [
+          {
+            nodeId: "a1",
+            name: "Reviewer",
+            action: "agent",
+            status: "succeeded",
+            details: {
+              backend: "claude",
+              sessionId: "session-9",
+              attempts: 2,
+              reply: '{"verdict":"approve"}',
+            },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
+    expect(result).toHaveTextContent("Backend: claude");
+    expect(result).toHaveTextContent("Session: session-9");
+    expect(result).toHaveTextContent("Attempts: 2");
+    expect(result).toHaveTextContent('{"verdict":"approve"}');
+    vi.unstubAllGlobals();
+  });
 });
