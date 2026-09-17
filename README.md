@@ -157,6 +157,17 @@ refs.
   type-checked when the run is planned and evaluated under a cost limit;
   arrows on routes not taken are skipped.
 
+The **Command**, **Prompt**, **Output schema** and **Schema** fields are code
+editors rather than plain text boxes. They take as many lines as the text
+needs, highlight a command as shell and the two schema fields as JSON, and mark
+`{{placeholders}}` out of the syntax around them in all four. Typing `{{`, or
+`$` in a command, or pressing Ctrl-Space offers the variables that actually
+reach the selected block: the workspace fields when a worktree reaches it,
+`{{result}}` and `{{results.<block>}}` for the blocks connected to it, and the
+`MEGA_AGENTS_WORKSPACE_*` environment variables in a command. Enter or Tab
+accepts the highlighted variable and Escape closes the list; with no list open
+Tab still moves to the next field rather than indenting.
+
 | Backend | CLI | Schema | Verified live |
 | --- | --- | --- | --- |
 | `claude` | `claude --print --output-format stream-json` | `--json-schema` | ✅ haiku |

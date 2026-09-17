@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
+  import CodeEditor from "./CodeEditor.svelte";
+  import { completionsFor, type EditorLanguage } from "./completions.js";
   import {
     AGENT_BACKENDS,
     DEFAULT_IGNORE_LABELS,
@@ -33,6 +35,12 @@
     { field: "model", label: "Model", placeholder: "the CLI's default" },
     { field: "effort", label: "Effort", placeholder: "e.g. low, medium, high" },
   ];
+
+  // The variables a text field of the block may name. A JSON Schema is not
+  // templated by the backend, so only the prompt and command fields ask.
+  function variablesFor(nodeId: string, language: EditorLanguage) {
+    return completionsFor(graph, nodeId, language);
+  }
 
   function schemaIsJSON(text: string | undefined): boolean {
     if (!text?.trim()) return true;
@@ -341,34 +349,36 @@
             />
           </label>
         {/each}
-        <label>
-          Prompt
-          <textarea
-            rows="5"
+        <div class="field">
+          <span>Prompt</span>
+          <CodeEditor
+            label="Prompt"
+            language="text"
+            minLines={5}
+            placeholder="what the agent should do"
             value={node.prompt ?? ""}
-            oninput={(event) =>
-              graph.setAgentField(node.id, "prompt", event.currentTarget.value)}
-          ></textarea>
-        </label>
+            completions={() => variablesFor(node.id, "text")}
+            onchange={(value) => graph.setAgentField(node.id, "prompt", value)}
+          />
+        </div>
         <p class="hint">
           Placeholders: {"{{workspace.path}}"}, {"{{workspace.branch}}"},
           {"{{workspace.base}}"}, {"{{workspace.repository}}"} from a connected worktree;
-          {"{{result}}"} or {"{{results.<agent>}}"} from connected agents.
+          {"{{result}}"} or {"{{results.<agent>}}"} from connected agents. Ctrl-Space
+          offers the ones this block receives.
         </p>
-        <label>
-          Output schema
-          <textarea
-            rows="4"
+        <div class="field">
+          <span>Output schema</span>
+          <CodeEditor
+            label="Output schema"
+            language="json"
+            minLines={4}
             placeholder="optional JSON Schema the reply must satisfy"
             value={node.outputSchema ?? ""}
-            oninput={(event) =>
-              graph.setAgentField(
-                node.id,
-                "outputSchema",
-                event.currentTarget.value,
-              )}
-          ></textarea>
-        </label>
+            onchange={(value) =>
+              graph.setAgentField(node.id, "outputSchema", value)}
+          />
+        </div>
         {#if !schemaIsJSON(node.outputSchema)}
           <p class="error" role="alert">The output schema is not valid JSON</p>
         {/if}
@@ -431,35 +441,39 @@
         </label>
       {/if}
       {#if node.type === "jsonschema"}
-        <label>
-          Schema
-          <textarea
-            rows="8"
+        <div class="field">
+          <span>Schema</span>
+          <CodeEditor
+            label="Schema"
+            language="json"
+            minLines={8}
             placeholder="JSON Schema the value must satisfy"
             value={node.schema ?? ""}
-            oninput={(event) =>
-              graph.setSchema(node.id, event.currentTarget.value)}
-          ></textarea>
-        </label>
+            onchange={(value) => graph.setSchema(node.id, value)}
+          />
+        </div>
         {#if !schemaIsJSON(node.schema)}
           <p class="error" role="alert">The schema is not valid JSON</p>
         {/if}
       {/if}
       {#if node.type === "command"}
-        <label>
-          Command
-          <textarea
-            rows="3"
+        <div class="field">
+          <span>Command</span>
+          <CodeEditor
+            label="Command"
+            language="shell"
+            minLines={3}
             placeholder="e.g. make verify"
             value={node.command ?? ""}
-            oninput={(event) =>
-              graph.setCommand(node.id, event.currentTarget.value)}
-          ></textarea>
-        </label>
+            completions={() => variablesFor(node.id, "shell")}
+            onchange={(value) => graph.setCommand(node.id, value)}
+          />
+        </div>
         <p class="hint">
           Runs with sh in the connected workspace or the project folder. Exit 0
           takes passed; anything else takes failed, or fails the run when no
-          arrow takes failed.
+          arrow takes failed. Ctrl-Space offers the placeholders and
+          MEGA_AGENTS_ variables this block receives.
         </p>
         <label>
           Timeout (minutes)
@@ -744,6 +758,16 @@
   }
 
   label {
+    display: grid;
+    gap: 0.25rem;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  /* A code field is labelled through its editor rather than a form control,
+     so it takes the same layout a label gives its input. */
+  .field {
     display: grid;
     gap: 0.25rem;
     font-size: 12px;

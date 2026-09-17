@@ -8,15 +8,20 @@ assets=${2:-internal/web/dist/assets}
 # notes choose CEL for type-checked, sandboxed routing expressions over a
 # hand-rolled language; re-baselined deliberately in review.
 max_binary=${MAX_BINARY_BYTES:-33554432}
-# 192 KiB: the graph workspace added an SVG edge layer and node interaction
+# 528 KiB: the graph workspace added an SVG edge layer and node interaction
 # logic, then executable blocks (Git actions, agents, validation, routing) with
 # their property editors and run views, then the editor redesign (themes,
 # block deletion, palette explanations, a problems panel), then draw.io style
 # arrows (drag handles, output menu, arrow selection, deletion and
 # reconnection) and agent health logos with their inline brand marks in the
-# status bar; re-baselined deliberately in review rather than trimming
-# features.
-max_javascript=${MAX_JAVASCRIPT_BYTES:-196736}
+# status bar, and finally CodeMirror 6 editors for the command, prompt and
+# schema fields. That last step costs about 334 KiB on its own: it was chosen
+# with the product owner over a hand-rolled highlighter so the fields get a
+# real editor (shell and JSON syntax, undo, bracket matching, soft wrap) and
+# completion of the variables that reach the block, which a bespoke textarea
+# overlay would have to reimplement and keep correct. Re-baselined
+# deliberately in review rather than trimming features.
+max_javascript=${MAX_JAVASCRIPT_BYTES:-540672}
 max_css=${MAX_CSS_BYTES:-51200}
 
 test -f "$binary" || { echo "Missing binary: $binary" >&2; exit 1; }
