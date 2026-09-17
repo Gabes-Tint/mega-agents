@@ -9,6 +9,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     testTimeout: 5000,
+    setupFiles: ["./src/test-setup.ts"],
     // Browser suites live in e2e/ and run via `bun run e2e` (Playwright).
     exclude: [...defaultExclude, "e2e/**"],
     coverage: {

@@ -38,6 +38,18 @@
   --warn-soft: #fdf3dc;
   --info: #2f6fd0;
   --info-soft: #e7effb;
+
+  /* Syntax colours of the command, prompt and schema editors. */
+  --code-keyword: #9226a8;
+  --code-builtin: #2f6fd0;
+  --code-variable: #0f7a70;
+  --code-property: #0f7a70;
+  --code-string: #1f8a55;
+  --code-number: #a8590c;
+  --code-operator: #5f6775;
+  --code-comment: #8b93a1;
+  --code-template: #6a3fd9;
+  --code-template-soft: rgb(106 63 217 / 0.12);
 }
 
 :root[data-theme="dark"] {
@@ -70,6 +82,17 @@
   --warn-soft: #30260f;
   --info: #6aa5ff;
   --info-soft: #152236;
+
+  --code-keyword: #d68ef0;
+  --code-builtin: #7fb4ff;
+  --code-variable: #5fd4c4;
+  --code-property: #5fd4c4;
+  --code-string: #8fdca9;
+  --code-number: #f0b47a;
+  --code-operator: #9ba3b0;
+  --code-comment: #6c7482;
+  --code-template: #b9a5ff;
+  --code-template-soft: rgb(185 165 255 / 0.18);
 }
 
 /* Block tints, derived from the --block-hue each block and palette entry

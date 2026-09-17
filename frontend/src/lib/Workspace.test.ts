@@ -8,6 +8,31 @@ import {
 } from "@testing-library/svelte";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import Workspace from "./Workspace.svelte";
+import { typeIntoEditor } from "../test-setup.js";
+
+// Command, Prompt and the two schema fields are code editors rather than
+// text boxes: they take text the way typing does and hold it in their
+// content element, one element per line.
+async function editField(label: string, value: string): Promise<void> {
+  await typeIntoEditor(screen.getByLabelText(label), value);
+}
+
+function fieldText(label: string): string {
+  return [...screen.getByLabelText(label).querySelectorAll(".cm-line")]
+    .map((line) =>
+      [...line.childNodes]
+        .filter(
+          (node) =>
+            !(
+              node instanceof HTMLElement &&
+              node.classList.contains("cm-placeholder")
+            ),
+        )
+        .map((node) => node.textContent)
+        .join(""),
+    )
+    .join("\n");
+}
 
 afterEach(() => {
   cleanup();
@@ -2149,13 +2174,18 @@ describe("graph builder workspace", () => {
     const text = {
       Model: "opencode-go/glm-5.3-flash",
       Effort: "high",
-      Prompt: "Implement {{workspace.branch}}",
-      "Output schema": '{"type": "object"}',
     };
     for (const [label, value] of Object.entries(text)) {
       await fireEvent.input(screen.getByLabelText(label), {
         target: { value },
       });
+    }
+    const code = {
+      Prompt: "Implement {{workspace.branch}}",
+      "Output schema": '{"type": "object"}',
+    };
+    for (const [label, value] of Object.entries(code)) {
+      await editField(label, value);
     }
     await fireEvent.input(screen.getByLabelText("Retries"), {
       target: { value: "1" },
@@ -2168,6 +2198,9 @@ describe("graph builder workspace", () => {
 
     for (const [label, value] of Object.entries(text)) {
       expect(screen.getByLabelText(label)).toHaveValue(value);
+    }
+    for (const [label, value] of Object.entries(code)) {
+      expect(fieldText(label)).toBe(value);
     }
     expect(screen.getByLabelText("Backend")).toHaveValue("opencode");
     await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
@@ -2188,16 +2221,12 @@ describe("graph builder workspace", () => {
     render(Workspace);
     await agentInProject();
 
-    await fireEvent.input(screen.getByLabelText("Output schema"), {
-      target: { value: '{"type": ' },
-    });
+    await editField("Output schema", '{"type": ');
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The output schema is not valid JSON",
     );
-    await fireEvent.input(screen.getByLabelText("Output schema"), {
-      target: { value: "" },
-    });
+    await editField("Output schema", "");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -2252,9 +2281,7 @@ describe("graph builder workspace", () => {
     await fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Check" },
     });
-    await fireEvent.input(screen.getByLabelText("Schema"), {
-      target: { value: '{"type": "object"}' },
-    });
+    await editField("Schema", '{"type": "object"}');
     await dropComponent("Agent", 596, 500);
     await fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Fixer" },
@@ -2264,15 +2291,13 @@ describe("graph builder workspace", () => {
     await fireEvent.click(screen.getByText("Fixer"));
 
     await fireEvent.click(screen.getByText("Check"));
-    expect(screen.getByLabelText("Schema")).toHaveValue('{"type": "object"}');
+    expect(fieldText("Schema")).toBe('{"type": "object"}');
     const port = screen.getByLabelText("Output to Fixer");
     expect(port).toHaveValue("valid");
     await fireEvent.change(port, { target: { value: "invalid" } });
 
     expect(canvas().querySelector(".edge-port")).toHaveTextContent("invalid");
-    await fireEvent.input(screen.getByLabelText("Schema"), {
-      target: { value: "{" },
-    });
+    await editField("Schema", "{");
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The schema is not valid JSON",
     );
@@ -2714,17 +2739,85 @@ describe("graph builder workspace", () => {
     await dropComponent("Project", 400, 400);
     await dropComponent("Command", 410, 410);
 
-    await fireEvent.input(screen.getByLabelText("Command"), {
-      target: { value: "go test ./..." },
-    });
+    await editField("Command", "cd repository\ngo test ./...");
     await fireEvent.input(screen.getByLabelText("Timeout (minutes)"), {
       target: { value: "15" },
     });
     await fireEvent.click(screen.getByText("Project 1"));
     await fireEvent.click(screen.getByText("Command 1"));
 
-    expect(screen.getByLabelText("Command")).toHaveValue("go test ./...");
+    expect(fieldText("Command")).toBe("cd repository\ngo test ./...");
     expect(screen.getByLabelText("Timeout (minutes)")).toHaveValue(15);
+  });
+
+  test("keeps one block's edits out of another block's undo", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Command", 410, 410);
+    await editField("Command", "make one");
+    await dropComponent("Command", 572, 478);
+    await editField("Command", "make two");
+
+    // Undoing past everything typed here must empty this block's field, not
+    // reach back into the edits the other block's field recorded.
+    await fireEvent.keyDown(screen.getByLabelText("Command"), {
+      key: "z",
+      ctrlKey: true,
+    });
+    await fireEvent.keyDown(screen.getByLabelText("Command"), {
+      key: "z",
+      ctrlKey: true,
+    });
+
+    expect(fieldText("Command")).toBe("");
+    await fireEvent.click(screen.getByText("Command 1"));
+    expect(fieldText("Command")).toBe("make one");
+  });
+
+  test("colours a command's shell words and its placeholders apart", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Command", 410, 410);
+
+    await editField("Command", "cd {{workspace.path}} && make verify");
+
+    const field = screen.getByLabelText("Command");
+    expect(field.querySelector(".tok-builtin")).toHaveTextContent("cd");
+    expect(field.querySelector(".tok-template")).toHaveTextContent(
+      "{{workspace.path}}",
+    );
+  });
+
+  test("offers a command the values of the blocks connected to it", async () => {
+    render(Workspace);
+    await dropComponent("Project", 400, 400);
+    await dropComponent("Agent", 410, 410);
+    // Beside the agent, which spans 410..570, and still inside the project.
+    await dropComponent("Command", 572, 478);
+    await fireEvent.click(screen.getByText("Agent 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(screen.getByText("Command 1"));
+    await fireEvent.click(screen.getByText("Command 1"));
+
+    const field = screen.getByLabelText("Command");
+    field.focus();
+    await editField("Command", "echo {{");
+
+    expect(
+      await screen.findByRole("option", { name: /results\.agent-1/ }),
+    ).toBeInTheDocument();
+  });
+
+  test("offers a prompt nothing while no block reaches the agent", async () => {
+    render(Workspace);
+    await agentInProject();
+
+    const field = screen.getByLabelText("Prompt");
+    field.focus();
+    await editField("Prompt", "Work on {{");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(document.querySelector(".cm-tooltip-autocomplete")).toBeNull();
   });
 
   test("shows a command step's exit code and output", async () => {
