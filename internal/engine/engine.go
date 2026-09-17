@@ -391,10 +391,27 @@ func (e *execution) gather(task Task) ([]Input, string) {
 			inputs = append(inputs, Input{TaskID: need.TaskID, Port: need.Port, Value: value})
 		}
 	}
-	if task.WaitForAny && len(inputs) == 0 && len(missing) > 0 {
-		return nil, "nothing arrived from " + joinNames(missing)
+	if task.WaitForAny {
+		// An arrow arrives with every output it carries or not at all, so a
+		// workspace passed along a branch not taken does not count.
+		inputs = slices.DeleteFunc(inputs, func(input Input) bool {
+			return slices.Contains(missing, e.nameOf(input.TaskID))
+		})
+		if len(inputs) == 0 && len(missing) > 0 {
+			return nil, "nothing arrived from " + joinNames(missing)
+		}
 	}
 	return inputs, ""
+}
+
+// nameOf is how a task is named in explanations.
+func (e *execution) nameOf(taskID string) string {
+	if _, isGiven := e.options.Given[taskID]; !isGiven {
+		if step := e.run.Steps[e.stepOf[e.index[taskID]]]; step.Name != "" {
+			return step.Name
+		}
+	}
+	return taskID
 }
 
 // joinNames spells a list as "a, b or c".

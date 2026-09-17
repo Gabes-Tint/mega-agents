@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
+	"github.com/Gabes-Tint/mega-agents/internal/gitops"
 	"github.com/Gabes-Tint/mega-agents/internal/router"
 )
 
@@ -157,5 +159,25 @@ func TestRouterAndSchemaLogsMarkTheirOutcome(t *testing.T) {
 	}
 	if got := logOf("s1", map[string]any{}); !strings.Contains(got, "⚠️ The value takes the invalid branch") {
 		t.Errorf("invalid schema log = %q", got)
+	}
+}
+
+func TestARouterPassesTheWorkspaceOn(t *testing.T) {
+	t.Parallel()
+	tasks, failures, _ := plan(WorkflowRequest{Nodes: []WorkflowNodeInput{
+		{ID: "p1", Type: "project", Name: "api", Path: "/work/api"},
+		{ID: "a1", Type: "agent", Name: "Reviewer", ParentID: "p1", Start: true, Backend: "claude", Prompt: "Review"},
+		{ID: "x1", Type: "router", Name: "Route", ParentID: "p1", Cases: []router.Case{{Name: "approved", Expression: "true"}}},
+	}, Edges: []WorkflowEdgeInput{{ID: "e1", From: "a1", To: "x1"}}})
+	if len(failures) > 0 {
+		t.Fatal(failures)
+	}
+	workspace := gitops.Workspace{Path: "/work/tree"}
+	result, err := tasks[1].Run(context.Background(), []engine.Input{
+		{TaskID: "a1", Port: resultPort, Value: map[string]any{}},
+		{TaskID: "a1", Port: workspacePort, Value: workspace},
+	}, io.Discard)
+	if err != nil || result.Outputs[workspacePort] != workspace {
+		t.Fatalf("outputs = %+v, err = %v", result.Outputs, err)
 	}
 }

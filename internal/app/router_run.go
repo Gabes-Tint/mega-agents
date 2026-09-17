@@ -23,6 +23,13 @@ func (planner runPlanner) routerTask(node WorkflowNodeInput) (engine.Task, error
 	if err != nil {
 		return engine.Task{}, err
 	}
+	// The workspace the value came with travels on down the route taken.
+	incoming, _ := planner.incomingNeeds(node)
+	for _, need := range incoming {
+		if need.Port == workspacePort {
+			needs = append(needs, need)
+		}
+	}
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "router", Needs: needs,
 		Run: func(_ context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
@@ -41,7 +48,11 @@ func (planner runPlanner) routerTask(node WorkflowNodeInput) (engine.Task, error
 			details["case"] = route
 			fmt.Fprintf(log, "🔀 Routed to %s\n", route)
 			routed := map[string]any{"case": route, "value": inputs[0].Value}
-			return engine.Result{Outputs: map[string]any{route: routed}, Details: details}, nil
+			outputs := map[string]any{route: routed}
+			if workspace, ok := workspaceIn(inputs); ok {
+				outputs[workspacePort] = workspace
+			}
+			return engine.Result{Outputs: outputs, Details: details}, nil
 		},
 	}, nil
 }

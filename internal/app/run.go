@@ -521,7 +521,7 @@ func (planner runPlanner) passesWorkspace(id string, visiting map[string]bool) b
 	switch node.Type {
 	case "action":
 		return node.Action == "worktree" || needsWorkspace[node.Action]
-	case "agent", "command", "loop":
+	case "agent", "command", "loop", "router":
 		if visiting[id] {
 			return false
 		}

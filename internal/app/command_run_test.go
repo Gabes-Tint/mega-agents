@@ -123,3 +123,18 @@ func TestCommandPlansAreCheckedBeforeRunning(t *testing.T) {
 		})
 	}
 }
+
+func TestTheWorkspaceTravelsDownTheRouteTaken(t *testing.T) {
+	fakeClaude(t)
+	body := gateFlow(t, "echo ok",
+		`, {"id": "x1", "type": "router", "name": "Route", "parentId": "p1", "cases": [{"name": "green", "expression": "value.exitCode == 0"}]},
+		   {"id": "c2", "type": "command", "name": "Where", "parentId": "p1", "command": "pwd"}`,
+		`, {"id": "e2", "from": "c1", "to": "x1"}, {"id": "e3", "from": "x1", "to": "c2", "fromPort": "green"}`)
+
+	record := finishedRunOnly(t, body)
+
+	where := record.Steps[len(record.Steps)-1]
+	if record.Status != engine.Succeeded || !strings.Contains(where.Details["output"].(string), "gate") {
+		t.Fatalf("where = %+v, record = %+v", where, record)
+	}
+}

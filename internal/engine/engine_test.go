@@ -447,3 +447,21 @@ func TestATaskWaitingForAnyIsSkippedWhenNothingArrives(t *testing.T) {
 		t.Fatalf("deliver = %+v", step)
 	}
 }
+
+func TestAnArrowArrivesOnlyWithEveryOutputItCarries(t *testing.T) {
+	r := &recorder{}
+	tasks := []Task{
+		r.task("route", nil, func([]Input) (Result, error) {
+			return Result{Outputs: map[string]any{"builder": "brief", "workspace": "/work"}}, nil
+		}),
+		{ID: "deliver", WaitForAny: true, Needs: []Need{
+			{TaskID: "route", Port: "mechanic"}, {TaskID: "route", Port: "workspace"},
+		}, Run: func(context.Context, []Input, io.Writer) (Result, error) { return Result{}, nil }},
+	}
+
+	run, _ := Execute(context.Background(), tasks, Options{})
+
+	if step := run.Steps[1]; step.Status != Skipped {
+		t.Fatalf("deliver = %+v, want skipped: the mechanic route never came", step)
+	}
+}
