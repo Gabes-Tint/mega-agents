@@ -84,6 +84,19 @@
     valid: boolean;
   } | null>(null);
   let hoverId = $state<string | null>(null);
+  // The arrow under the pointer shows its ends like the selected one. They
+  // hide a moment after the pointer leaves, so it can reach an end.
+  let hoverEdgeId = $state<string | null>(null);
+  let hideEnds: ReturnType<typeof setTimeout> | undefined;
+
+  function showEnds(id: string) {
+    globalThis.clearTimeout(hideEnds);
+    hoverEdgeId = id;
+  }
+
+  function leaveEnds() {
+    hideEnds = setTimeout(() => (hoverEdgeId = null), 300);
+  }
 
   // The outputs to choose from when a new arrow leaves a block with several,
   // shown where the pointer was released.
@@ -589,6 +602,16 @@
       >
         <path class="edge-arrow-active" d="M0 0 L8 4 L0 8 Z" />
       </marker>
+      <marker
+        id="edge-arrowhead-invalid"
+        markerWidth="8"
+        markerHeight="8"
+        refX="7"
+        refY="4"
+        orient="auto"
+      >
+        <path class="edge-arrow-invalid" d="M0 0 L8 4 L0 8 Z" />
+      </marker>
     </defs>
     <g role="listbox" aria-label="Arrows">
       {#each graph.edges as edge (edge.id)}
@@ -615,6 +638,8 @@
             aria-selected={selected}
             aria-label="Arrow from {from.name} to {to.name}"
             {...inset(start, end)}
+            onpointerenter={() => showEnds(edge.id)}
+            onpointerleave={leaveEnds}
             onclick={(event) => {
               graph.selectEdge(edge.id);
               event.currentTarget.focus();
@@ -647,11 +672,13 @@
               text-anchor="middle">{graph.portOf(edge)}</text
             >
           {/if}
-          {#if selected && !linking}
+          {#if (selected || hoverEdgeId === edge.id) && !linking}
             <circle
               class="edge-end"
               data-end="from"
               aria-hidden="true"
+              onpointerenter={() => showEnds(edge.id)}
+              onpointerleave={leaveEnds}
               cx={start.x}
               cy={start.y}
               r="5"
@@ -662,6 +689,8 @@
               class="edge-end"
               data-end="to"
               aria-hidden="true"
+              onpointerenter={() => showEnds(edge.id)}
+              onpointerleave={leaveEnds}
               cx={end.x}
               cy={end.y}
               r="5"
@@ -678,13 +707,15 @@
         {@const border = borderToward(anchor, linking.x, linking.y)}
         {@const tail = linking.end === "to" ? border : linking}
         {@const head = linking.end === "to" ? linking : border}
+        {@const refused = linking.targetId !== undefined && !linking.valid}
         <line
           class="edge-preview"
+          class:invalid={refused}
           x1={tail.x}
           y1={tail.y}
           x2={head.x}
           y2={head.y}
-          marker-end="url(#edge-arrowhead-active)"
+          marker-end="url(#edge-arrowhead-{refused ? 'invalid' : 'active'})"
         ></line>
       {/if}
     {/if}
@@ -902,6 +933,14 @@
     stroke: var(--accent);
     stroke-width: 2;
     stroke-dasharray: 6 4;
+  }
+
+  .edge-preview.invalid {
+    stroke: var(--fail);
+  }
+
+  .edge-arrow-invalid {
+    fill: var(--fail);
   }
 
   /* The ends of the selected arrow, dragged onto another block to move it. */

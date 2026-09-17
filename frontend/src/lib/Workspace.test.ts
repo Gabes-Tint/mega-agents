@@ -3676,4 +3676,78 @@ describe("drawing arrows on the canvas", () => {
     ).toBeInTheDocument();
     expect(canvas().querySelector(".edge-port")).toHaveTextContent("failed");
   });
+
+  test("the preview turns red over a block the arrow may not reach", async () => {
+    await twoProjects();
+    await dropComponent("Agent", 40, 30);
+    await fireEvent.click(block("Project 1"));
+    const preview = () => canvas().querySelector(".edge-preview");
+
+    await pressAndMove(handle("right"), 450, 420);
+    expect(preview()).not.toHaveClass("invalid");
+    expect(preview()).toHaveAttribute(
+      "marker-end",
+      "url(#edge-arrowhead-active)",
+    );
+    await fireEvent.pointerMove(window, { clientX: 60, clientY: 50 });
+    expect(preview()).toHaveClass("invalid");
+    expect(preview()).toHaveAttribute(
+      "marker-end",
+      "url(#edge-arrowhead-invalid)",
+    );
+    await fireEvent.pointerMove(window, { clientX: 700, clientY: 100 });
+    expect(preview()).not.toHaveClass("invalid");
+    await fireEvent.pointerUp(window);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(block("Project 2"));
+    await fireEvent.click(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    );
+    await pressAndMove(
+      canvas().querySelector('.edge-end[data-end="to"]')!,
+      60,
+      50,
+    );
+    expect(preview()).toHaveClass("invalid");
+    await fireEvent.pointerUp(window);
+    expect(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    ).toBeInTheDocument();
+  });
+
+  test("hovering an arrow shows its ends, which drag without selecting it", async () => {
+    await twoProjects();
+    await dropComponent("Project", 30, 400);
+    await fireEvent.click(block("Project 1"));
+    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await fireEvent.click(block("Project 2"));
+    const arrow = screen.getByRole("option", {
+      name: "Arrow from Project 1 to Project 2",
+    });
+    const ends = () => canvas().querySelectorAll(".edge-end");
+    expect(ends()).toHaveLength(0);
+
+    await fireEvent.pointerEnter(arrow);
+    expect(ends()).toHaveLength(2);
+    await fireEvent.pointerLeave(arrow);
+    await fireEvent.pointerEnter(ends()[1]!);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(ends()).toHaveLength(2);
+    await fireEvent.pointerLeave(ends()[1]!);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(ends()).toHaveLength(0);
+
+    await fireEvent.pointerEnter(arrow);
+    await pressAndMove(
+      canvas().querySelector('.edge-end[data-end="to"]')!,
+      60,
+      420,
+    );
+    await fireEvent.pointerUp(window);
+
+    expect(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 3" }),
+    ).toHaveAttribute("aria-selected", "false");
+  });
 });

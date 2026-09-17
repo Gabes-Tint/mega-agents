@@ -206,4 +206,65 @@ test.describe("drawing arrows by dragging", () => {
     ).toHaveCount(1);
     await expect(canvas(page).locator(".edge-line")).toHaveCount(1);
   });
+
+  test("a hovered arrow's end drags without selecting the arrow", async ({
+    page,
+  }) => {
+    await connect(page, coder, reviewer);
+    const ends = canvas(page).locator(".edge-end");
+    const from = center(await boxOf(coder));
+    const to = center(await boxOf(reviewer));
+    await expect(ends).toHaveCount(0);
+
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+    await expect(ends).toHaveCount(2);
+    const area = await boxOf(canvas(page));
+    await page.mouse.move(area.x + area.width - 20, area.y + area.height - 20);
+    await expect(ends).toHaveCount(0);
+
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+    await pressAndMove(
+      page,
+      canvas(page).locator('.edge-end[data-end="to"]'),
+      center(await boxOf(fixer)),
+    );
+    await page.mouse.up();
+
+    const moved = page.getByRole("option", {
+      name: "Arrow from Coder to Fixer",
+    });
+    await expect(moved).toHaveCount(1);
+    await expect(moved).toHaveAttribute("aria-selected", "false");
+  });
+
+  test("the preview turns red over a block the arrow cannot reach", async ({
+    page,
+  }) => {
+    const preview = canvas(page).locator(".edge-preview");
+    const box = await boxOf(project);
+
+    await dragFromHandle(page, coder, center(await boxOf(reviewer)));
+    await expect(preview).not.toHaveClass(/invalid/);
+    await page.mouse.move(box.x + 260, box.y + box.height - 20, { steps: 6 });
+    await expect(preview).toHaveClass(/invalid/);
+    await expect(preview).toHaveAttribute(
+      "marker-end",
+      "url(#edge-arrowhead-invalid)",
+    );
+    await page.mouse.up();
+
+    await connect(page, coder, reviewer);
+    const from = center(await boxOf(coder));
+    const to = center(await boxOf(reviewer));
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+    await pressAndMove(page, canvas(page).locator('.edge-end[data-end="to"]'), {
+      x: box.x + 260,
+      y: box.y + box.height - 20,
+    });
+    await expect(preview).toHaveClass(/invalid/);
+    await page.mouse.up();
+    await expect(
+      page.getByRole("option", { name: "Arrow from Coder to Reviewer" }),
+    ).toHaveCount(1);
+  });
 });
