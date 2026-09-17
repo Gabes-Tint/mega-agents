@@ -1133,6 +1133,22 @@ describe("graph builder workspace", () => {
     expect(id).toHaveTextContent(/^[0-9a-z]{3}$/);
   });
 
+  test("shows the same block id in the properties panel", async () => {
+    render(Workspace);
+
+    await dropComponent("Project");
+    await dropComponent("Agent");
+    const node = screen.getByRole("button", { name: "Agent 1" });
+    const headerId = node.querySelector(".node-id")?.textContent ?? "";
+
+    const properties = screen.getByRole("complementary", {
+      name: "Node properties",
+    });
+    const panelId = properties.querySelector(".node-id");
+
+    expect(panelId).toHaveTextContent(headerId);
+  });
+
   test("keeps a root-forbidden box in its parent when dropped over an incompatible container", async () => {
     render(Workspace);
 

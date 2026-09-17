@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import { GraphStore, isForgeType } from "./graph.svelte.js";
+  import { GraphStore, isForgeType, shortNodeId } from "./graph.svelte.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -78,6 +78,9 @@
     {#if graph.selected}
       {@const node = graph.selected}
       <p>Type: {node.type}</p>
+      <p>
+        Id: <span class="node-id">{shortNodeId(node.id)}</span>
+      </p>
       <label>
         Name
         <input
@@ -218,6 +221,12 @@
     letter-spacing: 0.05em;
     color: #5b7a71;
     margin: 0 0 0.75rem;
+  }
+
+  .node-id {
+    font-size: 0.7rem;
+    color: #5b7a71;
+    letter-spacing: 0.02em;
   }
 
   p {

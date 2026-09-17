@@ -489,9 +489,9 @@
   .node-id {
     margin-left: auto;
     align-self: center;
-    font-size: 0.55rem;
+    font-size: 0.7rem;
     font-weight: 400;
-    color: #9fb5ac;
+    color: #7d968d;
     letter-spacing: 0.02em;
   }
 
