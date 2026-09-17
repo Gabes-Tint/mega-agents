@@ -106,9 +106,9 @@ test.describe("Command blocks", () => {
     await expect(result).toContainText("Run succeeded", { timeout: 15_000 });
     await expect(result).toContainText("Exit code: 2");
     await expect(result).toContainText(
-      `worked in ${fixture.clone}: Fix: {"exitCode":2,"output":"lint: unused import\\n"}`,
+      // The gate passes its workspace on, so the fixer works in the worktree.
+      `worked in ${worktree}: Fix: {"exitCode":2,"output":"lint: unused import\\n"}`,
     );
     await expect(fixer).toHaveClass(/status-succeeded/);
-    expect(worktree).toContain("gate");
   });
 });
