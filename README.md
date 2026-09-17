@@ -172,7 +172,9 @@ backend whose CLI is on `PATH` gets one tiny prompt (`Reply with exactly: ACK`)
 on its cheapest model (`haiku` for Claude Code, `opencode-go/glm-5.3-flash` for
 OpenCode, the default model for Codex and Grok), with a 60-second limit. That
 costs one small model turn per installed backend. Set
-`MEGA_AGENTS_SKIP_AGENT_CHECK=1` to turn it off.
+`MEGA_AGENTS_SKIP_AGENT_CHECK=1` to turn it off. `make dev` turns it off by
+default, since the backend restarts on every Go change; run
+`MEGA_AGENTS_SKIP_AGENT_CHECK=0 make dev` to check the backends.
 
 ## Checks
 

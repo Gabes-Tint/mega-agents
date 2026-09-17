@@ -3,7 +3,8 @@
 # restarts on Go source changes (air), and the frontend dev server hot-reloads
 # Svelte changes and proxies /api to the backend. Either process exiting stops
 # both. The backend dev port defaults to the first free port in 8180-8189 and
-# can be forced with MEGA_AGENTS_DEV_PORT.
+# can be forced with MEGA_AGENTS_DEV_PORT. The startup agent check is off
+# unless MEGA_AGENTS_SKIP_AGENT_CHECK=0.
 set -uo pipefail
 
 root=$(git rev-parse --show-toplevel)
@@ -41,6 +42,9 @@ fi
 
 export PORT=$port
 export MEGA_AGENTS_API="http://localhost:$port"
+# Every backend restart would otherwise spend a model turn per agent CLI;
+# MEGA_AGENTS_SKIP_AGENT_CHECK=0 make dev checks them.
+export MEGA_AGENTS_SKIP_AGENT_CHECK=${MEGA_AGENTS_SKIP_AGENT_CHECK:-1}
 
 pids=()
 cleanup() {
