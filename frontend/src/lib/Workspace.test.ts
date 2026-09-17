@@ -172,6 +172,185 @@ describe("graph builder workspace", () => {
     vi.unstubAllGlobals();
   });
 
+  test("captures the already-authenticated flag for a GitHub box", async () => {
+    render(Workspace);
+
+    await dropComponent("Project", 400, 400);
+    await dropComponent("GitHub", 410, 410);
+    const checkbox = screen.getByLabelText("Already authenticated (OAuth)");
+    expect(checkbox).not.toBeChecked();
+
+    await fireEvent.click(checkbox);
+    await fireEvent.click(screen.getByText("Project 1"));
+    await fireEvent.click(screen.getByText("GitHub 1"));
+
+    expect(
+      screen.getByLabelText("Already authenticated (OAuth)"),
+    ).toBeChecked();
+  });
+
+  async function buildRunnableFlow(): Promise<void> {
+    await dropComponent("Project", 400, 400);
+    await fireEvent.input(screen.getByLabelText("Path"), {
+      target: { value: "/home/user/api" },
+    });
+    await dropComponent("GitHub", 410, 410);
+    await fireEvent.input(screen.getByLabelText("Repository"), {
+      target: { value: "acme/api" },
+    });
+    await fireEvent.click(
+      screen.getByLabelText("Already authenticated (OAuth)"),
+    );
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+  }
+
+  test("runs the flow on the backend and shows each step's result", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        status: "succeeded",
+        steps: [
+          {
+            nodeId: "g1",
+            name: "GitHub 1",
+            action: "fetch",
+            status: "succeeded",
+            remote: "origin",
+            output: "From github.com:acme/api",
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(Workspace);
+    await buildRunnableFlow();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
+    expect(result).toHaveTextContent("GitHub 1: fetch succeeded");
+    expect(result).toHaveTextContent("Remote: origin");
+    expect(result).toHaveTextContent("From github.com:acme/api");
+    const call = fetchMock.mock.calls.at(-1) as unknown as
+      [string, RequestInit] | undefined;
+    expect(call?.[0]).toBe("/api/runs");
+    expect(call?.[1]?.method).toBe("POST");
+    expect(call?.[1]?.headers).toEqual({ "Content-Type": "application/json" });
+    const body = JSON.parse(String(call?.[1]?.body)) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    expect(body.nodes[0]).toMatchObject({
+      type: "project",
+      path: "/home/user/api",
+    });
+    expect(body.nodes[1]).toMatchObject({
+      type: "github",
+      repository: "acme/api",
+      authenticated: true,
+      start: true,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  test("shows why a run step failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "failed",
+          steps: [
+            {
+              nodeId: "g1",
+              name: "GitHub 1",
+              action: "fetch",
+              status: "failed",
+              error: "project path /home/user/api is not a Git repository",
+            },
+          ],
+        }),
+      ),
+    );
+    render(Workspace);
+    await buildRunnableFlow();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run failed"));
+    expect(result).toHaveTextContent("GitHub 1: fetch failed");
+    expect(result).toHaveTextContent(
+      "project path /home/user/api is not a Git repository",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("surfaces a run the backend rejects", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            "flag a GitHub block as the starting point to run the flow\n",
+            { status: 400 },
+          ),
+      ),
+    );
+    render(Workspace);
+    await dropComponent("Project");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() =>
+      expect(result).toHaveTextContent(
+        "flag a GitHub block as the starting point to run the flow",
+      ),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("surfaces a backend outage while running", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new Error("offline"))),
+    );
+    render(Workspace);
+    await dropComponent("Project");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() =>
+      expect(result).toHaveTextContent("Cannot reach the backend"),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("disables the run button while a run is in flight", async () => {
+    let finish: (response: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    render(Workspace);
+    await buildRunnableFlow();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const running = await screen.findByRole("button", { name: "Running…" });
+    expect(running).toBeDisabled();
+    finish(Response.json({ status: "succeeded", steps: [] }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Run flow" })).toBeEnabled(),
+    );
+    vi.unstubAllGlobals();
+  });
+
   test("lists the draggable components in the left palette", () => {
     render(Workspace);
 

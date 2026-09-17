@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Gabes-Tint/mega-agents/internal/gitops"
 )
 
 func TestRunnerExecutesDiagnosisScenarioWithoutChangingSeededWorktree(t *testing.T) {
@@ -192,7 +194,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", args...)
 	command.Dir = dir
-	command.Env = cleanGitEnvironment(os.Environ())
+	command.Env = gitops.CleanEnvironment(os.Environ())
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
@@ -202,7 +204,7 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	command := exec.Command("git", args...)
 	command.Dir = dir
-	command.Env = cleanGitEnvironment(os.Environ())
+	command.Env = gitops.CleanEnvironment(os.Environ())
 	output, err := command.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)

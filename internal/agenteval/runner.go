@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Gabes-Tint/mega-agents/internal/gitops"
 )
 
 const StatusMessageDiagnosisScenario = "status-message-diagnosis"
@@ -127,7 +129,7 @@ func (runner Runner) Run(ctx context.Context, config Config, summary io.Writer) 
 	arguments = append(arguments, scenarioPrompt)
 	command := exec.CommandContext(ctx, config.Executable, arguments...)
 	command.Dir = workspace
-	command.Env = cleanGitEnvironment(os.Environ())
+	command.Env = gitops.CleanEnvironment(os.Environ())
 	started := runner.now()
 	output, commandErr := command.CombinedOutput()
 	duration := runner.now().Sub(started)
@@ -185,7 +187,7 @@ func createWorktree(ctx context.Context, repo string) (string, func(), error) {
 	workspace := filepath.Join(parent, "worktree")
 	command := exec.CommandContext(ctx, "git", "worktree", "add", "--detach", "--quiet", workspace, "HEAD")
 	command.Dir = repo
-	command.Env = cleanGitEnvironment(os.Environ())
+	command.Env = gitops.CleanEnvironment(os.Environ())
 	if output, commandErr := command.CombinedOutput(); commandErr != nil {
 		_ = os.RemoveAll(parent)
 		return "", nil, fmt.Errorf("create disposable worktree: %w: %s", commandErr, output)
@@ -193,7 +195,7 @@ func createWorktree(ctx context.Context, repo string) (string, func(), error) {
 	cleanup := func() {
 		remove := exec.Command("git", "worktree", "remove", "--force", workspace)
 		remove.Dir = repo
-		remove.Env = cleanGitEnvironment(os.Environ())
+		remove.Env = gitops.CleanEnvironment(os.Environ())
 		_ = remove.Run()
 		_ = os.RemoveAll(parent)
 	}
@@ -270,35 +272,12 @@ func snapshotFiles(workspace string) ([]string, error) {
 func gitCommand(ctx context.Context, workspace string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Dir = workspace
-	command.Env = cleanGitEnvironment(os.Environ())
+	command.Env = gitops.CleanEnvironment(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, output)
 	}
 	return string(output), nil
-}
-
-func cleanGitEnvironment(environment []string) []string {
-	repositoryVariables := map[string]bool{
-		"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
-		"GIT_COMMON_DIR":                   true,
-		"GIT_DIR":                          true,
-		"GIT_GRAFT_FILE":                   true,
-		"GIT_INDEX_FILE":                   true,
-		"GIT_OBJECT_DIRECTORY":             true,
-		"GIT_PREFIX":                       true,
-		"GIT_REPLACE_REF_BASE":             true,
-		"GIT_SHALLOW_FILE":                 true,
-		"GIT_WORK_TREE":                    true,
-	}
-	cleaned := make([]string, 0, len(environment))
-	for _, variable := range environment {
-		name, _, _ := strings.Cut(variable, "=")
-		if !repositoryVariables[name] {
-			cleaned = append(cleaned, variable)
-		}
-	}
-	return cleaned
 }
 
 func parseTranscript(transcript []byte) (string, []Invocation) {

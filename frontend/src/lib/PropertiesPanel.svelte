@@ -139,6 +139,15 @@
               graph.setSecretKey(node.id, event.currentTarget.value)}
           />
         </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={node.authenticated ?? false}
+            onchange={(event) =>
+              graph.setAuthenticated(node.id, event.currentTarget.checked)}
+          />
+          Already authenticated (OAuth)
+        </label>
       {/if}
       {#if node.type === "githubapp"}
         <label>

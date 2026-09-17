@@ -33,6 +33,7 @@ type WorkflowNodeInput struct {
 	Path           string  `json:"path,omitempty"`
 	Repository     string  `json:"repository,omitempty"`
 	SecretKey      string  `json:"secretKey,omitempty"`
+	Authenticated  bool    `json:"authenticated,omitempty"`
 	AppID          string  `json:"appId,omitempty"`
 	PrivateKeyPath string  `json:"privateKeyPath,omitempty"`
 }
@@ -115,8 +116,9 @@ func yamlString(value string) string {
 // derive from. It is not a displayable component type; both forge controllers
 // emit their configuration through it to avoid duplicated serialization.
 type gitBase struct {
-	Repository string
-	SecretKey  string
+	Repository    string
+	SecretKey     string
+	Authenticated bool
 }
 
 func (base gitBase) withLines(indent string) []string {
@@ -127,11 +129,14 @@ func (base gitBase) withLines(indent string) []string {
 	if base.SecretKey != "" {
 		with = append(with, fmt.Sprintf("%ssecretKey: %s", indent, yamlString(base.SecretKey)))
 	}
+	if base.Authenticated {
+		with = append(with, fmt.Sprintf("%sauthenticated: true", indent))
+	}
 	return with
 }
 
 func gitBaseFor(node WorkflowNodeInput) gitBase {
-	return gitBase{Repository: node.Repository, SecretKey: node.SecretKey}
+	return gitBase{Repository: node.Repository, SecretKey: node.SecretKey, Authenticated: node.Authenticated}
 }
 
 type workflowEmitter struct {
@@ -206,56 +211,68 @@ func (emitter *workflowEmitter) emitNode(
 	}
 }
 
+// validateGraph applies the rules the editor enforces while dragging: known
+// types, unique ids, edges and parents that resolve, and the containment
+// matrix. Export and run share it so neither accepts a graph the other rejects.
+func validateGraph(request WorkflowRequest) (map[string]WorkflowNodeInput, error) {
+	if len(request.Nodes) == 0 {
+		return nil, fmt.Errorf("no nodes to export")
+	}
+	for _, node := range request.Nodes {
+		if !knownComponentTypes[node.Type] {
+			return nil, fmt.Errorf("unknown component type %q", node.Type)
+		}
+	}
+	nodeByID := make(map[string]WorkflowNodeInput, len(request.Nodes))
+	for _, node := range request.Nodes {
+		if nodeByID[node.ID].Type != "" {
+			return nil, fmt.Errorf("duplicate node id %q", node.ID)
+		}
+		nodeByID[node.ID] = node
+	}
+	for _, edge := range request.Edges {
+		_, fromOK := nodeByID[edge.From]
+		_, toOK := nodeByID[edge.To]
+		if !fromOK || !toOK {
+			return nil, fmt.Errorf("edge references an unknown node")
+		}
+	}
+	for _, node := range request.Nodes {
+		target := "root"
+		if node.ParentID != "" {
+			parent, ok := nodeByID[node.ParentID]
+			if !ok {
+				return nil, fmt.Errorf("node %q references an unknown parent", node.ID)
+			}
+			target = parent.Type
+		}
+		if !containmentAllows(target, node.Type) {
+			return nil, fmt.Errorf(
+				"%s cannot be placed inside %s",
+				node.Type,
+				target,
+			)
+		}
+	}
+	return nodeByID, nil
+}
+
 // BuildWorkflowYAML serializes the graph deterministically: identifiers are
 // assigned in a first pass so needs and containment resolve regardless of
 // declaration order, while nodes keep their input order. Contained boxes are
 // serialized as child objects inside their parent instead of using a parent
 // tag. Secrets are exported as credential references only.
 func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
-	if len(request.Nodes) == 0 {
-		return "", fmt.Errorf("no nodes to export")
-	}
-	for _, node := range request.Nodes {
-		if !knownComponentTypes[node.Type] {
-			return "", fmt.Errorf("unknown component type %q", node.Type)
-		}
+	if _, err := validateGraph(request); err != nil {
+		return "", err
 	}
 	identifiers := newIdentifierSet()
-	nodeByID := make(map[string]WorkflowNodeInput, len(request.Nodes))
 	identifierByNode := make(map[string]string, len(request.Nodes))
-	for _, node := range request.Nodes {
-		if nodeByID[node.ID].Type != "" {
-			return "", fmt.Errorf("duplicate node id %q", node.ID)
-		}
-		nodeByID[node.ID] = node
-		identifierByNode[node.ID] = identifiers.slugIdentifier(node.Name)
-	}
-	for _, edge := range request.Edges {
-		_, fromOK := identifierByNode[edge.From]
-		_, toOK := identifierByNode[edge.To]
-		if !fromOK || !toOK {
-			return "", fmt.Errorf("edge references an unknown node")
-		}
-	}
 	childrenOf := make(map[string][]WorkflowNodeInput, len(request.Nodes))
 	for _, node := range request.Nodes {
-		var target string
-		if node.ParentID == "" {
-			target = "root"
-		} else {
-			parent, ok := nodeByID[node.ParentID]
-			if !ok {
-				return "", fmt.Errorf("node %q references an unknown parent", node.ID)
-			}
-			target = parent.Type
+		identifierByNode[node.ID] = identifiers.slugIdentifier(node.Name)
+		if node.ParentID != "" {
 			childrenOf[node.ParentID] = append(childrenOf[node.ParentID], node)
-		}
-		if !containmentAllows(target, node.Type) {
-			return "", fmt.Errorf(
-				"%s cannot be placed inside %s",
-				node.Type,
-				target,
-			)
 		}
 	}
 	if request.Name == "" {

@@ -28,6 +28,9 @@ export interface GraphNode {
   path?: string;
   repository?: string;
   secretKey?: string;
+  // The machine already holds forge credentials (SSH keys or an OAuth
+  // credential helper), so runs use them instead of a token.
+  authenticated?: boolean;
   appId?: string;
   privateKeyPath?: string;
 }
@@ -390,6 +393,11 @@ export class GraphStore {
   setSecretKey(id: string, secretKey: string): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (node) node.secretKey = secretKey;
+  }
+
+  setAuthenticated(id: string, authenticated: boolean): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (node) node.authenticated = authenticated;
   }
 
   setAppId(id: string, appId: string): void {

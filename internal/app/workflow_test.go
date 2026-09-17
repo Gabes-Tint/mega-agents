@@ -389,3 +389,26 @@ func TestWorkflowYAMLKeepsNeedsOnNestedNodes(t *testing.T) {
 		t.Errorf("expected the nested node to keep its needs, got:\n%s", body)
 	}
 }
+
+func TestWorkflowYAMLExportsTheAuthenticatedForgeFlag(t *testing.T) {
+	handler := NewHandler(testAssets())
+
+	response := postWorkflow(t, handler, `{
+		"nodes": [
+			{"id": "n1", "type": "project", "name": "api", "x": 0, "y": 0, "w": 160, "h": 64},
+			{"id": "n2", "type": "github", "name": "GitHub 1", "x": 20, "y": 10, "w": 160, "h": 64, "parentId": "n1", "repository": "acme/api", "authenticated": true},
+			{"id": "n3", "type": "gitlab", "name": "GitLab 1", "x": 20, "y": 90, "w": 160, "h": 64, "parentId": "n1", "repository": "acme/web"}
+		]
+	}`)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "          repository: \"acme/api\"\n          authenticated: true\n") {
+		t.Errorf("expected the GitHub block to export authenticated: true, got:\n%s", body)
+	}
+	if strings.Count(body, "authenticated:") != 1 {
+		t.Errorf("expected only the authenticated block to export the flag, got:\n%s", body)
+	}
+}
