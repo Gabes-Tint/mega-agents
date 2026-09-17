@@ -797,7 +797,7 @@ describe("shortNodeId", () => {
 
 describe("PALETTE", () => {
   test("offers the agent, project, github, gitlab, and github app components", () => {
-    expect(PALETTE).toEqual([
+    expect(PALETTE.map(({ type, label }) => ({ type, label }))).toEqual([
       { type: "agent", label: "Agent" },
       { type: "project", label: "Project" },
       { type: "github", label: "GitHub" },
@@ -807,6 +807,13 @@ describe("PALETTE", () => {
       { type: "router", label: "Router" },
       { type: "command", label: "Command" },
     ]);
+  });
+
+  test("explains every component in a sentence or two", () => {
+    for (const item of PALETTE) {
+      expect(item.description.length, item.label).toBeGreaterThan(20);
+      expect(item.description.length, item.label).toBeLessThanOrEqual(160);
+    }
   });
 });
 

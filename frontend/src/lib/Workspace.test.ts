@@ -2816,3 +2816,43 @@ describe("block colors", () => {
     );
   });
 });
+
+describe("palette tooltips", () => {
+  test("hovering a component explains what it is", async () => {
+    render(Workspace);
+    const entry = screen.getByRole("button", { name: "Command" });
+
+    await fireEvent.mouseEnter(entry);
+
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Runs a shell command");
+    expect(entry).toHaveAccessibleDescription(/Runs a shell command/);
+
+    await fireEvent.mouseLeave(entry);
+
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  test("focusing a component explains it too", async () => {
+    render(Workspace);
+    const entry = screen.getByRole("button", { name: "Router" });
+
+    await fireEvent.focus(entry);
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent("CEL");
+
+    await fireEvent.blur(entry);
+
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  test("dragging a component hides its tooltip", async () => {
+    render(Workspace);
+    const entry = screen.getByRole("button", { name: "Project" });
+    await fireEvent.mouseEnter(entry);
+
+    await fireEvent.dragStart(entry, { dataTransfer: makeDataTransfer() });
+
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+});

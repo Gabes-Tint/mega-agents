@@ -82,6 +82,8 @@ export interface GraphEdge {
 export interface PaletteItem {
   type: NodeType;
   label: string;
+  // What the component does, shown when the palette entry is hovered.
+  description: string;
 }
 
 export interface GraphNode {
@@ -137,14 +139,53 @@ const ACTION_TOP = 40;
 const ACTION_GAP = 24;
 
 export const PALETTE: readonly PaletteItem[] = [
-  { type: "agent", label: "Agent" },
-  { type: "project", label: "Project" },
-  { type: "github", label: "GitHub" },
-  { type: "gitlab", label: "GitLab" },
-  { type: "githubapp", label: "GitHub App" },
-  { type: "jsonschema", label: "JSON Schema" },
-  { type: "router", label: "Router" },
-  { type: "command", label: "Command" },
+  {
+    type: "agent",
+    label: "Agent",
+    description:
+      "One conversation with a coding agent (Claude Code, Codex, Grok or OpenCode) in the connected workspace or its project's folder.",
+  },
+  {
+    type: "project",
+    label: "Project",
+    description:
+      "A repository folder on this machine. The blocks inside it work on that repository.",
+  },
+  {
+    type: "github",
+    label: "GitHub",
+    description:
+      "A GitHub repository. Its actions fetch, create a worktree, read an issue, commit, push and open a pull request.",
+  },
+  {
+    type: "gitlab",
+    label: "GitLab",
+    description: "A GitLab repository's settings. Runs don't use GitLab yet.",
+  },
+  {
+    type: "githubapp",
+    label: "GitHub App",
+    description:
+      "A GitHub App's ID and private key, for the GitHub block it sits in.",
+  },
+  {
+    type: "jsonschema",
+    label: "JSON Schema",
+    description:
+      "Checks the connected value, usually an agent's reply, against a JSON Schema and sends it down valid or invalid.",
+  },
+  {
+    type: "router",
+    label: "Router",
+    description:
+      "Sends the connected value down the first case whose CEL condition holds, or down default.",
+  },
+  {
+    type: "command",
+    label: "Command",
+    description:
+      "Runs a shell command, such as tests or a linter, in the workspace. Exit 0 goes to passed; anything else to failed.",
+  },
 ];
 
 // Hue (OKLCH degrees) that colors each block type on the canvas and in the
