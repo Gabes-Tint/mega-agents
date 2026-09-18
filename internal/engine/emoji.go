@@ -15,6 +15,8 @@ func (status Status) Emoji() string {
 		return "❌"
 	case Skipped:
 		return "⏭️"
+	case Paused:
+		return "⏸️"
 	case "cancelled":
 		return "🛑"
 	case "interrupted":

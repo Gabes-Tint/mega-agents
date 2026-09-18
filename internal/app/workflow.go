@@ -26,21 +26,23 @@ type WorkflowEdgeInput struct {
 }
 
 type WorkflowNodeInput struct {
-	ID             string  `json:"id"`
-	Type           string  `json:"type"`
-	Name           string  `json:"name"`
-	X              float64 `json:"x"`
-	Y              float64 `json:"y"`
-	W              float64 `json:"w"`
-	H              float64 `json:"h"`
-	ParentID       string  `json:"parentId,omitempty"`
-	Start          bool    `json:"start,omitempty"`
-	Path           string  `json:"path,omitempty"`
-	Repository     string  `json:"repository,omitempty"`
-	SecretKey      string  `json:"secretKey,omitempty"`
-	Authenticated  bool    `json:"authenticated,omitempty"`
-	AppID          string  `json:"appId,omitempty"`
-	PrivateKeyPath string  `json:"privateKeyPath,omitempty"`
+	ID       string  `json:"id"`
+	Type     string  `json:"type"`
+	Name     string  `json:"name"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	W        float64 `json:"w"`
+	H        float64 `json:"h"`
+	ParentID string  `json:"parentId,omitempty"`
+	Start    bool    `json:"start,omitempty"`
+	// Breakpoint pauses the run before this block runs, every time it runs.
+	Breakpoint     bool   `json:"breakpoint,omitempty"`
+	Path           string `json:"path,omitempty"`
+	Repository     string `json:"repository,omitempty"`
+	SecretKey      string `json:"secretKey,omitempty"`
+	Authenticated  bool   `json:"authenticated,omitempty"`
+	AppID          string `json:"appId,omitempty"`
+	PrivateKeyPath string `json:"privateKeyPath,omitempty"`
 	// Git action blocks nested inside a GitHub block.
 	Action       string `json:"action,omitempty"`
 	Branch       string `json:"branch,omitempty"`
@@ -249,6 +251,11 @@ func (emitter *workflowEmitter) emitNode(
 	}
 	if node.Start {
 		builder.WriteString(fmt.Sprintf("%s  start: true\n", indent))
+	}
+	// A breakpoint is a property of the block itself, like its starting
+	// point, so it travels with the file and survives a reload.
+	if node.Breakpoint {
+		builder.WriteString(fmt.Sprintf("%s  breakpoint: true\n", indent))
 	}
 	var with []string
 	if node.Type == "github" || node.Type == "gitlab" {

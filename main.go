@@ -16,7 +16,17 @@ import (
 var frontend embed.FS
 
 func main() {
-	os.Exit(cli.Main(os.Args[1:], cli.Env{Stdout: os.Stdout, Stderr: os.Stderr, Serve: serve}))
+	os.Exit(cli.Main(os.Args[1:], cli.Env{
+		Stdout: os.Stdout, Stderr: os.Stderr, Serve: serve,
+		Stdin: os.Stdin, Interactive: isTerminal(os.Stdin),
+	}))
+}
+
+// isTerminal reports whether someone is there to answer a question, such as
+// what a run does at a breakpoint. A piped or redirected run has nobody.
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func serve() error {

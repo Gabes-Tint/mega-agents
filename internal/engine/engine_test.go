@@ -448,6 +448,108 @@ func TestATaskWaitingForAnyIsSkippedWhenNothingArrives(t *testing.T) {
 	}
 }
 
+// finishes runs a plan and fails the test if it does not end in time, so a
+// scheduler that waits for a step which will never run fails instead of
+// hanging the suite.
+func finishes(t *testing.T, ctx context.Context, tasks []Task, options Options, within time.Duration) Run {
+	t.Helper()
+	type outcome struct {
+		run Run
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		run, err := Execute(ctx, tasks, options)
+		done <- outcome{run, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("execute: %v", got.err)
+		}
+		return got.run
+	case <-time.After(within):
+		t.Fatalf("the run did not finish within %s", within)
+		return Run{}
+	}
+}
+
+func TestARunSettlesATaskReadiedByASkipDeclaredAfterIt(t *testing.T) {
+	ok := func(context.Context, []Input, io.Writer) (Result, error) { return Result{}, nil }
+	// "after" is declared before the task it needs, so the pass that skips
+	// "fix" starts nothing at all: the scheduler must look again instead of
+	// waiting for a step that will never report.
+	tasks := []Task{
+		{ID: "after", Needs: []Need{{TaskID: "fix"}}, Run: ok},
+		{ID: "fix", Needs: []Need{{TaskID: "route", Port: "mechanic"}}, Run: ok},
+	}
+	options := Options{Given: map[string]map[string]any{"route": {"builder": "brief"}}}
+
+	run := finishes(t, context.Background(), tasks, options, 5*time.Second)
+
+	want := map[string]Status{"after": Skipped, "fix": Skipped}
+	if got := statuses(run); !reflect.DeepEqual(got, want) {
+		t.Fatalf("statuses = %v, want %v", got, want)
+	}
+	if run.Status != Succeeded {
+		t.Fatalf("status = %s; a branch not taken must not fail the run", run.Status)
+	}
+	if !strings.Contains(run.Steps[0].Error, "fix was skipped") {
+		t.Fatalf("skip reason = %q, want it to name the skipped dependency", run.Steps[0].Error)
+	}
+}
+
+func TestCancellingARunSettlesATaskThatNeverReports(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	defer close(release)
+	tasks := []Task{
+		{ID: "wedged", Name: "Wedged", Run: func(context.Context, []Input, io.Writer) (Result, error) {
+			cancel()
+			<-release
+			return Result{}, nil
+		}},
+		{ID: "after", Needs: []Need{{TaskID: "wedged"}}, Run: func(context.Context, []Input, io.Writer) (Result, error) {
+			t.Error("a cancelled run started another task")
+			return Result{}, nil
+		}},
+	}
+
+	run := finishes(t, ctx, tasks, Options{CancelGrace: 20 * time.Millisecond}, 5*time.Second)
+
+	want := map[string]Status{"wedged": Skipped, "after": Skipped}
+	if got := statuses(run); !reflect.DeepEqual(got, want) {
+		t.Fatalf("statuses = %v, want %v", got, want)
+	}
+	if run.Status != Failed || run.Steps[0].Error != "the run was cancelled" {
+		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestACancelledRunStillRecordsTheStepThatReports(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tasks := []Task{
+		{ID: "slow", Run: func(taskCtx context.Context, _ []Input, _ io.Writer) (Result, error) {
+			cancel()
+			<-taskCtx.Done()
+			return Result{}, errors.New("stopped")
+		}},
+		{ID: "after", Needs: []Need{{TaskID: "slow"}}, Run: func(context.Context, []Input, io.Writer) (Result, error) {
+			t.Error("a cancelled run started another task")
+			return Result{}, nil
+		}},
+	}
+
+	run := finishes(t, ctx, tasks, Options{CancelGrace: time.Second}, 5*time.Second)
+
+	if step := run.Steps[0]; step.Status != Failed || step.Error != "stopped" {
+		t.Fatalf("slow = %+v, want the failure it reported while stopping", step)
+	}
+	if run.Steps[1].Status != Skipped {
+		t.Fatalf("after = %+v", run.Steps[1])
+	}
+}
+
 func TestAnArrowArrivesOnlyWithEveryOutputItCarries(t *testing.T) {
 	r := &recorder{}
 	tasks := []Task{

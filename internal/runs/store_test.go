@@ -78,6 +78,50 @@ func TestARunningRecordWhoseProcessIsGoneIsInterrupted(t *testing.T) {
 	}
 }
 
+func TestAPausedRecordWhoseProcessIsGoneIsInterrupted(t *testing.T) {
+	store := newStore(t)
+	record, _ := store.Create("flow", []engine.Step{{TaskID: "a1", Status: Paused}})
+	finished := exec.Command("true")
+	if err := finished.Run(); err != nil {
+		t.Fatalf("cannot start a short-lived process: %v", err)
+	}
+	record.PID = finished.Process.Pid
+	record.Status = Paused
+	record.Paused = []engine.Pause{{TaskID: "a1", Name: "Coder"}}
+	if err := store.Save(record); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.Load(record.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Status != Interrupted || loaded.Steps[0].Status != Interrupted {
+		t.Fatalf("loaded = %+v, want a run nobody can resume reported as interrupted", loaded)
+	}
+	if len(loaded.Paused) != 0 {
+		t.Fatalf("loaded = %+v, want an interrupted run to wait at nothing", loaded)
+	}
+}
+
+func TestAPausedRunKeepsWhereItWaits(t *testing.T) {
+	store := newStore(t)
+	record, _ := store.Create("flow", []engine.Step{{TaskID: "a1", Status: Paused}})
+	record.Status = Paused
+	record.Paused = []engine.Pause{{TaskID: "a1", Name: "Coder", Resolved: engine.Edit{Prompt: "Write the fix"}}}
+	if err := store.Save(record); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.Load(record.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Status != Paused || len(loaded.Paused) != 1 || loaded.Paused[0].Resolved.Prompt != "Write the fix" {
+		t.Fatalf("loaded = %+v", loaded)
+	}
+}
+
 func TestListShowsTheNewestRunFirst(t *testing.T) {
 	store := newStore(t)
 	clock := time.Date(2026, 9, 16, 23, 0, 0, 0, time.UTC)

@@ -31,6 +31,10 @@ const Interrupted engine.Status = "interrupted"
 // Cancelled marks a run someone stopped.
 const Cancelled engine.Status = "cancelled"
 
+// Paused marks a run waiting at a breakpoint. It is still in progress: a
+// paused run whose process ended is reported as interrupted like any other.
+const Paused = engine.Paused
+
 var ErrNotFound = errors.New("not found")
 
 // identifier restricts run and step ids to one safe path segment.
@@ -46,6 +50,9 @@ type Record struct {
 	// one whose process died.
 	PID   int           `json:"pid"`
 	Steps []engine.Step `json:"steps"`
+	// Paused are the breakpoints the run waits at, with what each block it
+	// stopped before is about to receive.
+	Paused []engine.Pause `json:"paused,omitempty"`
 	// Graph is the workflow as it ran, so the run can be retried.
 	Graph json.RawMessage `json:"graph,omitempty"`
 	// RetryOf names the run this one retries.
@@ -138,10 +145,12 @@ func (store *Store) Load(id string) (Record, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return Record{}, fmt.Errorf("run %s has an unreadable record: %w", id, err)
 	}
-	if record.Status == engine.Running && !processAlive(record.PID) {
-		record.Status = Interrupted
+	inProgress := record.Status == engine.Running || record.Status == Paused
+	if inProgress && !processAlive(record.PID) {
+		record.Status, record.Paused = Interrupted, nil
 		for i, step := range record.Steps {
-			if step.Status == engine.Running || step.Status == engine.Pending {
+			switch step.Status {
+			case engine.Running, engine.Pending, Paused:
 				record.Steps[i].Status = Interrupted
 			}
 		}
