@@ -8,7 +8,7 @@ assets=${2:-internal/web/dist/assets}
 # notes choose CEL for type-checked, sandboxed routing expressions over a
 # hand-rolled language; re-baselined deliberately in review.
 max_binary=${MAX_BINARY_BYTES:-33554432}
-# 544 KiB: the graph workspace added an SVG edge layer and node interaction
+# 528 KiB: the graph workspace added an SVG edge layer and node interaction
 # logic, then executable blocks (Git actions, agents, validation, routing) with
 # their property editors and run views, then the editor redesign (themes,
 # block deletion, palette explanations, a problems panel), then draw.io style
@@ -20,12 +20,12 @@ max_binary=${MAX_BINARY_BYTES:-33554432}
 # real editor (shell and JSON syntax, undo, bracket matching, soft wrap) and
 # completion of the variables that reach the block, which a bespoke textarea
 # overlay would have to reimplement and keep correct. Canvas zoom then took
-# the bundle to 540437 bytes, 235 under the previous 528 KiB limit: the
-# scaled content layer, the zoom controls and the single screen-to-content
-# conversion cost about 3.3 KiB, so the limit moved up one step rather than
-# standing with no room left for the change after it. Re-baselined
-# deliberately in review rather than trimming features.
-max_javascript=${MAX_JAVASCRIPT_BYTES:-557056}
+# the bundle to 540437 bytes and raised the limit to 544 KiB, which it did
+# not need: the build still fit under 528 KiB. Colouring each arrow with the
+# hue of the block it leaves replaced three arrowheads with one and left the
+# bundle at 540414 bytes, so the limit is back at the snug step above it.
+# Re-baselined deliberately in review rather than trimming features.
+max_javascript=${MAX_JAVASCRIPT_BYTES:-540672}
 max_css=${MAX_CSS_BYTES:-51200}
 
 test -f "$binary" || { echo "Missing binary: $binary" >&2; exit 1; }

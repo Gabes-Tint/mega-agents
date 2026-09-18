@@ -8,6 +8,7 @@ import {
 } from "@testing-library/svelte";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import Workspace from "./Workspace.svelte";
+import { BLOCK_HUES } from "./graph.svelte.js";
 import { typeIntoEditor } from "../test-setup.js";
 
 // Command, Prompt and the two schema fields are code editors rather than
@@ -3943,16 +3944,12 @@ describe("drawing arrows on the canvas", () => {
 
     await pressAndMove(handle("right"), 450, 420);
     expect(preview()).not.toHaveClass("invalid");
-    expect(preview()).toHaveAttribute(
-      "marker-end",
-      "url(#edge-arrowhead-active)",
-    );
+    // One head serves every arrow: it takes the colour of the line that
+    // carries it, so a refused preview needs no marker of its own.
+    expect(preview()).toHaveAttribute("marker-end", "url(#edge-arrowhead)");
     await fireEvent.pointerMove(window, { clientX: 60, clientY: 50 });
     expect(preview()).toHaveClass("invalid");
-    expect(preview()).toHaveAttribute(
-      "marker-end",
-      "url(#edge-arrowhead-invalid)",
-    );
+    expect(preview()).toHaveAttribute("marker-end", "url(#edge-arrowhead)");
     await fireEvent.pointerMove(window, { clientX: 700, clientY: 100 });
     expect(preview()).not.toHaveClass("invalid");
     await fireEvent.pointerUp(window);
@@ -4022,5 +4019,72 @@ describe("drawing arrows on the canvas", () => {
     expect(finish("Agent 2")).toBeInTheDocument();
     // The gate is beside the flow rather than in it: no start leads to it.
     expect(finish("Command 1")).toBeNull();
+  });
+
+  const hueOf = (element: Element) =>
+    (element as HTMLElement).style.getPropertyValue("--block-hue");
+
+  test("an arrow carries the hue of the block it leaves", async () => {
+    await gateAndAgents();
+    await drawArrow("Command 1", "Agent 1");
+    await drawArrow("Agent 1", "Agent 2");
+
+    const drawn = [...arrows()].map((arrow) => hueOf(arrow));
+    expect(drawn).toEqual([
+      String(BLOCK_HUES.command),
+      String(BLOCK_HUES.agent),
+    ]);
+    expect(hueOf(block("Command 1"))).toBe(drawn[0]);
+  });
+
+  test("the selected arrow is ringed, and only while it is selected", async () => {
+    await gateAndAgents();
+    await drawArrow("Agent 1", "Agent 2");
+    const ring = () => canvas().querySelectorAll(".edge-halo");
+    expect(ring()).toHaveLength(0);
+
+    await fireEvent.click(
+      screen.getByRole("option", { name: "Arrow from Agent 1 to Agent 2" }),
+    );
+
+    expect(ring()).toHaveLength(1);
+    // The ring marks the arrow without taking its colour away.
+    expect(hueOf(arrows()[0]!)).toBe(String(BLOCK_HUES.agent));
+
+    await fireEvent.click(block("Agent 1"));
+    expect(ring()).toHaveLength(0);
+  });
+
+  test("an arrow being drawn takes the hue of the block it leaves", async () => {
+    await gateAndAgents();
+    await fireEvent.click(block("Command 1"));
+    const preview = () => canvas().querySelector(".edge-preview");
+
+    await pressAndMove(handle("right"), 480, 232);
+
+    expect(hueOf(preview()!)).toBe(String(BLOCK_HUES.command));
+    await fireEvent.pointerUp(window);
+  });
+
+  test("an arrow whose source has not been found yet has no hue", async () => {
+    await gateAndAgents();
+    await drawArrow("Agent 1", "Agent 2");
+    await fireEvent.click(
+      screen.getByRole("option", { name: "Arrow from Agent 1 to Agent 2" }),
+    );
+    const preview = () => canvas().querySelector(".edge-preview");
+
+    // Dragging the tail away from its block leaves the arrow without a
+    // source until the pointer finds another block to leave.
+    await pressAndMove(
+      canvas().querySelector('.edge-end[data-end="from"]')!,
+      700,
+      520,
+    );
+    expect(hueOf(preview()!)).toBe("");
+
+    await fireEvent.pointerMove(window, { clientX: 60, clientY: 50 });
+    expect(hueOf(preview()!)).toBe(String(BLOCK_HUES.command));
+    await fireEvent.pointerUp(window);
   });
 });
