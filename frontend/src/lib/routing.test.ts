@@ -594,20 +594,40 @@ describe("routing the Fit_ development flow", () => {
     }
   });
 
-  test("a drag frame routes the whole template well inside a frame", () => {
-    // The dragged block moves every frame, so no route can be reused.
+  // The dragged block moves every frame, so no route can be reused.
+  function measure(route: (blocks: LevelNode[]) => unknown): number {
     const frames = 60;
     const start = performance.now();
     for (let step = 0; step < frames; step++)
-      frame(
+      route(
         FIT_BLOCKS.map((block) =>
           block.id === "reviewer"
             ? { ...block, box: { ...block.box, x: block.box.x + step } }
             : block,
         ),
       );
-    const each = (performance.now() - start) / frames;
+    return (performance.now() - start) / frames;
+  }
 
-    expect(each).toBeLessThan(8);
+  test("a drag frame routes the whole template well inside a frame", () => {
+    // Here a frame takes about 1.5 ms for all 47 arrows. A shared CI runner
+    // with a dozen workers on it is several times slower, so the budget is
+    // wide enough to survive that and still catch a routing cost that grows
+    // by an order of magnitude.
+    expect(measure(frame)).toBeLessThan(40);
+  });
+
+  test("the blocks in the way cost only a few times a clear run", () => {
+    // Routing the same arrows with nothing to avoid is the floor. Staying
+    // near it is what keeps a drag smooth however loaded the machine is,
+    // and it is what a search that widened out of hand would lose.
+    const clear = measure((blocks) => {
+      const boxes = new Map(blocks.map((block) => [block.id, block.box]));
+      return FIT_ARROWS.map(([fromId, toId]) =>
+        routeArrow(boxes.get(fromId)!, boxes.get(toId)!),
+      );
+    });
+
+    expect(measure(frame)).toBeLessThan(Math.max(clear, 0.05) * 25);
   });
 });
