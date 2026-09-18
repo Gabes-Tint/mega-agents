@@ -1,10 +1,13 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,6 +345,51 @@ func TestAPausedRunHasNothingToRetryYet(t *testing.T) {
 		t.Fatalf("resume = %d", code)
 	}
 	awaitRun(t, handler, started.ID)
+}
+
+func TestResumingARunWaitingAtTwoBlocksNamesThem(t *testing.T) {
+	breakpoints := &Breakpoints{}
+	answers := map[string]engine.Resume{}
+	var waiting sync.WaitGroup
+	var mu sync.Mutex
+	for _, nodeID := range []string{"a1", "c1"} {
+		waiting.Add(1)
+		go func() {
+			defer waiting.Done()
+			answer := breakpoints.Wait(context.Background(), "run-1", engine.Pause{TaskID: nodeID})
+			mu.Lock()
+			answers[nodeID] = answer
+			mu.Unlock()
+		}()
+	}
+	for {
+		breakpoints.mu.Lock()
+		waits := len(breakpoints.waiting["run-1"])
+		breakpoints.mu.Unlock()
+		if waits == 2 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	err := breakpoints.Resume("run-1", "", engine.Resume{Action: engine.ResumeContinue})
+
+	if err == nil || !strings.Contains(err.Error(), "a1, c1") {
+		t.Fatalf("err = %v, want it to name both blocks the run waits at", err)
+	}
+	for _, nodeID := range []string{"a1", "c1"} {
+		if err := breakpoints.Resume("run-1", nodeID, engine.Resume{Action: engine.ResumeSkip}); err != nil {
+			t.Fatalf("resume %s: %v", nodeID, err)
+		}
+	}
+	waiting.Wait()
+
+	if answers["a1"].Action != engine.ResumeSkip || answers["c1"].Action != engine.ResumeSkip {
+		t.Fatalf("answers = %+v", answers)
+	}
+	if err := breakpoints.Resume("run-1", "a1", engine.Resume{}); !errors.Is(err, errNotPaused) {
+		t.Fatalf("resuming twice = %v, want it refused", err)
+	}
 }
 
 func resume(t *testing.T, handler http.Handler, id string, body string) int {
