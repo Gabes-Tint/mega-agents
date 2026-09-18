@@ -397,6 +397,19 @@ function paletteLabel(type: NodeType): string {
   return labelFor(type);
 }
 
+// Named outputs a block chooses between; empty for blocks with one output.
+export function outputPortsOf(node: GraphNode | undefined): string[] {
+  if (node?.type === "jsonschema") return ["valid", "invalid"];
+  if (node?.type === "command") return ["passed", "failed"];
+  if (node?.type === "loop") return ["done", "exhausted"];
+  if (node?.type === "router")
+    return [
+      ...(node.cases ?? []).map((routeCase) => routeCase.name),
+      "default",
+    ];
+  return [];
+}
+
 export class GraphStore {
   nodes = $state<GraphNode[]>([]);
   edges = $state<GraphEdge[]>([]);
@@ -978,16 +991,7 @@ export class GraphStore {
 
   // Named outputs a block chooses between; empty for blocks with one output.
   outputPorts(id: string): string[] {
-    const node = this.nodes.find((candidate) => candidate.id === id);
-    if (node?.type === "jsonschema") return ["valid", "invalid"];
-    if (node?.type === "command") return ["passed", "failed"];
-    if (node?.type === "loop") return ["done", "exhausted"];
-    if (node?.type === "router")
-      return [
-        ...(node.cases ?? []).map((routeCase) => routeCase.name),
-        "default",
-      ];
-    return [];
+    return outputPortsOf(this.nodes.find((candidate) => candidate.id === id));
   }
 
   // The output an arrow takes: its own choice, or its source's first port.

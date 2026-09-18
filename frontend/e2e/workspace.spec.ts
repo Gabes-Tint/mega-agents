@@ -204,7 +204,7 @@ test.describe("graph builder workspace", () => {
     await expect(first).toBeVisible();
 
     await page.getByLabel("Starting point").check();
-    await expect(first).toContainText("▶");
+    await expect(first.locator('[data-mark="start"]')).toHaveCount(1);
 
     const project = page.getByRole("button", { name: "Project 1" });
     const projectBox = await project.boundingBox();
@@ -240,8 +240,8 @@ test.describe("graph builder workspace", () => {
       .toBe(true);
 
     await page.getByLabel("Starting point").check();
-    await expect(second).toContainText("▶");
-    await expect(first).not.toContainText("▶");
+    await expect(second.locator('[data-mark="start"]')).toHaveCount(1);
+    await expect(first.locator('[data-mark="start"]')).toHaveCount(0);
   });
 
   test("styles each node with a title header and separator", async ({

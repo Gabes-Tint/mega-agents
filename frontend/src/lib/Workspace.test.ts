@@ -1387,7 +1387,7 @@ describe("graph builder workspace", () => {
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
     const node = screen.getByRole("button", { name: "Agent 1" });
-    expect(node).toHaveTextContent("▶");
+    expect(node.querySelector('[data-mark="start"]')).toBeInTheDocument();
     expect(screen.getByLabelText("Starting point")).toBeChecked();
   });
 
@@ -1404,10 +1404,12 @@ describe("graph builder workspace", () => {
     await dropComponent("Agent", 30, 30);
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
-    expect(screen.getByRole("button", { name: "Agent 2" })).toHaveTextContent(
-      "▶",
-    );
-    expect(first).not.toHaveTextContent("▶");
+    expect(
+      screen
+        .getByRole("button", { name: "Agent 2" })
+        .querySelector('[data-mark="start"]'),
+    ).toBeInTheDocument();
+    expect(first.querySelector('[data-mark="start"]')).toBeNull();
   });
 
   test("start markers in separate projects coexist", async () => {
@@ -1422,10 +1424,12 @@ describe("graph builder workspace", () => {
     await dropComponent("Agent", 430, 430);
     await fireEvent.click(screen.getByLabelText("Starting point"));
 
-    expect(first).toHaveTextContent("▶");
-    expect(screen.getByRole("button", { name: "Agent 2" })).toHaveTextContent(
-      "▶",
-    );
+    expect(first.querySelector('[data-mark="start"]')).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole("button", { name: "Agent 2" })
+        .querySelector('[data-mark="start"]'),
+    ).toBeInTheDocument();
   });
 
   test("shows the checked state when a start node is selected", async () => {
@@ -1771,7 +1775,7 @@ describe("graph builder workspace", () => {
     expect(agent).toHaveStyle({ left: "450px", top: "420px" });
   });
 
-  test("keeps the start badge inside the header", async () => {
+  test("keeps the start and finish flags inside the header", async () => {
     render(Workspace);
 
     await dropComponent("Project");
@@ -1781,7 +1785,18 @@ describe("graph builder workspace", () => {
     const node = screen.getByRole("button", { name: "Agent 1" });
     const title = node.querySelector(".node-title");
     expect(title).not.toBeNull();
-    expect(title?.querySelector(".start-flag")).toBeInTheDocument();
+    // A block that starts the flow and leads nowhere also ends it.
+    expect(title?.querySelector('[data-mark="start"]')).toBeInTheDocument();
+    expect(title?.querySelector('[data-mark="end"]')).toBeInTheDocument();
+    // The flags are drawings, so the block keeps its own name.
+    expect(node).toHaveAccessibleName("Agent 1");
+    // A container holds work but does none of its own, so it never ends a
+    // flow.
+    expect(
+      screen
+        .getByRole("button", { name: "Project 1" })
+        .querySelector('[data-mark="end"]'),
+    ).toBeNull();
   });
 
   test("ignores a second connection attempt for the same pair", async () => {
@@ -3833,5 +3848,23 @@ describe("drawing arrows on the canvas", () => {
     expect(
       screen.getByRole("option", { name: "Arrow from Project 1 to Project 3" }),
     ).toHaveAttribute("aria-selected", "false");
+  });
+
+  test("an arrow out of a block hands the finish flag to the next one", async () => {
+    await gateAndAgents();
+    await fireEvent.click(block("Agent 1"));
+    await fireEvent.click(screen.getByLabelText("Starting point"));
+    const finish = (name: string) =>
+      block(name).querySelector('[data-mark="end"]');
+    expect(finish("Agent 1")).toBeInTheDocument();
+
+    await pressAndMove(handle("right"), 480, 362);
+    await fireEvent.pointerUp(window);
+
+    expect(arrows()).toHaveLength(1);
+    expect(finish("Agent 1")).toBeNull();
+    expect(finish("Agent 2")).toBeInTheDocument();
+    // The gate is beside the flow rather than in it: no start leads to it.
+    expect(finish("Command 1")).toBeNull();
   });
 });
