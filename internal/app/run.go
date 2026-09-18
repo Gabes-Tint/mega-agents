@@ -31,6 +31,9 @@ const workspacePort = "workspace"
 // Cancelled is the status of a run someone stopped.
 const Cancelled = runs.Cancelled
 
+// Paused is the status of a run waiting at a breakpoint.
+const Paused = engine.Paused
+
 var errNoStartingBlock = errors.New(
 	"flag a GitHub block or an agent as the starting point to run the flow",
 )
@@ -55,6 +58,10 @@ const (
 // its record and the log of every step in the store.
 type Runs struct {
 	Store *runs.Store
+	// Pause answers a block that carries a breakpoint, blocking for as long
+	// as the run stays paused before it. Nil ignores breakpoints, which is
+	// what a run nobody can answer does.
+	Pause func(ctx context.Context, runID string, at engine.Pause) engine.Resume
 }
 
 // Execution runs a started run to its end, calling observe (when not nil)
@@ -86,6 +93,8 @@ func (service Runs) Retry(id string) (runs.Record, Execution, error) {
 		return runs.Record{}, nil, fmt.Errorf("run %s succeeded; %w", id, errNothingToRetry)
 	case engine.Running:
 		return runs.Record{}, nil, fmt.Errorf("run %s is still running; %w yet", id, errNothingToRetry)
+	case Paused:
+		return runs.Record{}, nil, fmt.Errorf("run %s is paused at a breakpoint; %w yet", id, errNothingToRetry)
 	}
 	var request WorkflowRequest
 	if err := json.Unmarshal(previous.Graph, &request); err != nil || len(previous.Graph) == 0 {
@@ -198,9 +207,23 @@ func (service Runs) execute(
 			observe(record)
 		}
 	}
+	var pause func(context.Context, engine.Pause) engine.Resume
+	if service.Pause != nil {
+		pause = func(ctx context.Context, at engine.Pause) engine.Resume {
+			return service.Pause(ctx, record.ID, at)
+		}
+	}
 	finished, err := engine.Execute(ctx, tasks, engine.Options{
+		Pause: pause,
 		Observe: func(run engine.Run) {
-			record.Steps = run.Steps
+			record.Steps, record.Paused = run.Steps, run.Paused
+			// A run waiting at a breakpoint is still in progress: its status
+			// says so, and the clock of the block it waits before has not
+			// started.
+			record.Status = engine.Running
+			if len(run.Paused) > 0 {
+				record.Status = Paused
+			}
 			save()
 		},
 		Log: func(taskID string) io.Writer {
@@ -221,7 +244,7 @@ func (service Runs) execute(
 	if finished.Steps != nil {
 		record.Steps = finished.Steps
 	}
-	record.Status = finished.Status
+	record.Status, record.Paused = finished.Status, nil
 	if errors.Is(ctx.Err(), context.Canceled) {
 		record.Status = Cancelled
 	}
@@ -317,6 +340,8 @@ func plan(request WorkflowRequest) ([]engine.Task, []planFailure, map[string]boo
 			failures = append(failures, planFailure{nodeID: node.ID, err: err})
 			continue
 		}
+		// A breakpoint travels with the block, whatever it does.
+		task.Breakpoint = node.Breakpoint
 		tasks = append(tasks, task)
 	}
 	return tasks, failures, included
@@ -735,6 +760,11 @@ func projectDir(project WorkflowNodeInput) (string, error) {
 func registerRunHandler(mux *http.ServeMux, service Runs) {
 	// Cancel functions of the runs this server is executing, by run id.
 	var active sync.Map
+	// The editor answers the breakpoints its runs stop at, so the server
+	// honours them whatever the service was built with.
+	breakpoints := &Breakpoints{}
+	service.Pause = breakpoints.Wait
+	registerResumeHandler(mux, service, breakpoints)
 	// launch executes a started run in the background, cancellable by id.
 	launch := func(r *http.Request, record runs.Record, execute Execution) {
 		ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))

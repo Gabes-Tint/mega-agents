@@ -95,6 +95,9 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 	}
 	return engine.Task{
 		ID: node.ID, Name: node.Name, Kind: "agent", Needs: needs, WaitForAny: sources.anyOne,
+		Resolve: func(inputs []engine.Input) engine.Edit {
+			return engine.Edit{Prompt: renderTemplate(node.Prompt, inputs, sources)}
+		},
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			details := map[string]any{"backend": node.Backend, "model": node.Model, "effort": node.Effort}
 			workspace, hasWorkspace := workspaceIn(inputs)
@@ -109,7 +112,7 @@ func (planner runPlanner) agentTask(node WorkflowNodeInput) (engine.Task, error)
 					return engine.Result{Details: details}, err
 				}
 			}
-			prompt := renderTemplate(node.Prompt, inputs, sources)
+			prompt := editedPrompt(ctx, node.Prompt, inputs, sources)
 			continued := ""
 			for _, input := range inputs {
 				if input.Port == sessionPort {

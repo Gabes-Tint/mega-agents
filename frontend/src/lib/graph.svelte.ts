@@ -133,6 +133,9 @@ export interface GraphNode {
   h: number;
   parentId?: string;
   start?: boolean;
+  // Pauses the run before this block runs, every time it runs, until
+  // someone continues, steps, skips or edits it.
+  breakpoint?: boolean;
   path?: string;
   repository?: string;
   secretKey?: string;
@@ -562,6 +565,14 @@ export class GraphStore {
       }
     }
     node.start = isStart;
+  }
+
+  // A breakpoint belongs to the block, so it is saved with the workflow and
+  // any number of blocks may carry one.
+  setBreakpoint(id: string, on: boolean): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    node.breakpoint = on || undefined;
   }
 
   startConnect(id: string): void {

@@ -361,6 +361,33 @@ describe("GraphStore", () => {
     expect(graph.nodes[0]?.start).toBe(false);
   });
 
+  test("marks blocks with a breakpoint and clears them again", () => {
+    const graph = new GraphStore();
+    const project = graph.addNode("project", 0, 0);
+    const coder = graph.addNode("agent", 10, 10, project.id);
+    const gate = graph.addNode("command", 20, 20, project.id);
+
+    graph.setBreakpoint(coder.id, true);
+    graph.setBreakpoint(gate.id, true);
+
+    expect(graph.nodes[1]?.breakpoint).toBe(true);
+    expect(graph.nodes[2]?.breakpoint).toBe(true);
+
+    graph.setBreakpoint(coder.id, false);
+
+    expect(graph.nodes[1]?.breakpoint).toBeUndefined();
+    expect(graph.nodes[2]?.breakpoint).toBe(true);
+  });
+
+  test("setting a breakpoint on an unknown id is a no-op", () => {
+    const graph = new GraphStore();
+    graph.addNode("agent", 0, 0);
+
+    graph.setBreakpoint("not-a-node", true);
+
+    expect(graph.nodes[0]?.breakpoint).toBeUndefined();
+  });
+
   test("setting a start point on an unknown id is a no-op", () => {
     const graph = new GraphStore();
     graph.addNode("agent", 0, 0);
