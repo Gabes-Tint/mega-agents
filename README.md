@@ -85,6 +85,16 @@ ends; drag either end onto another block to move it. Deleting an arrow
 between Git actions does not rejoin their sequence: the actions after it stop
 running until an arrow joins them again.
 
+A flow that outgrows the screen is zoomed between 25% and 200%: Ctrl or Cmd
+with the wheel, or a trackpad pinch, zooms toward the pointer; Ctrl or Cmd
+with **+**, **-** and **0** steps and resets it; and the controls in the
+canvas's bottom right corner zoom in and out, show the level, reset it when
+clicked, and **fit the whole flow on screen**. Blocks are dropped, moved,
+resized and joined under the pointer at every level; arrows, their ends and
+the handles around a block keep their size on screen, so they stay clickable
+once the whole flow is in view. The level is remembered in this browser, like
+the panel sizes.
+
 Every run, whether started from the editor or the command line, keeps its
 record and the log of each step under `$MEGA_AGENTS_HOME/runs` (default
 `~/.mega-agents/runs`). In the editor, select a block after a run and choose

@@ -934,7 +934,7 @@
     grid-area: palette;
   }
 
-  .workspace > :global(.canvas) {
+  .workspace > :global(.canvas-area) {
     grid-area: canvas;
   }
 
