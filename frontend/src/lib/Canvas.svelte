@@ -16,8 +16,25 @@
   import NodeMark from "./NodeMark.svelte";
   import { endingNodeIds, statusMark } from "./nodeMarks.js";
   import { arrowScope, routeArrow, type Box } from "./routing.js";
+  import {
+    clampZoom,
+    fitToContent,
+    scrollForZoom,
+    wheelZoom,
+    ZOOM_DEFAULT,
+    zoomIn,
+    zoomOut,
+    zoomPercent,
+  } from "./canvasZoom.js";
+  import { loadZoom, saveZoom } from "./panelLayout.js";
+  import { tick } from "svelte";
 
   let { graph }: { graph: GraphStore } = $props();
+
+  // How large the content is drawn, remembered between visits. Blocks and
+  // arrows keep their content coordinates: only the layer they sit in is
+  // scaled, and every pointer position converts through this one number.
+  let zoom = $state(loadZoom());
 
   // Where a run of the flow as it stands could finish. Arrows change it as
   // they are drawn and removed, so it is derived rather than held on a node.
@@ -203,24 +220,103 @@
   }
 
   // Top left corner of a handle, just outside the middle of a block's side.
+  // Handles keep their size on screen at every zoom, so the box they take up
+  // in content space is the screen size converted through the zoom.
   function handleAt(node: GraphNode, side: (typeof SIDES)[number]) {
     const { x, y } = graph.absolutePosition(node);
-    const middleX = x + (node.w - HANDLE_SIZE) / 2;
-    const middleY = y + (node.h - HANDLE_SIZE) / 2;
+    const size = HANDLE_SIZE / zoom;
+    const middleX = x + (node.w - size) / 2;
+    const middleY = y + (node.h - size) / 2;
     return {
-      top: { x: middleX, y: y - HANDLE_SIZE },
+      top: { x: middleX, y: y - size },
       right: { x: x + node.w, y: middleY },
       bottom: { x: middleX, y: y + node.h },
-      left: { x: x - HANDLE_SIZE, y: middleY },
+      left: { x: x - size, y: middleY },
     }[side];
+  }
+
+  // The one conversion from screen pixels to canvas content units: every
+  // pointer position and every distance a gesture covers goes through it, so
+  // zooming needs no scale factor anywhere else.
+  function toContent(x: number, y: number) {
+    return { x: x / zoom, y: y / zoom };
   }
 
   function contentPoint(event: { clientX: number; clientY: number }) {
     const rect = canvasElement.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left + canvasElement.scrollLeft,
-      y: event.clientY - rect.top + canvasElement.scrollTop,
-    };
+    return toContent(
+      event.clientX - rect.left + canvasElement.scrollLeft,
+      event.clientY - rect.top + canvasElement.scrollTop,
+    );
+  }
+
+  // The box around every block, which fit to content frames.
+  function contentBounds(): Box {
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const node of graph.nodes) {
+      const at = graph.absolutePosition(node);
+      left = Math.min(left, at.x);
+      top = Math.min(top, at.y);
+      right = Math.max(right, at.x + node.w);
+      bottom = Math.max(bottom, at.y + node.h);
+    }
+    if (left > right) return { x: 0, y: 0, w: 0, h: 0 };
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }
+
+  // Zooms to the level, leaving the content under the anchor where it is.
+  // The anchor is measured from the canvas's top left corner in screen
+  // pixels, and defaults to the middle of what is on screen.
+  function setZoom(next: number, anchor?: { x: number; y: number }): void {
+    const level = clampZoom(next);
+    if (level === zoom) return;
+    const view = canvasElement;
+    const scroll = scrollForZoom(
+      { left: view.scrollLeft, top: view.scrollTop },
+      anchor ?? { x: view.clientWidth / 2, y: view.clientHeight / 2 },
+      zoom,
+      level,
+    );
+    applyZoom(level, scroll);
+  }
+
+  // Frames the whole flow, however far it spreads.
+  function fitContent(): void {
+    const view = canvasElement;
+    const fit = fitToContent(contentBounds(), {
+      width: view.clientWidth,
+      height: view.clientHeight,
+    });
+    applyZoom(fit.zoom, fit);
+  }
+
+  // The scrollable area only takes its new size once the layer is redrawn,
+  // so the canvas scrolls after that update rather than against the old one.
+  function applyZoom(
+    level: number,
+    scroll: { left: number; top: number },
+  ): void {
+    zoom = level;
+    saveZoom(level);
+    void tick().then(() => {
+      canvasElement.scrollLeft = scroll.left;
+      canvasElement.scrollTop = scroll.top;
+    });
+  }
+
+  // Ctrl or Cmd with the wheel, which is also how a trackpad pinch arrives,
+  // zooms toward the pointer instead of scrolling the canvas.
+  function zoomWheel(event: globalThis.WheelEvent): void {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const rect = canvasElement.getBoundingClientRect();
+    setZoom(wheelZoom(zoom, event.deltaY), {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    });
   }
 
   function hover(event: PointerEvent) {
@@ -315,10 +411,26 @@
     event.preventDefault();
   }
 
-  function cancelLink(event: { key: string }) {
-    if (event.key !== "Escape") return;
-    linking = null;
-    portMenu = null;
+  // Escape drops what is being drawn; Ctrl or Cmd with plus, minus and zero
+  // zoom and reset, in place of the browser's own page zoom.
+  function canvasKey(event: globalThis.KeyboardEvent) {
+    if (event.key === "Escape") {
+      linking = null;
+      portMenu = null;
+      return;
+    }
+    if (!event.ctrlKey && !event.metaKey) return;
+    const next =
+      event.key === "0"
+        ? ZOOM_DEFAULT
+        : event.key === "-"
+          ? zoomOut(zoom)
+          : event.key === "+" || event.key === "="
+            ? zoomIn(zoom)
+            : undefined;
+    if (next === undefined) return;
+    event.preventDefault();
+    setZoom(next);
   }
 
   function closeMenu(event: PointerEvent) {
@@ -342,10 +454,7 @@
     event.preventDefault();
     const type = draggedType();
     if (!type) return;
-    const target = event.currentTarget;
-    const rect = target.getBoundingClientRect();
-    const contentX = event.clientX - rect.left + target.scrollLeft;
-    const contentY = event.clientY - rect.top + target.scrollTop;
+    const { x: contentX, y: contentY } = contentPoint(event);
     const where = graph.landingOf(type, contentX, contentY, dragState?.id);
     const valid = where.valid;
     previewing = true;
@@ -405,16 +514,15 @@
     node: GraphNode,
   ) {
     if (!event.dataTransfer) return;
+    // The block is drawn at the current zoom, so the grab point is a screen
+    // distance into it and converts to content units like every other one.
     const rect = event.currentTarget.getBoundingClientRect();
+    const grab = toContent(event.clientX - rect.left, event.clientY - rect.top);
     event.dataTransfer.setData("text/plain", `node:${node.id}`);
     event.dataTransfer.effectAllowed = "move";
     hideDragImage(event.dataTransfer);
     movingId = node.id;
-    dragState = {
-      id: node.id,
-      dx: event.clientX - rect.left,
-      dy: event.clientY - rect.top,
-    };
+    dragState = { id: node.id, dx: grab.x, dy: grab.y };
   }
 
   function startResize(
@@ -444,12 +552,16 @@
   ) {
     const active = resizeState;
     if (!active) return;
+    const travelled = toContent(
+      event.clientX - active.startX,
+      event.clientY - active.startY,
+    );
     graph.resizeFrom(
       active.id,
       active.box,
       active.edges,
-      event.clientX - active.startX,
-      event.clientY - active.startY,
+      travelled.x,
+      travelled.y,
     );
   }
 
@@ -491,12 +603,9 @@
     event: DragEvent & { currentTarget: EventTarget & HTMLDivElement },
   ) {
     event.preventDefault();
-    const target = event.currentTarget;
-    const rect = target.getBoundingClientRect();
     // Node coordinates are content-space; pointer coordinates are viewport
-    // space, so scrolled canvases need the scroll offset added back.
-    const contentX = event.clientX - rect.left + target.scrollLeft;
-    const contentY = event.clientY - rect.top + target.scrollTop;
+    // space, so the conversion adds back the scroll offset and the zoom.
+    const { x: contentX, y: contentY } = contentPoint(event);
     const data = event.dataTransfer?.getData("text/plain") ?? "";
     dropHint = "";
     clearPreview();
@@ -552,285 +661,355 @@
   }
 </script>
 
-<div
-  class="canvas"
-  class:preview-invalid={previewing && !previewValid}
-  class:resizing
-  class:linking
-  role="region"
-  aria-label="Graph canvas"
-  bind:this={canvasElement}
-  onpointermove={hover}
-  onpointerleave={() => (hoverId = null)}
-  ondragover={previewDrop}
-  ondragleave={clearPreview}
-  ondrop={drop}
->
-  <svg
-    class="edges"
-    style:width="{extent.width}px"
-    style:height="{extent.height}px"
+<div class="canvas-area" style:--zoom={zoom}>
+  <div
+    class="canvas"
+    class:preview-invalid={previewing && !previewValid}
+    class:resizing
+    class:linking
+    role="region"
+    aria-label="Graph canvas"
+    bind:this={canvasElement}
+    onpointermove={hover}
+    onpointerleave={() => (hoverId = null)}
+    ondragover={previewDrop}
+    ondragleave={clearPreview}
+    ondrop={drop}
+    onwheel={zoomWheel}
   >
-    <defs>
-      <marker
-        id="edge-arrowhead"
-        markerWidth="8"
-        markerHeight="8"
-        refX="7"
-        refY="4"
-        orient="auto"
+    <!-- The scrollable area is the content at its drawn size, so scrolling
+       still reaches every corner of a zoomed flow; the layer inside it holds
+       the content at its own coordinates and is scaled as a whole. -->
+    <div
+      class="zoom-sizer"
+      style:width="{extent.width * zoom}px"
+      style:height="{extent.height * zoom}px"
+    >
+      <div
+        class="zoom-layer"
+        style:width="{extent.width}px"
+        style:height="{extent.height}px"
+        style:transform="scale({zoom})"
       >
-        <path class="edge-arrow" d="M0 0 L8 4 L0 8 Z" />
-      </marker>
-      <marker
-        id="edge-arrowhead-active"
-        markerWidth="8"
-        markerHeight="8"
-        refX="7"
-        refY="4"
-        orient="auto"
-      >
-        <path class="edge-arrow-active" d="M0 0 L8 4 L0 8 Z" />
-      </marker>
-      <marker
-        id="edge-arrowhead-invalid"
-        markerWidth="8"
-        markerHeight="8"
-        refX="7"
-        refY="4"
-        orient="auto"
-      >
-        <path class="edge-arrow-invalid" d="M0 0 L8 4 L0 8 Z" />
-      </marker>
-    </defs>
-    <g role="listbox" aria-label="Arrows">
-      {#each graph.edges as edge (edge.id)}
-        {@const from = nodeById(edge.from)}
-        {@const to = nodeById(edge.to)}
-        {#if from && to}
-          {@const route = routeOf(from, to)}
-          {@const selected = edge.id === graph.selectedEdgeId}
-          <path
-            class="edge-hit"
-            role="option"
-            tabindex="0"
-            aria-selected={selected}
-            aria-label="Arrow from {from.name} to {to.name}"
-            d={route.hitPath}
-            onpointerenter={() => showEnds(edge.id)}
-            onpointerleave={leaveEnds}
-            onclick={(event) => {
-              graph.selectEdge(edge.id);
-              event.currentTarget.focus();
-            }}
+        <svg
+          class="edges"
+          style:width="{extent.width}px"
+          style:height="{extent.height}px"
+        >
+          <defs>
+            <marker
+              id="edge-arrowhead"
+              markerWidth="8"
+              markerHeight="8"
+              refX="7"
+              refY="4"
+              orient="auto"
+            >
+              <path class="edge-arrow" d="M0 0 L8 4 L0 8 Z" />
+            </marker>
+            <marker
+              id="edge-arrowhead-active"
+              markerWidth="8"
+              markerHeight="8"
+              refX="7"
+              refY="4"
+              orient="auto"
+            >
+              <path class="edge-arrow-active" d="M0 0 L8 4 L0 8 Z" />
+            </marker>
+            <marker
+              id="edge-arrowhead-invalid"
+              markerWidth="8"
+              markerHeight="8"
+              refX="7"
+              refY="4"
+              orient="auto"
+            >
+              <path class="edge-arrow-invalid" d="M0 0 L8 4 L0 8 Z" />
+            </marker>
+          </defs>
+          <g role="listbox" aria-label="Arrows">
+            {#each graph.edges as edge (edge.id)}
+              {@const from = nodeById(edge.from)}
+              {@const to = nodeById(edge.to)}
+              {#if from && to}
+                {@const route = routeOf(from, to)}
+                {@const selected = edge.id === graph.selectedEdgeId}
+                <path
+                  class="edge-hit"
+                  role="option"
+                  tabindex="0"
+                  aria-selected={selected}
+                  aria-label="Arrow from {from.name} to {to.name}"
+                  d={route.hitPath}
+                  onpointerenter={() => showEnds(edge.id)}
+                  onpointerleave={leaveEnds}
+                  onclick={(event) => {
+                    graph.selectEdge(edge.id);
+                    event.currentTarget.focus();
+                  }}
+                  onkeydown={(event) => {
+                    // Delete or Backspace deletes the focused arrow.
+                    if (event.key !== "Delete" && event.key !== "Backspace")
+                      return;
+                    event.preventDefault();
+                    graph.removeEdge(edge.id);
+                  }}
+                ></path>
+                <path
+                  class="edge-line"
+                  class:selected
+                  class:moving={linking?.edgeId === edge.id}
+                  d={route.path}
+                  marker-end={selected
+                    ? "url(#edge-arrowhead-active)"
+                    : "url(#edge-arrowhead)"}
+                ></path>
+                {#if graph.portOf(edge)}
+                  <text
+                    class="edge-port"
+                    aria-hidden="true"
+                    x={route.label.x}
+                    y={route.label.y}
+                    text-anchor={route.label.anchor}>{graph.portOf(edge)}</text
+                  >
+                {/if}
+                {#if (selected || hoverEdgeId === edge.id) && !linking}
+                  <circle
+                    class="edge-end"
+                    data-end="from"
+                    aria-hidden="true"
+                    onpointerenter={() => showEnds(edge.id)}
+                    onpointerleave={leaveEnds}
+                    cx={route.start.x}
+                    cy={route.start.y}
+                    r={5 / zoom}
+                    onpointerdown={(event) =>
+                      startLink(event, edge.to, "from", edge.id)}
+                  ></circle>
+                  <circle
+                    class="edge-end"
+                    data-end="to"
+                    aria-hidden="true"
+                    onpointerenter={() => showEnds(edge.id)}
+                    onpointerleave={leaveEnds}
+                    cx={route.end.x}
+                    cy={route.end.y}
+                    r={5 / zoom}
+                    onpointerdown={(event) =>
+                      startLink(event, edge.from, "to", edge.id)}
+                  ></circle>
+                {/if}
+              {/if}
+            {/each}
+          </g>
+          {#if linking}
+            {@const anchor = nodeById(linking.anchorId)}
+            {#if anchor}
+              {@const preview = previewRoute(linking, anchor)}
+              {@const refused =
+                linking.targetId !== undefined && !linking.valid}
+              <path
+                class="edge-preview"
+                class:invalid={refused}
+                d={preview.path}
+                marker-end="url(#edge-arrowhead-{refused
+                  ? 'invalid'
+                  : 'active'})"
+              ></path>
+            {/if}
+          {/if}
+        </svg>
+        {#each graph.nodes as node (node.id)}
+          {@const mark = statusMark(graph.statusOf(node.id))}
+          <button
+            type="button"
+            class="node block-{node.type} status-{graph.statusOf(node.id) ??
+              'idle'}"
+            aria-describedby={mark ? `status-${node.id}` : undefined}
+            class:selected={node.id === graph.selectedId}
+            class:problem-error={graph.severityOf(node.id) === "error"}
+            class:problem-warning={graph.severityOf(node.id) === "warning"}
+            class:drop-ok={(previewing && nestId === node.id) ||
+              (linking?.targetId === node.id && linking.valid)}
+            class:drop-no={(previewing && refusedId === node.id) ||
+              (linking?.targetId === node.id && !linking.valid)}
+            class:dragging={node.id === movingId}
+            aria-pressed={node.id === graph.selectedId}
+            draggable="true"
+            style:--block-hue={BLOCK_HUES[node.type]}
+            style:left="{graph.absolutePosition(node).x}px"
+            style:top="{graph.absolutePosition(node).y}px"
+            style:width="{node.w}px"
+            style:height="{node.h}px"
+            ondragstart={(event) => startNodeDrag(event, node)}
+            ondragend={endNodeDrag}
+            onclick={() => graph.select(node.id)}
             onkeydown={(event) => {
-              // Delete or Backspace deletes the focused arrow.
+              // Delete or Backspace deletes the focused block.
               if (event.key !== "Delete" && event.key !== "Backspace") return;
               event.preventDefault();
-              graph.removeEdge(edge.id);
+              graph.removeNode(node.id);
             }}
-          ></path>
-          <path
-            class="edge-line"
-            class:selected
-            class:moving={linking?.edgeId === edge.id}
-            d={route.path}
-            marker-end={selected
-              ? "url(#edge-arrowhead-active)"
-              : "url(#edge-arrowhead)"}
-          ></path>
-          {#if graph.portOf(edge)}
-            <text
-              class="edge-port"
+          >
+            <span class="node-title">
+              {node.name}
+              {#if node.start}
+                <NodeMark kind="start" />
+              {/if}
+              {#if endingIds.has(node.id)}
+                <NodeMark kind="end" />
+              {/if}
+              {#if mark}
+                <NodeMark kind={mark} id="status-{node.id}" />
+              {/if}
+              {#if node.type === "loop"}
+                <span class="repeats" aria-hidden="true">
+                  ↻
+                  {#if graph.iterationOf(node.id)}
+                    {graph.iterationOf(node.id)} of {node.maxIterations ?? 3}
+                  {:else}
+                    up to {node.maxIterations ?? 3}×
+                  {/if}
+                </span>
+              {/if}
+              {#if graph.severityOf(node.id)}
+                <span
+                  class="problem-mark"
+                  title={graph.severityOf(node.id) === "error"
+                    ? "Has errors to fix"
+                    : "Has warnings"}
+                  aria-hidden="true"
+                ></span>
+              {/if}
+              <span class="node-meta">
+                <span class="node-id" aria-hidden="true"
+                  >{shortNodeId(node.id)}</span
+                >
+                <BlockIcon {node} />
+              </span>
+            </span>
+            <span class="node-separator" aria-hidden="true"></span>
+            {#each RESIZE_EDGES as edge (edge)}
+              <span
+                class="resize-edge"
+                data-edge={edge}
+                aria-hidden="true"
+                onpointerdown={(event) => startResize(event, node, edge)}
+              ></span>
+            {/each}
+            <span
+              class="resize-handle"
+              data-edge="bottom right"
               aria-hidden="true"
-              x={route.label.x}
-              y={route.label.y}
-              text-anchor={route.label.anchor}>{graph.portOf(edge)}</text
-            >
-          {/if}
-          {#if (selected || hoverEdgeId === edge.id) && !linking}
-            <circle
-              class="edge-end"
-              data-end="from"
-              aria-hidden="true"
-              onpointerenter={() => showEnds(edge.id)}
-              onpointerleave={leaveEnds}
-              cx={route.start.x}
-              cy={route.start.y}
-              r="5"
               onpointerdown={(event) =>
-                startLink(event, edge.to, "from", edge.id)}
-            ></circle>
-            <circle
-              class="edge-end"
-              data-end="to"
-              aria-hidden="true"
-              onpointerenter={() => showEnds(edge.id)}
-              onpointerleave={leaveEnds}
-              cx={route.end.x}
-              cy={route.end.y}
-              r="5"
-              onpointerdown={(event) =>
-                startLink(event, edge.from, "to", edge.id)}
-            ></circle>
+                startResize(event, node, "bottom right")}
+            ></span>
+          </button>
+        {/each}
+        {#each handleIds as id (id)}
+          {@const node = nodeById(id)}
+          {#if node}
+            {#each SIDES as side (side)}
+              {@const at = handleAt(node, side)}
+              <span
+                class="link-handle"
+                data-side={side}
+                aria-hidden="true"
+                title="Drag to draw an arrow"
+                style:left="{at.x}px"
+                style:top="{at.y}px"
+                onpointerdown={(event) => startLink(event, node.id, "to")}
+              ></span>
+            {/each}
           {/if}
+        {/each}
+        {#if portMenu}
+          <div
+            class="port-menu"
+            role="menu"
+            aria-label="Output"
+            tabindex="-1"
+            bind:this={menuElement}
+            style:left="{portMenu.x}px"
+            style:top="{portMenu.y}px"
+            onkeydown={menuKey}
+          >
+            <span class="port-menu-title" aria-hidden="true">Output</span>
+            {#each portMenu.ports as port, index (index)}
+              <button
+                type="button"
+                role="menuitem"
+                onclick={() => choosePort(port)}>{port}</button
+              >
+            {/each}
+          </div>
         {/if}
-      {/each}
-    </g>
-    {#if linking}
-      {@const anchor = nodeById(linking.anchorId)}
-      {#if anchor}
-        {@const preview = previewRoute(linking, anchor)}
-        {@const refused = linking.targetId !== undefined && !linking.valid}
-        <path
-          class="edge-preview"
-          class:invalid={refused}
-          d={preview.path}
-          marker-end="url(#edge-arrowhead-{refused ? 'invalid' : 'active'})"
-        ></path>
-      {/if}
+        {#if landing}
+          <div
+            class="drop-preview block-{landing.type}"
+            class:invalid={!previewValid}
+            class:nesting={nestId !== null}
+            aria-hidden="true"
+            style:--block-hue={BLOCK_HUES[landing.type]}
+            style:left="{landing.x}px"
+            style:top="{landing.y}px"
+            style:width="{landing.w}px"
+            style:height="{landing.h}px"
+          >
+            <span class="node-title">{landing.name}</span>
+          </div>
+        {/if}
+      </div>
+    </div>
+    {#if graph.nodes.length === 0}
+      <p class="hint">Drag components here to build your graph</p>
     {/if}
-  </svg>
-  {#each graph.nodes as node (node.id)}
-    {@const mark = statusMark(graph.statusOf(node.id))}
+    {#if dropHint}
+      <p class="drop-hint" role="status">{dropHint}</p>
+    {/if}
+  </div>
+  <div
+    class="zoom-bar"
+    class:dragging={graph.draggingType !== null || movingId !== null}
+    role="group"
+    aria-label="Zoom"
+  >
     <button
       type="button"
-      class="node block-{node.type} status-{graph.statusOf(node.id) ?? 'idle'}"
-      aria-describedby={mark ? `status-${node.id}` : undefined}
-      class:selected={node.id === graph.selectedId}
-      class:problem-error={graph.severityOf(node.id) === "error"}
-      class:problem-warning={graph.severityOf(node.id) === "warning"}
-      class:drop-ok={(previewing && nestId === node.id) ||
-        (linking?.targetId === node.id && linking.valid)}
-      class:drop-no={(previewing && refusedId === node.id) ||
-        (linking?.targetId === node.id && !linking.valid)}
-      class:dragging={node.id === movingId}
-      aria-pressed={node.id === graph.selectedId}
-      draggable="true"
-      style:--block-hue={BLOCK_HUES[node.type]}
-      style:left="{graph.absolutePosition(node).x}px"
-      style:top="{graph.absolutePosition(node).y}px"
-      style:width="{node.w}px"
-      style:height="{node.h}px"
-      ondragstart={(event) => startNodeDrag(event, node)}
-      ondragend={endNodeDrag}
-      onclick={() => graph.select(node.id)}
-      onkeydown={(event) => {
-        // Delete or Backspace deletes the focused block.
-        if (event.key !== "Delete" && event.key !== "Backspace") return;
-        event.preventDefault();
-        graph.removeNode(node.id);
-      }}
+      aria-label="Fit to content"
+      title="Fit the whole flow on screen"
+      onclick={fitContent}
     >
-      <span class="node-title">
-        {node.name}
-        {#if node.start}
-          <NodeMark kind="start" />
-        {/if}
-        {#if endingIds.has(node.id)}
-          <NodeMark kind="end" />
-        {/if}
-        {#if mark}
-          <NodeMark kind={mark} id="status-{node.id}" />
-        {/if}
-        {#if node.type === "loop"}
-          <span class="repeats" aria-hidden="true">
-            ↻
-            {#if graph.iterationOf(node.id)}
-              {graph.iterationOf(node.id)} of {node.maxIterations ?? 3}
-            {:else}
-              up to {node.maxIterations ?? 3}×
-            {/if}
-          </span>
-        {/if}
-        {#if graph.severityOf(node.id)}
-          <span
-            class="problem-mark"
-            title={graph.severityOf(node.id) === "error"
-              ? "Has errors to fix"
-              : "Has warnings"}
-            aria-hidden="true"
-          ></span>
-        {/if}
-        <span class="node-meta">
-          <span class="node-id" aria-hidden="true">{shortNodeId(node.id)}</span>
-          <BlockIcon {node} />
-        </span>
-      </span>
-      <span class="node-separator" aria-hidden="true"></span>
-      {#each RESIZE_EDGES as edge (edge)}
-        <span
-          class="resize-edge"
-          data-edge={edge}
-          aria-hidden="true"
-          onpointerdown={(event) => startResize(event, node, edge)}
-        ></span>
-      {/each}
-      <span
-        class="resize-handle"
-        data-edge="bottom right"
-        aria-hidden="true"
-        onpointerdown={(event) => startResize(event, node, "bottom right")}
-      ></span>
+      <svg viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" />
+      </svg>
     </button>
-  {/each}
-  {#each handleIds as id (id)}
-    {@const node = nodeById(id)}
-    {#if node}
-      {#each SIDES as side (side)}
-        {@const at = handleAt(node, side)}
-        <span
-          class="link-handle"
-          data-side={side}
-          aria-hidden="true"
-          title="Drag to draw an arrow"
-          style:left="{at.x}px"
-          style:top="{at.y}px"
-          onpointerdown={(event) => startLink(event, node.id, "to")}
-        ></span>
-      {/each}
-    {/if}
-  {/each}
-  {#if portMenu}
-    <div
-      class="port-menu"
-      role="menu"
-      aria-label="Output"
-      tabindex="-1"
-      bind:this={menuElement}
-      style:left="{portMenu.x}px"
-      style:top="{portMenu.y}px"
-      onkeydown={menuKey}
+    <button
+      type="button"
+      aria-label="Zoom out"
+      title="Zoom out"
+      onclick={() => setZoom(zoomOut(zoom))}
     >
-      <span class="port-menu-title" aria-hidden="true">Output</span>
-      {#each portMenu.ports as port, index (index)}
-        <button type="button" role="menuitem" onclick={() => choosePort(port)}
-          >{port}</button
-        >
-      {/each}
-    </div>
-  {/if}
-  {#if landing}
-    <div
-      class="drop-preview block-{landing.type}"
-      class:invalid={!previewValid}
-      class:nesting={nestId !== null}
-      aria-hidden="true"
-      style:--block-hue={BLOCK_HUES[landing.type]}
-      style:left="{landing.x}px"
-      style:top="{landing.y}px"
-      style:width="{landing.w}px"
-      style:height="{landing.h}px"
+      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" /></svg>
+    </button>
+    <button
+      type="button"
+      class="zoom-level"
+      aria-label="Reset zoom"
+      title="Reset to 100%"
+      onclick={() => setZoom(ZOOM_DEFAULT)}>{zoomPercent(zoom)}%</button
     >
-      <span class="node-title">{landing.name}</span>
-    </div>
-  {/if}
-  {#if graph.nodes.length === 0}
-    <p class="hint">Drag components here to build your graph</p>
-  {/if}
-  {#if dropHint}
-    <p class="drop-hint" role="status">{dropHint}</p>
-  {/if}
+    <button
+      type="button"
+      aria-label="Zoom in"
+      title="Zoom in"
+      onclick={() => setZoom(zoomIn(zoom))}
+    >
+      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8M6 2v8" /></svg
+      >
+    </button>
+  </div>
 </div>
 
 <svelte:window
@@ -847,16 +1026,97 @@
     linking = null;
   }}
   onpointerdown={closeMenu}
-  onkeydown={cancelLink}
+  onkeydown={canvasKey}
 />
 
 <style>
+  /* Holds the scrolling canvas and the zoom controls that float over it. */
+  .canvas-area {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    /* One screen pixel in the content units the scaled layer is drawn in.
+       Anything the pointer has to hit, or read, uses it to keep its size on
+       screen however far the content is zoomed. */
+    --screen-px: calc(1px / var(--zoom));
+  }
+
   .canvas {
     position: relative;
     overflow: auto;
     background:
       radial-gradient(var(--canvas-dot) 1px, transparent 1px) 0 0 / 20px 20px,
       var(--canvas);
+  }
+
+  /* The dot grid is on the scrolling canvas rather than the scaled layer, so
+     it stays crisp and evenly spaced at every zoom; nothing snaps to it. */
+
+  .zoom-sizer {
+    position: relative;
+  }
+
+  /* The content at its own coordinates, drawn at the current scale from its
+     top left corner. It is deliberately not promoted to its own layer: the
+     browser then redraws the text at the scale it is shown at, rather than
+     stretching a picture of it. */
+  .zoom-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+  }
+
+  .zoom-bar {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.15rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-lifted);
+  }
+
+  /* The controls float over the canvas, so they step aside while a block is
+     dragged: the corner under them takes drops like the rest of the canvas. */
+  .zoom-bar.dragging {
+    pointer-events: none;
+    opacity: 0.4;
+  }
+
+  .zoom-bar button {
+    min-height: 1.6rem;
+    min-width: 1.6rem;
+    padding: 0.1rem 0.3rem;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+  }
+
+  .zoom-bar button:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .zoom-bar svg {
+    width: 0.7rem;
+    height: 0.7rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+  }
+
+  .zoom-level {
+    min-width: 3rem;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Above the blocks: arrows between blocks nested in a container would
@@ -873,10 +1133,14 @@
 
   /* Arrows are routed paths, so they must never be filled: only the stroke
      of the corners and runs is drawn. */
+  /* Arrows keep their weight, their ends and their hit area at the same
+     size on screen at every zoom: a stroke that scaled with the content
+     would all but disappear once the whole flow is on screen, and an 8px
+     target would be 2px wide at a quarter size. */
   .edge-line {
     fill: none;
     stroke: var(--edge);
-    stroke-width: 1.5;
+    stroke-width: calc(1.5 * var(--screen-px));
     stroke-linejoin: round;
   }
 
@@ -889,7 +1153,7 @@
   .edge-hit {
     fill: none;
     stroke: transparent;
-    stroke-width: 12;
+    stroke-width: calc(12 * var(--screen-px));
     pointer-events: stroke;
     cursor: pointer;
     outline: none;
@@ -902,7 +1166,7 @@
   .edge-line.selected,
   .edge-hit:focus-visible + .edge-line {
     stroke: var(--accent);
-    stroke-width: 2.25;
+    stroke-width: calc(2.25 * var(--screen-px));
   }
 
   .edge-line.moving {
@@ -916,8 +1180,8 @@
   .edge-preview {
     fill: none;
     stroke: var(--accent);
-    stroke-width: 2;
-    stroke-dasharray: 6 4;
+    stroke-width: calc(2 * var(--screen-px));
+    stroke-dasharray: calc(6 * var(--screen-px)) calc(4 * var(--screen-px));
     stroke-linejoin: round;
   }
 
@@ -933,7 +1197,7 @@
   .edge-end {
     fill: var(--surface);
     stroke: var(--accent);
-    stroke-width: 2;
+    stroke-width: calc(2 * var(--screen-px));
     pointer-events: all;
     cursor: move;
     touch-action: none;
@@ -948,8 +1212,8 @@
   .link-handle {
     position: absolute;
     z-index: 4;
-    width: 20px;
-    height: 20px;
+    width: calc(20 * var(--screen-px));
+    height: calc(20 * var(--screen-px));
     cursor: crosshair;
     touch-action: none;
   }
@@ -957,7 +1221,7 @@
   .link-handle::before {
     content: "";
     position: absolute;
-    inset: 4px;
+    inset: calc(4 * var(--screen-px));
     background: var(--accent);
     clip-path: polygon(50% 6%, 100% 94%, 0 94%);
     opacity: 0.6;
@@ -992,6 +1256,8 @@
   .port-menu {
     position: absolute;
     z-index: 5;
+    transform: scale(calc(1 / var(--zoom)));
+    transform-origin: 0 0;
     display: grid;
     min-width: 8rem;
     padding: 0.25rem;
@@ -1172,17 +1438,17 @@
 
   .resize-edge[data-edge="top"],
   .resize-edge[data-edge="bottom"] {
-    left: 8px;
-    right: 8px;
-    height: 6px;
+    left: calc(8 * var(--screen-px));
+    right: calc(8 * var(--screen-px));
+    height: calc(6 * var(--screen-px));
     cursor: ns-resize;
   }
 
   .resize-edge[data-edge="left"],
   .resize-edge[data-edge="right"] {
-    top: 8px;
-    bottom: 8px;
-    width: 6px;
+    top: calc(8 * var(--screen-px));
+    bottom: calc(8 * var(--screen-px));
+    width: calc(6 * var(--screen-px));
     cursor: ew-resize;
   }
 
@@ -1207,8 +1473,8 @@
   }
 
   .resize-edge[data-edge*=" "] {
-    width: 10px;
-    height: 10px;
+    width: calc(10 * var(--screen-px));
+    height: calc(10 * var(--screen-px));
   }
 
   .resize-edge[data-edge="top left"] {
@@ -1225,8 +1491,8 @@
     z-index: 1;
     right: 0;
     bottom: 0;
-    width: 14px;
-    height: 14px;
+    width: calc(14 * var(--screen-px));
+    height: calc(14 * var(--screen-px));
     touch-action: none;
     cursor: nwse-resize;
     background: linear-gradient(

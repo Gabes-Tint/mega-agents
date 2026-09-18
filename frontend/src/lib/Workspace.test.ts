@@ -3543,6 +3543,160 @@ describe("resizable panels", () => {
   });
 });
 
+describe("zooming the canvas", () => {
+  // The scale the canvas draws its content at, as the browser would read it
+  // off the layer every block and arrow sits in.
+  function scale(): string {
+    const layer = canvas().querySelector(".zoom-layer") as HTMLElement;
+    return layer.style.transform;
+  }
+
+  function level() {
+    return screen.getByRole("button", { name: "Reset zoom" });
+  }
+
+  async function press(name: string) {
+    await fireEvent.click(screen.getByRole("button", { name }));
+  }
+
+  // Steps down to half size, which the buttons reach in three steps.
+  async function halve() {
+    await press("Zoom out");
+    await press("Zoom out");
+    await press("Zoom out");
+  }
+
+  test("starts at full size and says so", () => {
+    render(Workspace);
+
+    expect(scale()).toBe("scale(1)");
+    expect(level()).toHaveTextContent("100%");
+  });
+
+  test("the buttons step the zoom and reset it to full size", async () => {
+    render(Workspace);
+
+    await press("Zoom in");
+    expect(scale()).toBe("scale(1.25)");
+    expect(level()).toHaveTextContent("125%");
+
+    await halve();
+    expect(scale()).toBe("scale(0.67)");
+    expect(level()).toHaveTextContent("67%");
+
+    await fireEvent.click(level());
+    expect(scale()).toBe("scale(1)");
+    expect(level()).toHaveTextContent("100%");
+  });
+
+  test("Ctrl with plus, minus and zero zooms and resets", async () => {
+    render(Workspace);
+
+    await fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+    expect(level()).toHaveTextContent("75%");
+    await fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    expect(level()).toHaveTextContent("100%");
+    await fireEvent.keyDown(window, { key: "=", metaKey: true });
+    expect(level()).toHaveTextContent("125%");
+    await fireEvent.keyDown(window, { key: "0", ctrlKey: true });
+    expect(level()).toHaveTextContent("100%");
+  });
+
+  test("Ctrl and the wheel zooms, and the wheel alone scrolls", async () => {
+    render(Workspace);
+
+    await fireEvent.wheel(canvas(), { deltaY: -100, ctrlKey: true });
+    expect(level()).toHaveTextContent("128%");
+
+    await fireEvent.wheel(canvas(), { deltaY: -100 });
+    expect(level()).toHaveTextContent("128%");
+  });
+
+  test("the zoom level is remembered", async () => {
+    render(Workspace);
+    await press("Zoom in");
+    cleanup();
+
+    render(Workspace);
+    expect(level()).toHaveTextContent("125%");
+    expect(scale()).toBe("scale(1.25)");
+  });
+
+  test("a stored level outside the range comes back inside it", () => {
+    localStorage.setItem("mega-agents:layout", JSON.stringify({ zoom: 12 }));
+    render(Workspace);
+
+    expect(level()).toHaveTextContent("200%");
+  });
+
+  test("a block dropped on a zoomed canvas lands under the pointer", async () => {
+    render(Workspace);
+    await halve();
+
+    await dropComponent("Project", 200, 100);
+
+    // Half size doubles the distance the pointer covers in content space.
+    expect(screen.getByRole("button", { name: "Project 1" })).toHaveStyle({
+      left: "400px",
+      top: "200px",
+    });
+  });
+
+  test("a block moved on a zoomed canvas follows the pointer", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await halve();
+    const node = screen.getByRole("button", { name: "Project 1" });
+
+    const dataTransfer = makeDataTransfer();
+    await dispatchDragStart(node, { dataTransfer, clientX: 0, clientY: 0 });
+    await dispatchDrop(canvas(), { dataTransfer, clientX: 100, clientY: 80 });
+
+    expect(node).toHaveStyle({ left: "200px", top: "160px" });
+  });
+
+  test("a block resized on a zoomed canvas follows the pointer", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await halve();
+    const node = screen.getByRole("button", { name: "Project 1" });
+    const before = parseFloat(node.style.width);
+    const grip = node.querySelector(".resize-handle");
+    if (!grip) throw new Error("no resize grip");
+
+    await fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0 });
+    await fireEvent.pointerMove(window, { clientX: 100, clientY: 50 });
+    await fireEvent.pointerUp(window);
+
+    expect(parseFloat(node.style.width)).toBe(before + 200);
+  });
+
+  test("an arrow drawn on a zoomed canvas reaches the block under the pointer", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Project", 400, 400);
+    await halve();
+    await fireEvent.click(screen.getByRole("button", { name: "Project 1" }));
+    const handle = canvas().querySelector('.link-handle[data-side="right"]');
+    if (!handle) throw new Error("no arrow handle");
+
+    await fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 0,
+      clientY: 0,
+    });
+    // Half of the content position of the second block, since the pointer
+    // moves in screen pixels.
+    await fireEvent.pointerMove(window, { clientX: 225, clientY: 210 });
+    await fireEvent.pointerUp(window);
+
+    expect(
+      screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("drawing arrows on the canvas", () => {
   function block(name: string) {
     return screen.getByRole("button", { name });

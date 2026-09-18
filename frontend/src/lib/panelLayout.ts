@@ -1,3 +1,5 @@
+import { clampZoom, ZOOM_DEFAULT } from "./canvasZoom.js";
+
 // Sizes in pixels of the panels around the canvas, which people drag to
 // suit their screen. They are remembered in this browser only.
 export interface PanelLayout {
@@ -32,27 +34,54 @@ function defaults(): PanelLayout {
   };
 }
 
+// Everything the workspace remembers about its layout lives under one key,
+// so reading and writing go through the whole record and a panel drag never
+// forgets the zoom, or the other way round.
+function readStored(): Record<string, unknown> {
+  try {
+    const stored: unknown = JSON.parse(
+      localStorage.getItem(LAYOUT_KEY) ?? "{}",
+    );
+    if (stored && typeof stored === "object")
+      return stored as Record<string, unknown>;
+  } catch {
+    // Unreadable or unavailable storage leaves the defaults.
+  }
+  return {};
+}
+
+function writeStored(changes: Record<string, number>): void {
+  try {
+    localStorage.setItem(
+      LAYOUT_KEY,
+      JSON.stringify({ ...readStored(), ...changes }),
+    );
+  } catch {
+    // The settings then last only until the page reloads.
+  }
+}
+
 export function loadLayout(): PanelLayout {
   const layout = defaults();
-  try {
-    const stored = JSON.parse(
-      localStorage.getItem(LAYOUT_KEY) ?? "{}",
-    ) as Partial<Record<PanelName, unknown>>;
-    for (const name of Object.keys(layout) as PanelName[]) {
-      const size = stored[name];
-      if (typeof size === "number" && Number.isFinite(size))
-        layout[name] = clampPanel(name, size);
-    }
-  } catch {
-    // Unreadable or unavailable storage leaves the default sizes.
+  const stored = readStored();
+  for (const name of Object.keys(layout) as PanelName[]) {
+    const size = stored[name];
+    if (typeof size === "number" && Number.isFinite(size))
+      layout[name] = clampPanel(name, size);
   }
   return layout;
 }
 
 export function saveLayout(layout: PanelLayout): void {
-  try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
-  } catch {
-    // The sizes then last only until the page reloads.
-  }
+  writeStored({ ...layout });
+}
+
+// How far the canvas was zoomed, kept beside the panel sizes.
+export function loadZoom(): number {
+  const zoom = readStored().zoom;
+  return typeof zoom === "number" ? clampZoom(zoom) : ZOOM_DEFAULT;
+}
+
+export function saveZoom(zoom: number): void {
+  writeStored({ zoom });
 }
