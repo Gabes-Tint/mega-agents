@@ -121,10 +121,19 @@ type Options struct {
 	// Given are outputs of tasks outside the plan that its tasks may need,
 	// as a loop gives its body.
 	Given map[string]map[string]any
+	// CancelGrace is how long a cancelled run waits for the tasks still
+	// running to report before it records them as cancelled and ends; 0 uses
+	// DefaultCancelGrace. A task that ignores cancellation cannot hold a run
+	// open forever.
+	CancelGrace time.Duration
 }
 
 // DefaultParallelism is how many independent tasks run at once.
 const DefaultParallelism = 4
+
+// DefaultCancelGrace is how long a cancelled run waits for its running tasks
+// to report what they did before it settles them as cancelled.
+const DefaultCancelGrace = 2 * time.Second
 
 // Execute validates the plan, then runs its tasks one at a time in dependency
 // order, keeping declaration order among tasks that are ready together. It
@@ -154,16 +163,23 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 	if now == nil {
 		now = time.Now
 	}
+	grace := options.CancelGrace
+	if grace <= 0 {
+		grace = DefaultCancelGrace
+	}
 	execution := &execution{
 		ctx: ctx, tasks: tasks, options: options, run: &run, index: index, stepOf: stepOf, now: now,
 		outputs: make(map[string]map[string]any, len(tasks)),
 		logs:    make([]io.Writer, len(tasks)),
 		settled: make([]bool, len(tasks)), started: make([]bool, len(tasks)),
-		finished: make(chan int), progress: make(chan func()),
+		// A settled run abandons the tasks that never reported, so the channel
+		// buffers their results rather than leaving their goroutines stuck.
+		finished: make(chan int, len(tasks)), progress: make(chan func()), grace: grace,
 	}
 	execution.notify()
 	running := 0
 	for remaining := len(tasks); remaining > 0; {
+		progressed := false
 		for i := range tasks {
 			if execution.started[i] || !execution.ready(i) {
 				continue
@@ -171,6 +187,7 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 			if reason := execution.blocked(i); reason != "" {
 				execution.skip(i, reason)
 				remaining--
+				progressed = true
 				continue
 			}
 			if running == limit {
@@ -178,13 +195,31 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 			}
 			execution.start(i)
 			running++
+			progressed = true
 		}
 		if remaining == 0 {
 			break
 		}
-		execution.complete(execution.next())
-		running--
-		remaining--
+		if running == 0 {
+			// Nothing is running, so no task can report. A pass that settled
+			// something may have readied a task declared before it, which the
+			// next pass picks up; every such pass settles at least one task, so
+			// looking again cannot spin. A pass that settled nothing means the
+			// run can never go on, and the rest fails rather than waiting.
+			if progressed {
+				continue
+			}
+			execution.settle(Failed, "nothing left in the flow can run")
+			break
+		}
+		if i := execution.next(); i != noTask {
+			execution.complete(i)
+			running--
+			remaining--
+			continue
+		}
+		execution.settle(Skipped, "the run was cancelled")
+		break
 	}
 	run.Status = Succeeded
 	for _, step := range run.Steps {
@@ -230,17 +265,59 @@ type execution struct {
 	finished chan int
 	progress chan func()
 	begun    []time.Time
+	grace    time.Duration
 }
 
+// noTask is what next returns when no task will report: a cancelled run
+// whose running tasks did not settle within the grace.
+const noTask = -1
+
 // next applies loop progress until a task finishes, and returns that task.
+// A cancelled run gives the tasks still running the grace to report what
+// they did, and then stops waiting, so a task that ignores cancellation
+// cannot hold the run open.
 func (e *execution) next() int {
+	done := e.ctx.Done()
+	var expired <-chan time.Time
 	for {
 		select {
 		case apply := <-e.progress:
 			apply()
 		case i := <-e.finished:
 			return i
+		case <-done:
+			// Done stays ready once it fires, so it is taken only once.
+			done = nil
+			timer := time.NewTimer(e.grace)
+			defer timer.Stop()
+			expired = timer.C
+		case <-expired:
+			return noTask
 		}
+	}
+}
+
+// settle ends a run that cannot wait any longer: tasks that already reported
+// are completed, and every task still unsettled is recorded with the reason.
+func (e *execution) settle(status Status, reason string) {
+	for {
+		select {
+		case i := <-e.finished:
+			e.complete(i)
+			continue
+		default:
+		}
+		break
+	}
+	for i := range e.tasks {
+		if e.settled[i] {
+			continue
+		}
+		if status == Failed {
+			e.fail(i, reason)
+			continue
+		}
+		e.skip(i, reason)
 	}
 }
 
@@ -291,16 +368,31 @@ func (e *execution) blocked(i int) string {
 }
 
 func (e *execution) skip(i int, reason string) {
+	e.settleStep(i, Skipped, reason)
+}
+
+// fail settles a task that never ran, and everything a loop holds, with the
+// reason it could not.
+func (e *execution) fail(i int, reason string) {
+	e.settleStep(i, Failed, reason)
+}
+
+// settleStep ends a task without running it, or without waiting for it any
+// longer, and ends the body of a loop with it.
+func (e *execution) settleStep(i int, status Status, reason string) {
 	step := &e.run.Steps[e.stepOf[i]]
 	e.started[i], e.settled[i] = true, true
-	step.Status, step.Error = Skipped, reason
+	step.Status, step.Error = status, reason
 	if loop := e.tasks[i].Loop; loop != nil {
 		for offset := range loop.Body {
 			body := &e.run.Steps[e.stepOf[i]+1+offset]
-			body.Status, body.Error = Skipped, reason
+			if body.Status == Succeeded || body.Status == Failed {
+				continue
+			}
+			body.Status, body.Error = status, reason
 		}
 	}
-	fmt.Fprintf(e.log(i), "%s %s skipped: %s\n", Skipped.Emoji(), labelOf(e.tasks[i]), reason)
+	fmt.Fprintf(e.log(i), "%s %s %s: %s\n", status.Emoji(), labelOf(e.tasks[i]), status, reason)
 	e.notify()
 }
 
