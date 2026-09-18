@@ -1,3 +1,5 @@
+import { screen, waitFor } from "@testing-library/svelte";
+
 // jsdom lays nothing out, so the ranges CodeMirror measures report no
 // rectangles instead of throwing while the editor takes its own size.
 if (!Range.prototype.getClientRects)
@@ -5,6 +7,18 @@ if (!Range.prototype.getClientRects)
     getClientRects: () => [],
     getBoundingClientRect: () => new DOMRect(),
   });
+
+// A code field is a plain text box until the editor's chunk arrives, so a
+// test that drives the editor waits for the swap the way a user sees it: the
+// field named after the property becomes CodeMirror's own content element.
+export async function codeEditor(label: string): Promise<HTMLElement> {
+  return await waitFor(() => {
+    const field = screen.getByLabelText(label);
+    if (!field.classList.contains("cm-content"))
+      throw new Error(`the ${label} editor has not arrived yet`);
+    return field;
+  });
+}
 
 // Types the text into a CodeMirror field the way a browser does: the content
 // element's lines are replaced and the editor reads the change back through

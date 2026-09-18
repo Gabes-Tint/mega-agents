@@ -13,9 +13,31 @@ fi
 truncate -s 2 "$fixture/app"
 truncate -s 2 "$fixture/assets/app.js"
 truncate -s 2 "$fixture/assets/app.css"
+# A page that names its entry script, beside a chunk it fetches only later.
+truncate -s 10 "$fixture/assets/lazy.js"
+printf '<script type="module" src="/assets/app.js"></script>\n' > "$fixture/index.html"
 if MAX_BINARY_BYTES=1 bash scripts/gates/check-artifact-sizes.sh "$fixture/app" "$fixture/assets" \
   >/dev/null 2>&1; then
   echo 'Artifact-size gate accepted an oversized binary.' >&2
+  exit 1
+fi
+if MAX_JAVASCRIPT_BYTES=1 bash scripts/gates/check-artifact-sizes.sh "$fixture/app" "$fixture/assets" \
+  >/dev/null 2>&1; then
+  echo 'Artifact-size gate accepted an oversized first-paint bundle.' >&2
+  exit 1
+fi
+# The chunk the page does not name stays out of the first-paint budget and
+# inside the budget for every chunk together, so splitting hides nothing.
+if ! MAX_JAVASCRIPT_BYTES=4 MAX_TOTAL_JAVASCRIPT_BYTES=100 \
+  bash scripts/gates/check-artifact-sizes.sh "$fixture/app" "$fixture/assets" \
+  >/dev/null 2>&1; then
+  echo 'Artifact-size gate counted a lazily fetched chunk against first paint.' >&2
+  exit 1
+fi
+if MAX_JAVASCRIPT_BYTES=4 MAX_TOTAL_JAVASCRIPT_BYTES=4 \
+  bash scripts/gates/check-artifact-sizes.sh "$fixture/app" "$fixture/assets" \
+  >/dev/null 2>&1; then
+  echo 'Artifact-size gate accepted an oversized chunk outside the page.' >&2
   exit 1
 fi
 

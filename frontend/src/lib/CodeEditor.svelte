@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Annotation, Compartment, EditorState } from "@codemirror/state";
-  import { EditorView, placeholder as placeholderText } from "@codemirror/view";
   import { untrack } from "svelte";
   import type { EditorLanguage, VariableCompletion } from "./completions.js";
-  import { editorExtensions } from "./editorExtensions.js";
+  // Type only: the editor's code is fetched when a field first mounts, so
+  // nothing here reaches CodeMirror at load time.
+  import type { MountedEditor } from "./codeEditorView.js";
 
   let {
     value,
@@ -27,82 +27,78 @@
     completions?: () => readonly VariableCompletion[];
   } = $props();
 
-  // Marks the edits this component makes itself, so a field following the
-  // selected block does not report its own text back as a change.
-  const syncing = Annotation.define<boolean>();
-  const naming = new Compartment();
-  const syntax = new Compartment();
-
   let host = $state<HTMLDivElement>();
-  let view: EditorView | undefined;
+  let box = $state<HTMLTextAreaElement>();
+  let view = $state<MountedEditor>();
+  let missing = $state(false);
 
+  // The field is a plain text box until the editor's chunk arrives. The swap
+  // reads the box rather than the property: a keystroke the parent has not
+  // echoed back yet is still in the box, and the caret and the focus are
+  // carried over in the same turn, so nothing typed is lost.
   $effect(() => {
     const parent = host;
     if (!parent) return;
-    const editor = new EditorView({
-      parent,
-      state: EditorState.create({
-        doc: untrack(() => value),
-        extensions: [
-          naming.of(
-            EditorView.contentAttributes.of({
-              "aria-label": untrack(() => label),
-            }),
-          ),
-          syntax.of(
-            editorExtensions(
-              untrack(() => language),
-              () => completions(),
-            ),
-          ),
-          placeholderText(untrack(() => placeholder)),
-          EditorView.updateListener.of((update) => {
-            if (!update.docChanged) return;
-            if (
-              update.transactions.some(
-                (transaction) => transaction.annotation(syncing) === true,
-              )
-            )
-              return;
-            onchange(update.state.doc.toString());
-          }),
-        ],
-      }),
-    });
-    view = editor;
+    let mounted: MountedEditor | undefined;
+    let dropped = false;
+    import("./codeEditorView.js")
+      .then(({ mountEditor }) => {
+        if (dropped) return;
+        const typing = box;
+        const doc = typing ? typing.value : untrack(() => value);
+        const caret = typing?.selectionStart ?? doc.length;
+        const upTo = typing?.selectionEnd ?? caret;
+        const inUse = typing !== undefined && document.activeElement === typing;
+        // The box is removed on the next render; dropping its name first
+        // keeps the field from answering to its label twice meanwhile.
+        typing?.removeAttribute("aria-label");
+        mounted = mountEditor({
+          parent,
+          doc,
+          selection: { anchor: caret, head: upTo },
+          label: untrack(() => label),
+          placeholder: untrack(() => placeholder),
+          language: untrack(() => language),
+          completions: () => completions(),
+          onchange: (next) => onchange(next),
+        });
+        view = mounted;
+        if (inUse) mounted.focus();
+      })
+      .catch(() => {
+        if (!dropped) missing = true;
+      });
     return () => {
+      dropped = true;
       view = undefined;
-      editor.destroy();
+      mounted?.destroy();
     };
   });
 
-  // The panel keeps one editor per field and points it at whichever block is
-  // selected, so the document follows the property it shows.
+  // The panel keeps one field per property and points it at whichever block
+  // is selected, so the text follows the property it shows. Only the property
+  // is watched: the swap itself must not write the property back over text
+  // the box holds and the parent has not been told about yet. The box is
+  // written only when it holds something else, so echoing a keystroke back
+  // does not move the caret to the end of what is being typed.
   $effect(() => {
     const next = value;
-    const editor = view;
-    if (!editor || editor.state.doc.toString() === next) return;
-    editor.dispatch({
-      changes: { from: 0, to: editor.state.doc.length, insert: next },
-      annotations: syncing.of(true),
-    });
+    const editor = untrack(() => view);
+    if (editor) {
+      editor.setValue(next);
+      return;
+    }
+    const typing = untrack(() => box);
+    if (!typing || typing.value === next) return;
+    const caret = Math.min(typing.selectionStart, next.length);
+    const upTo = Math.min(typing.selectionEnd, next.length);
+    typing.value = next;
+    typing.setSelectionRange(caret, upTo);
   });
 
-  $effect(() => {
-    view?.dispatch({
-      effects: naming.reconfigure(
-        EditorView.contentAttributes.of({ "aria-label": label }),
-      ),
-    });
-  });
+  $effect(() => view?.setLabel(label));
 
-  $effect(() => {
-    view?.dispatch({
-      effects: syntax.reconfigure(
-        editorExtensions(language, () => completions()),
-      ),
-    });
-  });
+  $effect(() => view?.setSyntax(language, () => completions()));
 </script>
 
 <div
@@ -110,7 +106,23 @@
   style:--min-lines={minLines}
   style:--max-lines={maxLines}
   bind:this={host}
-></div>
+>
+  {#if !view}
+    <textarea
+      class="plain"
+      aria-label={label}
+      {placeholder}
+      spellcheck="false"
+      bind:this={box}
+      oninput={(event) => onchange(event.currentTarget.value)}
+    ></textarea>
+  {/if}
+</div>
+{#if missing}
+  <p class="missing" role="status">
+    The highlighted editor could not load; this field takes plain text.
+  </p>
+{/if}
 
 <style>
   .editor {
@@ -123,6 +135,38 @@
   .editor:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--focus);
+  }
+
+  /* What the field is until the editor's chunk arrives: the same box, the
+     same text, the same size, without the highlighting. */
+  .plain {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.35rem 0.5rem;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    min-height: calc(var(--min-lines) * 1.5em + 0.7rem);
+    max-height: calc(var(--max-lines) * 1.5em + 0.7rem);
+    resize: none;
+  }
+
+  .plain:focus {
+    outline: none;
+  }
+
+  .plain::placeholder {
+    color: var(--text-faint);
+  }
+
+  .missing {
+    margin: 0.35rem 0 0;
+    color: var(--text-faint);
+    font-size: 11px;
   }
 
   .editor :global(.cm-editor) {

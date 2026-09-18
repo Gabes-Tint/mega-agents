@@ -9,17 +9,18 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 import Workspace from "./Workspace.svelte";
 import { BLOCK_HUES } from "./graph.svelte.js";
-import { typeIntoEditor } from "../test-setup.js";
+import { codeEditor, typeIntoEditor } from "../test-setup.js";
 
 // Command, Prompt and the two schema fields are code editors rather than
 // text boxes: they take text the way typing does and hold it in their
-// content element, one element per line.
+// content element, one element per line. The editor arrives with a chunk of
+// its own, so a test that drives it waits for the field to become one.
 async function editField(label: string, value: string): Promise<void> {
-  await typeIntoEditor(screen.getByLabelText(label), value);
+  await typeIntoEditor(await codeEditor(label), value);
 }
 
-function fieldText(label: string): string {
-  return [...screen.getByLabelText(label).querySelectorAll(".cm-line")]
+async function fieldText(label: string): Promise<string> {
+  return [...(await codeEditor(label)).querySelectorAll(".cm-line")]
     .map((line) =>
       [...line.childNodes]
         .filter(
@@ -38,6 +39,10 @@ function fieldText(label: string): string {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  // A test that stands in for fetch, URL or a mocked method leaves the next
+  // one the real thing: the editor's chunk is fetched through them.
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   // Opening or saving a workflow moves the address bar, so each test starts
   // at the editor's own page again.
   history.replaceState(null, "", "/");
@@ -164,7 +169,13 @@ describe("graph builder workspace", () => {
     vi.stubGlobal("fetch", fetchMock);
     const createObjectURL = vi.fn(() => "blob:yaml");
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    // Only the object-URL helpers stand in: addresses are still parsed by the
+    // real URL, which the editor's chunk is fetched through.
+    class ObjectURL extends URL {
+      static createObjectURL = createObjectURL;
+      static revokeObjectURL = revokeObjectURL;
+    }
+    vi.stubGlobal("URL", ObjectURL);
     const clicks: HTMLAnchorElement[] = [];
     const originalCreate = document.createElement.bind(document);
     vi.spyOn(document, "createElement").mockImplementation((tag) => {
@@ -2205,7 +2216,7 @@ describe("graph builder workspace", () => {
       expect(screen.getByLabelText(label)).toHaveValue(value);
     }
     for (const [label, value] of Object.entries(code)) {
-      expect(fieldText(label)).toBe(value);
+      expect(await fieldText(label)).toBe(value);
     }
     expect(screen.getByLabelText("Backend")).toHaveValue("opencode");
     await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
@@ -2294,7 +2305,7 @@ describe("graph builder workspace", () => {
     await drawArrow("Check", "Fixer");
 
     await fireEvent.click(screen.getByText("Check"));
-    expect(fieldText("Schema")).toBe('{"type": "object"}');
+    expect(await fieldText("Schema")).toBe('{"type": "object"}');
     const port = screen.getByLabelText("Output to Fixer");
     expect(port).toHaveValue("valid");
     await fireEvent.change(port, { target: { value: "invalid" } });
@@ -2747,7 +2758,7 @@ describe("graph builder workspace", () => {
     await fireEvent.click(screen.getByText("Project 1"));
     await fireEvent.click(screen.getByText("Command 1"));
 
-    expect(fieldText("Command")).toBe("cd repository\ngo test ./...");
+    expect(await fieldText("Command")).toBe("cd repository\ngo test ./...");
     expect(screen.getByLabelText("Timeout (minutes)")).toHaveValue(15);
   });
 
@@ -2770,9 +2781,9 @@ describe("graph builder workspace", () => {
       ctrlKey: true,
     });
 
-    expect(fieldText("Command")).toBe("");
+    expect(await fieldText("Command")).toBe("");
     await fireEvent.click(screen.getByText("Command 1"));
-    expect(fieldText("Command")).toBe("make one");
+    expect(await fieldText("Command")).toBe("make one");
   });
 
   test("colours a command's shell words and its placeholders apart", async () => {
@@ -4272,7 +4283,7 @@ describe("breakpoints in the editor", () => {
     expect(panel).toHaveTextContent("Agent 1");
     expect(panel).toHaveTextContent("workspace");
     expect(panel).toHaveTextContent("/tmp/login");
-    expect(fieldText("Prompt for Agent 1 in this run")).toBe(
+    expect(await fieldText("Prompt for Agent 1 in this run")).toBe(
       "Fix the login bug",
     );
     // The block the run waits before is marked apart from a running one.
