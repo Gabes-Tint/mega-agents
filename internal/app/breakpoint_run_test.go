@@ -289,6 +289,26 @@ func TestResumeRefusesWhatItCannotAnswer(t *testing.T) {
 	}
 }
 
+func TestAPausedRunHasNothingToRetryYet(t *testing.T) {
+	fakeClaude(t)
+	response, handler := postRun(t, breakpointFlow(t))
+	started := decodeRecord(t, response)
+	awaitPaused(t, handler, started.ID, "a1")
+
+	retry := workflowRequest(t, handler, http.MethodPost, "/api/runs/"+started.ID+"/retry", "{}", "application/json")
+
+	if retry.Code != http.StatusConflict {
+		t.Fatalf("retry = %d, want 409 while the run waits at a breakpoint: %s", retry.Code, retry.Body.String())
+	}
+	if !strings.Contains(retry.Body.String(), "paused") {
+		t.Fatalf("retry says %q", retry.Body.String())
+	}
+	if code := resume(t, handler, started.ID, `{"action": "skip"}`); code != http.StatusAccepted {
+		t.Fatalf("resume = %d", code)
+	}
+	awaitRun(t, handler, started.ID)
+}
+
 func resume(t *testing.T, handler http.Handler, id string, body string) int {
 	t.Helper()
 	return workflowRequest(t, handler, http.MethodPost, "/api/runs/"+id+"/resume", body, "application/json").Code
