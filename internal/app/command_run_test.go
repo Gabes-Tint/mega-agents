@@ -108,6 +108,10 @@ func TestCommandPlansAreCheckedBeforeRunning(t *testing.T) {
 				`, {"id": "e2", "from": "c1", "to": "a1", "fromPort": "green"}`),
 			want: `Tests has no output "green"; use passed or failed`,
 		},
+		"unknown block": {
+			body: gateFlow(t, `echo {{results.nobody}}`, "", ""),
+			want: "Tests: {{results.nobody}} names no block connected to this one",
+		},
 		"bad timeout": {
 			body: strings.Replace(gateFlow(t, `true`, "", ""), `"command": "true"`, `"command": "true", "timeoutMinutes": 0`, 1),
 			want: "Tests: the timeout must be more than 0 and at most 240 minutes",
@@ -136,5 +140,22 @@ func TestTheWorkspaceTravelsDownTheRouteTaken(t *testing.T) {
 	where := record.Steps[len(record.Steps)-1]
 	if record.Status != engine.Succeeded || !strings.Contains(where.Details["output"].(string), "gate") {
 		t.Fatalf("where = %+v, record = %+v", where, record)
+	}
+}
+
+func TestACommandFillsInThePlaceholdersAsTextWhereverTheyLand(t *testing.T) {
+	line := `printf '%s\\n' `
+	body := gateFlow(t, `echo "it's done"`,
+		`, {"id": "c2", "type": "command", "name": "Report", "parentId": "p1", "command":
+		   "`+line+`{{results.tests}}; `+line+`\"double {{results.tests}}\"; `+line+`'single {{results.tests}}'; `+line+`{{workspace.branch}}"}`,
+		`, {"id": "e2", "from": "c1", "to": "c2"}`)
+
+	record := finishedRunOnly(t, body)
+
+	report := record.Steps[len(record.Steps)-1]
+	result := `{"exitCode":0,"output":"it's done\n"}`
+	want := result + "\ndouble " + result + "\nsingle " + result + "\ngate\n"
+	if record.Status != engine.Succeeded || report.Details["output"] != want {
+		t.Fatalf("report = %+v, want output %q", report, want)
 	}
 }

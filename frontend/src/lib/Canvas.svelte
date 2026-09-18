@@ -20,8 +20,15 @@
   import {
     clampZoom,
     fitToContent,
+    loadWheelMode,
+    NO_WHEEL_GESTURE,
+    saveWheelMode,
     scrollForZoom,
+    wheelIntent,
+    wheelPixels,
     wheelZoom,
+    type WheelGesture,
+    type WheelMode,
     ZOOM_DEFAULT,
     zoomIn,
     zoomOut,
@@ -36,6 +43,18 @@
   // arrows keep their content coordinates: only the layer they sit in is
   // scaled, and every pointer position converts through this one number.
   let zoom = $state(loadZoom());
+
+  // What a bare wheel over the canvas does, remembered the same way, and
+  // what the run of wheel events so far has shown about the device sending
+  // them, which is how a trackpad's two fingers are told from a wheel.
+  let wheelMode = $state<WheelMode>(loadWheelMode());
+  let wheelGesture: WheelGesture = NO_WHEEL_GESTURE;
+
+  // The pan in flight, with the pointer position it last moved the view
+  // from, and whether the space bar is held ready to start one.
+  let panState: { pointerId: number; x: number; y: number } | null = null;
+  let panning = $state(false);
+  let spaceHeld = $state(false);
 
   // Where a run of the flow as it stands could finish. Arrows change it as
   // they are drawn and removed, so it is derived rather than held on a node.
@@ -308,16 +327,74 @@
     });
   }
 
-  // Ctrl or Cmd with the wheel, which is also how a trackpad pinch arrives,
-  // zooms toward the pointer instead of scrolling the canvas.
+  // What the wheel does over the canvas: a bare wheel zooms toward the
+  // pointer, Ctrl or Cmd with it zooms too, which is how a trackpad pinch
+  // arrives, and shift sends it sideways. A trackpad's two fingers are left
+  // to scroll the canvas, and so is every wheel once the setting says so;
+  // the canvas scrolls itself, so nothing is cancelled and the page behind
+  // it never scrolls in its place.
   function zoomWheel(event: globalThis.WheelEvent): void {
-    if (!event.ctrlKey && !event.metaKey) return;
+    const read = wheelIntent(event, wheelGesture, wheelMode);
+    wheelGesture = read.gesture;
+    if (read.intent === "scroll-y") return;
     event.preventDefault();
+    if (read.intent === "scroll-x") {
+      canvasElement.scrollLeft += wheelPixels(event, "x");
+      return;
+    }
     const rect = canvasElement.getBoundingClientRect();
-    setZoom(wheelZoom(zoom, event.deltaY), {
+    setZoom(wheelZoom(zoom, wheelPixels(event)), {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
     });
+  }
+
+  function toggleWheel(): void {
+    wheelMode = wheelMode === "zoom" ? "scroll" : "zoom";
+    saveWheelMode(wheelMode);
+  }
+
+  // Nothing on the empty canvas answers a press, so a drag on it moves the
+  // view; the middle button and the space bar do the same from anywhere,
+  // including over a block. Cancelling the press keeps the browser from
+  // turning it into the block's own drag or a text selection, and the
+  // pointer is captured so the gesture ends even if it leaves the window.
+  // Arrow handles and resize edges stop their press before it reaches here.
+  function startPan(event: PointerEvent): void {
+    const onBackground =
+      event.button === 0 &&
+      !(event.target as globalThis.Element).closest?.(
+        ".node, .link-handle, .edge-hit, .edge-end, .port-menu",
+      );
+    const takes =
+      event.button === 1 || (spaceHeld && event.button === 0) || onBackground;
+    if (!takes) return;
+    event.preventDefault();
+    canvasElement.setPointerCapture?.(event.pointerId);
+    panState = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    panning = true;
+  }
+
+  // The view follows the pointer: the content under it stays under it, so
+  // the canvas scrolls against the way the pointer went.
+  function movePan(event: PointerEvent): void {
+    const active = panState;
+    if (!active) return;
+    canvasElement.scrollLeft -= event.clientX - active.x;
+    canvasElement.scrollTop -= event.clientY - active.y;
+    active.x = event.clientX;
+    active.y = event.clientY;
+  }
+
+  function endPan(): void {
+    if (panState && canvasElement.hasPointerCapture(panState.pointerId))
+      canvasElement.releasePointerCapture(panState.pointerId);
+    panState = null;
+    panning = false;
   }
 
   function hover(event: PointerEvent) {
@@ -421,12 +498,29 @@
     event.preventDefault();
   }
 
+  // Whether the keyboard is being used to write rather than to drive the
+  // canvas, in which case the space bar is a space.
+  function typing(target: EventTarget | null): boolean {
+    const element = target as globalThis.Element | null;
+    return Boolean(
+      element?.closest?.("input, textarea, select, [contenteditable]"),
+    );
+  }
+
   // Escape drops what is being drawn; Ctrl or Cmd with plus, minus and zero
-  // zoom and reset, in place of the browser's own page zoom.
+  // zoom and reset, in place of the browser's own page zoom; the space bar
+  // arms the grab that drags the view, the way a drawing tool does.
   function canvasKey(event: globalThis.KeyboardEvent) {
     if (event.key === "Escape") {
       linking = null;
       portMenu = null;
+      return;
+    }
+    if (event.key === " ") {
+      if (portMenu || typing(event.target)) return;
+      // Cancelling it keeps the page from scrolling a screen at a time.
+      event.preventDefault();
+      spaceHeld = true;
       return;
     }
     if (!event.ctrlKey && !event.metaKey) return;
@@ -677,9 +771,12 @@
     class:preview-invalid={previewing && !previewValid}
     class:resizing
     class:linking
+    class:grab={spaceHeld && !panning}
+    class:grabbing={panning}
     role="region"
     aria-label="Graph canvas"
     bind:this={canvasElement}
+    onpointerdown={startPan}
     onpointermove={hover}
     onpointerleave={() => (hoverId = null)}
     ondragover={previewDrop}
@@ -985,6 +1082,24 @@
     role="group"
     aria-label="Zoom"
   >
+    <!-- What a bare wheel does, for the trackpad the heuristic reads wrong
+       and for anyone who would rather scroll. The pressed state is the
+       whole setting, so a screen reader says which way it is set. -->
+    <button
+      type="button"
+      class="wheel-mode"
+      aria-label="Wheel zooms"
+      aria-pressed={wheelMode === "zoom"}
+      title={wheelMode === "zoom"
+        ? "The wheel zooms the canvas; press to scroll it instead"
+        : "The wheel scrolls the canvas; press to zoom with it instead"}
+      onclick={toggleWheel}
+    >
+      <svg viewBox="0 0 12 12" aria-hidden="true">
+        <rect x="3.3" y="0.8" width="5.4" height="10.4" rx="2.7" />
+        <path d="M6 3v2" />
+      </svg>
+    </button>
     <button
       type="button"
       aria-label="Fit to content"
@@ -1026,17 +1141,29 @@
   onpointermove={(event) => {
     applyResize(event);
     moveLink(event);
+    movePan(event);
   }}
   onpointerup={() => {
     endResize();
     endLink();
+    endPan();
   }}
   onpointercancel={() => {
     endResize();
     linking = null;
+    endPan();
   }}
   onpointerdown={closeMenu}
   onkeydown={canvasKey}
+  onkeyup={(event) => {
+    if (event.key === " ") spaceHeld = false;
+  }}
+  onblur={() => {
+    // A gesture the window never sees the end of is dropped rather than
+    // left holding the canvas.
+    spaceHeld = false;
+    endPan();
+  }}
 />
 
 <style>
@@ -1055,6 +1182,13 @@
   .canvas {
     position: relative;
     overflow: auto;
+    /* A wheel or a pan moves the view by setting where it is scrolled to,
+       which has to land at once rather than glide there: nothing about
+       these gestures animates, for reduced motion or otherwise. The canvas
+       also keeps its scrolling to itself, so a wheel that reaches its edge
+       never scrolls the page behind it instead. */
+    scroll-behavior: auto;
+    overscroll-behavior: contain;
     background:
       radial-gradient(var(--canvas-dot) 1px, transparent 1px) 0 0 / 20px 20px,
       var(--canvas);
@@ -1121,6 +1255,12 @@
     stroke: currentColor;
     stroke-width: 1.4;
     stroke-linecap: round;
+  }
+
+  /* The wheel setting reads at a glance: the mouse is drawn in the accent
+     while the wheel zooms, and stays muted while it scrolls. */
+  .zoom-bar .wheel-mode[aria-pressed="true"] {
+    color: var(--accent);
   }
 
   .zoom-level {
@@ -1268,6 +1408,18 @@
   .canvas.linking,
   .canvas.linking .node {
     cursor: crosshair;
+  }
+
+  /* The view is dragged by its background, by the middle button, or with
+     the space bar held, which says so before the drag starts. */
+  .canvas.grab,
+  .canvas.grab .node {
+    cursor: grab;
+  }
+
+  .canvas.grabbing,
+  .canvas.grabbing .node {
+    cursor: grabbing;
   }
 
   .port-menu {
