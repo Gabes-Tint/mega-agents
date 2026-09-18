@@ -177,14 +177,33 @@ refs.
   did, instead of being skipped because a branch was not taken.
 - **Breakpoints** stop a run *before* a block runs, like a debugger, so you
   see what it is about to receive and can stop an expensive agent before it
-  spends anything. A breakpoint is a property of the block (`breakpoint: true`
-  in the workflow file, beside `start: true`), so it is saved with the flow and
-  survives a reload. The run reports `paused` with the block it waits before,
-  the values that arrived and the prompt or command it is about to run, and
-  waits indefinitely: the block's clock only starts when it runs. Only that
-  block waits — everything already running beside it keeps going, and blocks
-  that do not depend on it still start. Resume it with `POST
-  /api/runs/{id}/resume`:
+  spends anything. Tick **Breakpoint** in the selected block's properties,
+  beside **Starting point**, or press **B** on the block on the canvas: it
+  wears a red dot in its header from then on. A breakpoint is a property of
+  the block (`breakpoint: true` in the workflow file, beside `start: true`),
+  so it is saved with the flow and survives a reload. The run reports `paused`
+  with the block it waits before, the values that arrived and the prompt or
+  command it is about to run, and waits indefinitely: the block's clock only
+  starts when it runs. Only that block waits — everything already running
+  beside it keeps going, and blocks that do not depend on it still start.
+
+  On the canvas the block the run waits before takes a pause mark and a ring
+  that breathes, in the warning colour rather than the blue of a block that is
+  working (still, but still marked, when the machine asks for less motion).
+  The **Run** panel gives each waiting block a card: which repeat it is on,
+  every value that reached it with the block and output it came from, and the
+  prompt or command it would run, filled in, in a code editor. Editing that
+  text is the **edit then run** of the list below; the card is marked *for
+  this run only*, says so beside the editor, and offers **Undo the edit**,
+  because nothing typed there is ever saved to the block. **Continue**,
+  **Step** and **Skip** sit under the card and name their block, so with two
+  branches waiting each card takes only its own block on. **Cancel run** stays
+  in the toolbar while a run is paused. If the run has meanwhile moved on, the
+  panel says what the backend answered and re-reads the run, so the canvas
+  shows where it actually is.
+
+  The same three actions, and the edit, are what `POST /api/runs/{id}/resume`
+  takes:
 
   ```sh
   curl -X POST -H 'Content-Type: application/json' \
@@ -199,9 +218,10 @@ refs.
   only**: the text is used as written, the saved workflow is never changed, and
   the step records both what ran and what the workflow holds, so a recorded run
   never misrepresents what was executed. `nodeId` may be left out when the run
-  waits at a single block. Resuming a run that is not paused is a conflict.
-  **Cancel run** works while paused. A breakpoint on a block inside a loop
-  stops on **every repeat**, and the pause says which repeat it is.
+  waits at a single block; the editor always names the block, so two waiting
+  branches never make it guess. Resuming a run that is not paused is a
+  conflict. **Cancel run** works while paused. A breakpoint on a block inside
+  a loop stops on **every repeat**, and the pause says which repeat it is.
 - **Router** sends the one value connected to it down the first case whose
   CEL condition over `value` holds (for example `value.verdict == "approve"`),
   or down `default`, as `{"case": ..., "value": ...}`. Expressions are

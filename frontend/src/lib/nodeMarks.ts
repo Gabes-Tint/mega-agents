@@ -6,15 +6,27 @@ import {
 } from "./graph.svelte.js";
 
 // The marks a block's header carries beside its name: where a run starts,
-// where it can finish, and how the block fared in the run being shown.
+// where it can finish, where a run stops to be looked at, and how the block
+// fared in the run being shown.
 export type MarkKind =
-  "start" | "end" | "running" | "succeeded" | "failed" | "skipped";
+  | "start"
+  | "end"
+  | "breakpoint"
+  | "running"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "skipped";
 
-// What each mark says, as its tooltip and as the block's description.
+// What each mark says, as its tooltip and as the block's description, in the
+// order a header carries them: what the block itself is, then what the run
+// being shown made of it.
 export const MARK_LABELS: Record<MarkKind, string> = {
   start: "Starting point",
   end: "Ending block",
+  breakpoint: "Breakpoint",
   running: "Running",
+  paused: "Paused at a breakpoint",
   succeeded: "Succeeded",
   failed: "Failed",
   skipped: "Skipped",
@@ -25,6 +37,7 @@ export const MARK_LABELS: Record<MarkKind, string> = {
 // quiet until the run reaches it.
 export function statusMark(status: string | undefined): MarkKind | undefined {
   return status === "running" ||
+    status === "paused" ||
     status === "succeeded" ||
     status === "failed" ||
     status === "skipped"

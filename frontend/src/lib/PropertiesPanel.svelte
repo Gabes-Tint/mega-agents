@@ -175,6 +175,19 @@
         />
         Starting point
       </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={node.breakpoint ?? false}
+          onchange={(event) =>
+            graph.setBreakpoint(node.id, event.currentTarget.checked)}
+        />
+        Breakpoint
+      </label>
+      <p class="hint">
+        A breakpoint stops the run before this block runs, every time, so you
+        see what reaches it. Pressing B on the block on the canvas sets it too.
+      </p>
       {#if graph.hasLog(node.id)}
         <button type="button" onclick={() => graph.openLog(node.id)}>
           Show logs
