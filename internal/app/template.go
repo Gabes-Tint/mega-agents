@@ -76,6 +76,77 @@ func checkTemplate(text string, sources templateSources) error {
 // renderTemplate fills a checked template from a task's inputs: workspace
 // fields as text, results as JSON.
 func renderTemplate(text string, inputs []engine.Input, sources templateSources) string {
+	return fillTemplate(text, inputs, sources, func(value, _ string) string { return value })
+}
+
+// renderShellTemplate fills a checked template that a shell is about to run,
+// so every value is text the command reads and never shell the command runs.
+func renderShellTemplate(text string, inputs []engine.Input, sources templateSources) string {
+	return fillTemplate(text, inputs, sources, shellValue)
+}
+
+// shellValue writes a value where the command puts it, which the command up
+// to that point gives: between single quotes it closes and reopens them
+// around every quote the value holds, between double quotes it escapes what
+// the shell still reads there, and outside both it becomes one quoted word,
+// so a path holding a space stays one path.
+func shellValue(value, before string) string {
+	switch quotesOpenIn(before) {
+	case singleQuoted:
+		return strings.ReplaceAll(value, "'", `'\''`)
+	case doubleQuoted:
+		return insideDoubleQuotes.Replace(value)
+	default:
+		return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+	}
+}
+
+// insideDoubleQuotes escapes the characters a shell still reads between
+// double quotes.
+var insideDoubleQuotes = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$", `\$`)
+
+type quoting int
+
+const (
+	unquoted quoting = iota
+	singleQuoted
+	doubleQuoted
+)
+
+// quotesOpenIn reads the command before a placeholder for the quotes it
+// opened and has not closed.
+func quotesOpenIn(before string) quoting {
+	open := unquoted
+	for index := 0; index < len(before); index++ {
+		switch before[index] {
+		case '\\':
+			// A backslash escapes the character after it everywhere but
+			// between single quotes, where it is a character of its own.
+			if open != singleQuoted {
+				index++
+			}
+		case '\'':
+			switch open {
+			case unquoted:
+				open = singleQuoted
+			case singleQuoted:
+				open = unquoted
+			}
+		case '"':
+			switch open {
+			case unquoted:
+				open = doubleQuoted
+			case doubleQuoted:
+				open = unquoted
+			}
+		}
+	}
+	return open
+}
+
+// fillTemplate replaces every placeholder with its value, written as the
+// field's language needs it where it lands.
+func fillTemplate(text string, inputs []engine.Input, sources templateSources, write func(value, before string) string) string {
 	workspace, _ := workspaceIn(inputs)
 	results := map[string]any{}
 	for _, input := range inputs {
@@ -83,24 +154,33 @@ func renderTemplate(text string, inputs []engine.Input, sources templateSources)
 			results[input.TaskID] = input.Value
 		}
 	}
-	return placeholder.ReplaceAllStringFunc(text, func(token string) string {
-		name := placeholder.FindStringSubmatch(token)[1]
+	var filled strings.Builder
+	end := 0
+	for _, match := range placeholder.FindAllStringSubmatchIndex(text, -1) {
+		value := ""
+		name := text[match[2]:match[3]]
 		if field, ok := strings.CutPrefix(name, "workspace."); ok {
-			return workspaceFields[field](workspace)
-		}
-		source := ""
-		if blockName, ok := strings.CutPrefix(name, "results."); ok {
-			source = sources.resultFrom[blockName]
+			value = workspaceFields[field](workspace)
 		} else {
-			for _, id := range sources.resultFrom {
-				if _, arrived := results[id]; arrived {
-					source = id
+			source := ""
+			if blockName, ok := strings.CutPrefix(name, "results."); ok {
+				source = sources.resultFrom[blockName]
+			} else {
+				for _, id := range sources.resultFrom {
+					if _, arrived := results[id]; arrived {
+						source = id
+					}
 				}
 			}
+			encoded, _ := json.Marshal(results[source])
+			value = string(encoded)
 		}
-		encoded, _ := json.Marshal(results[source])
-		return string(encoded)
-	})
+		filled.WriteString(text[end:match[0]])
+		filled.WriteString(write(value, filled.String()))
+		end = match[1]
+	}
+	filled.WriteString(text[end:])
+	return filled.String()
 }
 
 // workspaceIn finds the workspace among a task's inputs.

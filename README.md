@@ -157,7 +157,14 @@ refs.
 
 - **Command** runs a shell command (a test suite, a linter, `make verify`) in
   the workspace connected to it or its project's folder, with
-  `MEGA_AGENTS_WORKSPACE_PATH|BRANCH|BASE|REPOSITORY` set. Exit 0 leaves on
+  `MEGA_AGENTS_WORKSPACE_PATH|BRANCH|BASE|REPOSITORY` set. It takes the same
+  placeholders an agent's prompt does and fills each one in before the shell
+  sees it, as text wherever it lands: quoted as one word on its own, so
+  `cat {{workspace.path}}/README.md` reads one path however it is spelled,
+  and as the value itself inside quotes you wrote, so
+  `echo "tests said {{results.tests}}"` prints the result. A value holding a
+  quote, a dollar sign or a semicolon is always text the command reads, never
+  shell it runs. Exit 0 leaves on
   `passed`; anything else leaves on `failed` with `{exitCode, output}` when an
   arrow takes it (for example to a fixer agent), and otherwise fails the run.
 - **Loop** repeats the blocks inside it (agents with their schema checks,
