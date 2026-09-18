@@ -13,8 +13,14 @@
   } from "./graph.svelte.js";
   import { hideDragImage } from "./dragImage.js";
   import BlockIcon from "./BlockIcon.svelte";
+  import NodeMark from "./NodeMark.svelte";
+  import { endingNodeIds, statusMark } from "./nodeMarks.js";
 
   let { graph }: { graph: GraphStore } = $props();
+
+  // Where a run of the flow as it stands could finish. Arrows change it as
+  // they are drawn and removed, so it is derived rather than held on a node.
+  const endingIds = $derived(endingNodeIds(graph.nodes, graph.edges));
 
   // Transient explanation for a palette drop that was rejected by the
   // containment rules; cleared on the next drop so it cannot go stale.
@@ -325,15 +331,6 @@
   function closeMenu(event: PointerEvent) {
     if (portMenu && !menuElement?.contains(event.target as globalThis.Node))
       portMenu = null;
-  }
-
-  function selectOrConnect(node: GraphNode): void {
-    if (graph.connecting && graph.connectFromId) {
-      graph.connect(graph.connectFromId, node.id);
-      graph.cancelConnect();
-      return;
-    }
-    graph.select(node.id);
   }
 
   function draggedType(): NodeType | undefined {
@@ -721,9 +718,11 @@
     {/if}
   </svg>
   {#each graph.nodes as node (node.id)}
+    {@const mark = statusMark(graph.statusOf(node.id))}
     <button
       type="button"
       class="node block-{node.type} status-{graph.statusOf(node.id) ?? 'idle'}"
+      aria-describedby={mark ? `status-${node.id}` : undefined}
       class:selected={node.id === graph.selectedId}
       class:problem-error={graph.severityOf(node.id) === "error"}
       class:problem-warning={graph.severityOf(node.id) === "warning"}
@@ -741,7 +740,7 @@
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}
       ondragend={endNodeDrag}
-      onclick={() => selectOrConnect(node)}
+      onclick={() => graph.select(node.id)}
       onkeydown={(event) => {
         // Delete or Backspace deletes the focused block.
         if (event.key !== "Delete" && event.key !== "Backspace") return;
@@ -752,7 +751,13 @@
       <span class="node-title">
         {node.name}
         {#if node.start}
-          <span class="start-flag" aria-hidden="true">▶</span>
+          <NodeMark kind="start" />
+        {/if}
+        {#if endingIds.has(node.id)}
+          <NodeMark kind="end" />
+        {/if}
+        {#if mark}
+          <NodeMark kind={mark} id="status-{node.id}" />
         {/if}
         {#if node.type === "loop"}
           <span class="repeats" aria-hidden="true">
@@ -1125,11 +1130,6 @@
     display: block;
     height: 1px;
     background: var(--block-border);
-  }
-
-  .start-flag {
-    color: var(--ok);
-    font-size: 10px;
   }
 
   /* The block's id over its type icon, at the header's right edge. */

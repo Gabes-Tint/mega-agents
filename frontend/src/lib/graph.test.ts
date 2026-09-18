@@ -1371,17 +1371,14 @@ describe("deleting blocks", () => {
     expect(graph.selectedId).toBe(kept.id);
   });
 
-  test("stops connecting from and showing the log of a deleted block", () => {
+  test("stops showing the log of a deleted block", () => {
     const graph = new GraphStore();
     const node = graph.addNode("agent", 0, 0);
     graph.showRun([{ nodeId: node.id, status: "failed" }], "run-1");
     graph.openLog(node.id);
-    graph.startConnect(node.id);
 
     graph.removeNode(node.id);
 
-    expect(graph.connecting).toBe(false);
-    expect(graph.connectFromId).toBeNull();
     expect(graph.logNodeId).toBeNull();
   });
 

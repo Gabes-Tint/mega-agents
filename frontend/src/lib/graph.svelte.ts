@@ -400,14 +400,25 @@ function paletteLabel(type: NodeType): string {
   return labelFor(type);
 }
 
+// Named outputs a block chooses between; empty for blocks with one output.
+export function outputPortsOf(node: GraphNode | undefined): string[] {
+  if (node?.type === "jsonschema") return ["valid", "invalid"];
+  if (node?.type === "command") return ["passed", "failed"];
+  if (node?.type === "loop") return ["done", "exhausted"];
+  if (node?.type === "router")
+    return [
+      ...(node.cases ?? []).map((routeCase) => routeCase.name),
+      "default",
+    ];
+  return [];
+}
+
 export class GraphStore {
   nodes = $state<GraphNode[]>([]);
   edges = $state<GraphEdge[]>([]);
   selectedId = $state<string | null>(null);
   // The selected arrow; selecting a block or an arrow clears the other.
   selectedEdgeId = $state<string | null>(null);
-  connecting = $state(false);
-  connectFromId = $state<string | null>(null);
   // Component type currently dragged from the palette; dataTransfer.getData
   // is protected while a drag is in flight, so the type travels through the
   // store to power live dragover validation on the canvas.
@@ -428,7 +439,6 @@ export class GraphStore {
     this.edges = workflow.edges ?? [];
     this.workflowName = workflow.name ?? "workflow";
     this.select(null);
-    this.cancelConnect();
     this.showRun([]);
     this.logNodeId = null;
   }
@@ -575,16 +585,6 @@ export class GraphStore {
     node.breakpoint = on || undefined;
   }
 
-  startConnect(id: string): void {
-    this.connectFromId = id;
-    this.connecting = true;
-  }
-
-  cancelConnect(): void {
-    this.connecting = false;
-    this.connectFromId = null;
-  }
-
   // Boxes connect through arrows only within their own level: two top-level
   // boxes or two children of the same project. Level membership is validated
   // at creation only; edges follow their endpoints afterward. Any number of
@@ -729,8 +729,6 @@ export class GraphStore {
     if (!this.selectedEdge) this.selectedEdgeId = null;
     if (this.logNodeId && removed.includes(this.logNodeId))
       this.logNodeId = null;
-    if (this.connectFromId && removed.includes(this.connectFromId))
-      this.cancelConnect();
   }
 
   hasChildren(id: string): boolean {
@@ -1004,16 +1002,7 @@ export class GraphStore {
 
   // Named outputs a block chooses between; empty for blocks with one output.
   outputPorts(id: string): string[] {
-    const node = this.nodes.find((candidate) => candidate.id === id);
-    if (node?.type === "jsonschema") return ["valid", "invalid"];
-    if (node?.type === "command") return ["passed", "failed"];
-    if (node?.type === "loop") return ["done", "exhausted"];
-    if (node?.type === "router")
-      return [
-        ...(node.cases ?? []).map((routeCase) => routeCase.name),
-        "default",
-      ];
-    return [];
+    return outputPortsOf(this.nodes.find((candidate) => candidate.id === id));
   }
 
   // The output an arrow takes: its own choice, or its source's first port.

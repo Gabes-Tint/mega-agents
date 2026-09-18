@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvas, mouseDrag } from "./fixtures";
+import { canvas, connect, mouseDrag } from "./fixtures";
 
 test.describe("graph builder workspace", () => {
   test.beforeEach(async ({ page }) => {
@@ -204,7 +204,7 @@ test.describe("graph builder workspace", () => {
     await expect(first).toBeVisible();
 
     await page.getByLabel("Starting point").check();
-    await expect(first).toContainText("▶");
+    await expect(first.locator('[data-mark="start"]')).toHaveCount(1);
 
     const project = page.getByRole("button", { name: "Project 1" });
     const projectBox = await project.boundingBox();
@@ -240,8 +240,8 @@ test.describe("graph builder workspace", () => {
       .toBe(true);
 
     await page.getByLabel("Starting point").check();
-    await expect(second).toContainText("▶");
-    await expect(first).not.toContainText("▶");
+    await expect(second.locator('[data-mark="start"]')).toHaveCount(1);
+    await expect(first.locator('[data-mark="start"]')).toHaveCount(0);
   });
 
   test("styles each node with a title header and separator", async ({
@@ -300,10 +300,11 @@ test.describe("graph builder workspace", () => {
     await page.mouse.up();
     await expect(page.getByRole("button", { name: "Project 2" })).toBeVisible();
 
-    // Project 1 is auto-selected by its drop, so it is the arrow source.
-    await page.getByRole("button", { name: "Project 1" }).click();
-    await page.getByRole("button", { name: "Connect" }).click();
-    await page.getByRole("button", { name: "Project 2" }).click();
+    await connect(
+      page,
+      page.getByRole("button", { name: "Project 1" }),
+      page.getByRole("button", { name: "Project 2" }),
+    );
 
     await expect(page.locator(".edge-line")).toHaveCount(1);
 

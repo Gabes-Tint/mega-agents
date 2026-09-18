@@ -1,43 +1,14 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { canvas, connect, dropInto, enlarge, selectBlock } from "./fixtures";
-
-function center(box: { x: number; y: number; width: number; height: number }) {
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-}
-
-async function boxOf(locator: Locator) {
-  const box = await locator.boundingBox();
-  if (!box) throw new Error("not visible");
-  return box;
-}
-
-// Presses on the element and moves the real mouse to the point, leaving the
-// button down so the drag can be inspected before it is released.
-async function pressAndMove(
-  page: Page,
-  element: Locator,
-  to: { x: number; y: number },
-) {
-  const from = center(await boxOf(element));
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(to.x, to.y, { steps: 12 });
-}
-
-// Selects the block and drags from its handle on the side to the point.
-async function dragFromHandle(
-  page: Page,
-  block: Locator,
-  to: { x: number; y: number },
-  side = "right",
-) {
-  await selectBlock(block);
-  await pressAndMove(
-    page,
-    canvas(page).locator(`.link-handle[data-side="${side}"]`),
-    to,
-  );
-}
+import { expect, test, type Locator } from "@playwright/test";
+import {
+  boxOf,
+  canvas,
+  center,
+  connect,
+  dragFromHandle,
+  dropInto,
+  enlarge,
+  pressAndMove,
+} from "./fixtures";
 
 test.describe("drawing arrows by dragging", () => {
   test.use({ viewport: { width: 1600, height: 1000 } });
