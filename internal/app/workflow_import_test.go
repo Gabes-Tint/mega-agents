@@ -105,6 +105,33 @@ func TestReadIssueWithZeroOrNoIssueNumberRoundTrips(t *testing.T) {
 	}
 }
 
+func TestABreakpointOnABlockRoundTrips(t *testing.T) {
+	graph := WorkflowRequest{Name: "review", Nodes: []WorkflowNodeInput{
+		{ID: "p1", Type: "project", Name: "api", Path: "/src/api"},
+		{ID: "a1", Type: "agent", Name: "Coder", ParentID: "p1", Start: true, Breakpoint: true,
+			Backend: "claude", Prompt: "Write the fix"},
+	}}
+
+	exported, err := BuildWorkflowYAML(graph)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if !strings.Contains(exported, "        start: true\n        breakpoint: true\n") {
+		t.Fatalf("export does not carry the breakpoint beside the starting point:\n%s", exported)
+	}
+
+	imported, err := ParseWorkflowYAML([]byte(exported))
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if coder := imported.Nodes[1]; !coder.Breakpoint || !coder.Start {
+		t.Fatalf("imported = %+v, want the breakpoint to survive the file", coder)
+	}
+	if project := imported.Nodes[0]; project.Breakpoint {
+		t.Fatalf("imported = %+v, want a breakpoint only where the file has one", project)
+	}
+}
+
 func TestImportRejectsDocumentsThatAreNotWorkflows(t *testing.T) {
 	cases := map[string]struct {
 		yaml string

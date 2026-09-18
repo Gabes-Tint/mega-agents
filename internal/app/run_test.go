@@ -122,7 +122,9 @@ func awaitRun(t *testing.T, handler http.Handler, id string) runs.Record {
 		if polled.Code != http.StatusOK {
 			t.Fatalf("poll = %d: %s", polled.Code, polled.Body.String())
 		}
-		if record := decodeRecord(t, polled); record.Status != engine.Running {
+		// A run paused at a breakpoint is still in progress: it ends only
+		// once someone takes it on.
+		if record := decodeRecord(t, polled); record.Status != engine.Running && record.Status != Paused {
 			return record
 		}
 		time.Sleep(10 * time.Millisecond)

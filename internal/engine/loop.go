@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 )
 
 type previousKey struct{}
@@ -107,9 +108,15 @@ func (runner *loopRunner) run() (Result, error) {
 			Given:       runner.given,
 			Now:         e.options.Now,
 			Parallelism: e.options.Parallelism,
-			Log:         func(taskID string) io.Writer { return runner.logs[taskID] },
+			CancelGrace: e.options.CancelGrace,
+			Loop:        runner.task.ID,
+			Iteration:   iteration,
+			// A breakpoint inside a loop pauses on every repeat: each one runs
+			// the body again, and the block carries its breakpoint with it.
+			Pause: e.options.Pause,
+			Log:   func(taskID string) io.Writer { return runner.logs[taskID] },
 			Observe: func(current Run) {
-				e.progress <- func() { runner.show(current, iteration) }
+				e.report(func() { runner.show(current, iteration) })
 			},
 		})
 		if err != nil {
@@ -163,5 +170,10 @@ func (runner *loopRunner) show(current Run, iteration int) {
 		step.Loop, step.Iteration = runner.task.ID, iteration
 		e.run.Steps[first+offset] = step
 	}
+	// A body block pauses inside the loop's own execution, which already says
+	// which loop and repeat it stopped in; the run shows those breakpoints
+	// with its own, so they can be resumed like any other.
+	e.run.Paused = slices.DeleteFunc(e.run.Paused, func(at Pause) bool { return at.Loop == runner.task.ID })
+	e.run.Paused = append(e.run.Paused, current.Paused...)
 	e.notify()
 }

@@ -10,13 +10,14 @@ import (
 
 // yamlNode mirrors one entry under nodes in an exported workflow.
 type yamlNode struct {
-	Uses     string         `yaml:"uses"`
-	Name     string         `yaml:"name"`
-	Needs    []string       `yaml:"needs"`
-	Start    bool           `yaml:"start"`
-	With     map[string]any `yaml:"with"`
-	Layout   yamlLayout     `yaml:"layout"`
-	Children yaml.Node      `yaml:"children"`
+	Uses       string         `yaml:"uses"`
+	Name       string         `yaml:"name"`
+	Needs      []string       `yaml:"needs"`
+	Start      bool           `yaml:"start"`
+	Breakpoint bool           `yaml:"breakpoint"`
+	With       map[string]any `yaml:"with"`
+	Layout     yamlLayout     `yaml:"layout"`
+	Children   yaml.Node      `yaml:"children"`
 }
 
 type yamlLayout struct {
@@ -111,7 +112,7 @@ func (importer *yamlImporter) nodes(mapping *yaml.Node, parentID string) error {
 
 func importedNode(identifier string, parentID string, entry yamlNode) (WorkflowNodeInput, error) {
 	node := WorkflowNodeInput{
-		ID: identifier, Name: entry.Name, ParentID: parentID, Start: entry.Start,
+		ID: identifier, Name: entry.Name, ParentID: parentID, Start: entry.Start, Breakpoint: entry.Breakpoint,
 		X: entry.Layout.X, Y: entry.Layout.Y, W: entry.Layout.W, H: entry.Layout.H,
 	}
 	if node.Name == "" {

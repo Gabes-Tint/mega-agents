@@ -63,6 +63,8 @@ func (planner runPlanner) loopTask(node WorkflowNodeInput, failures *[]planFailu
 			*failures = append(*failures, planFailure{nodeID: child.ID, err: err})
 			continue
 		}
+		// A breakpoint on a block inside a loop pauses on every repeat.
+		task.Breakpoint = child.Breakpoint
 		body = append(body, task)
 	}
 	handlesExhausted := false
