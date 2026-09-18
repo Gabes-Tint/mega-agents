@@ -1157,7 +1157,10 @@
                 {#each fieldErrors(step.details) as fieldError (fieldError)}
                   <pre class="failed">{fieldError}</pre>
                 {/each}
-                {#if step.details?.output && step.action === "command"}
+                <!-- A failed command reports the tail of its output in the
+                error; the whole of it follows. Every other step already has
+                its output above. -->
+                {#if step.error && step.details?.output && step.action === "command"}
                   <pre>{step.details.output}</pre>
                 {/if}
                 {#if step.details?.reply}
