@@ -82,6 +82,16 @@ func (store WorkflowStore) Save(name string, request WorkflowRequest) error {
 	return os.Rename(temporary.Name(), store.Path(name))
 }
 
+// Exists reports whether the named workflow is saved, so a deep link to it
+// can be answered without parsing the file.
+func (store WorkflowStore) Exists(name string) bool {
+	if err := checkWorkflowName(name); err != nil {
+		return false
+	}
+	info, err := os.Stat(store.Path(name))
+	return err == nil && !info.IsDir()
+}
+
 // Load reads the named workflow back into the editor's graph.
 func (store WorkflowStore) Load(name string) (WorkflowRequest, error) {
 	if err := checkWorkflowName(name); err != nil {

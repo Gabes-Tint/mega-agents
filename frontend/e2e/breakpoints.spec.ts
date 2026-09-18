@@ -178,7 +178,9 @@ test.describe("Breakpoints in the editor", () => {
     await expect(runResult(page)).toContainText("Write the smallest fix", RUN);
     await expect(runResult(page)).toContainText("Run succeeded");
 
-    // The workflow on disk still holds the block's own prompt.
+    // The workflow on disk still holds the block's own prompt. Saving moved
+    // the address to the workflow, so the fresh editor starts at "/" again.
+    await page.goto("/");
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await page.getByRole("button", { name: "Open…" }).click();

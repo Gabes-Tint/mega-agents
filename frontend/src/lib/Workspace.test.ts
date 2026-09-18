@@ -38,6 +38,9 @@ function fieldText(label: string): string {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  // Opening or saving a workflow moves the address bar, so each test starts
+  // at the editor's own page again.
+  history.replaceState(null, "", "/");
 });
 
 interface FakeDataTransfer {
@@ -4425,5 +4428,156 @@ describe("breakpoints in the editor", () => {
     );
 
     await waitFor(() => expect(sent).toContain("cancel"));
+  });
+});
+
+describe("the address of a workflow", () => {
+  const nightly = {
+    name: "nightly",
+    nodes: [
+      { id: "api", type: "project", name: "api", x: 10, y: 10, w: 300, h: 200 },
+      {
+        id: "planner",
+        type: "agent",
+        name: "Planner",
+        x: 20,
+        y: 40,
+        w: 160,
+        h: 64,
+        parentId: "api",
+      },
+    ],
+    edges: [],
+  };
+
+  const weekly = { ...nightly, name: "weekly" };
+
+  // The saved workflows the backend answers with, by name.
+  function backend(saved: Record<string, unknown>) {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${input}`);
+        if (input === "/api/workflows")
+          return Response.json(
+            Object.keys(saved).map((name) => ({ name, updatedAt: "now" })),
+          );
+        const name = input.replace("/api/workflows/", "");
+        const workflow = saved[name];
+        if (init?.method === "PUT")
+          return Response.json({ name, updatedAt: "now" });
+        if (!workflow)
+          return new Response(`workflow ${name} not found`, { status: 404 });
+        return Response.json(workflow);
+      }),
+    );
+    return calls;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("opening a workflow moves the address to it, with a way back", async () => {
+    backend({ nightly });
+    const pushed = vi.spyOn(history, "pushState");
+    render(Workspace);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "nightly" }),
+    );
+
+    await waitFor(() => expect(location.pathname).toBe("/workflows/nightly"));
+    expect(pushed).toHaveBeenCalled();
+    pushed.mockRestore();
+  });
+
+  test("a deep link opens the workflow it names", async () => {
+    history.replaceState(null, "", "/workflows/nightly");
+    const calls = backend({ nightly });
+
+    render(Workspace);
+
+    expect(
+      await screen.findByRole("button", { name: "Planner" }),
+    ).toBeInTheDocument();
+    expect(calls).toContain("GET /api/workflows/nightly");
+    expect(screen.getByLabelText("Workflow name")).toHaveValue("nightly");
+  });
+
+  test("going back opens the workflow the browser returns to", async () => {
+    history.replaceState(null, "", "/workflows/weekly");
+    backend({ nightly, weekly });
+    render(Workspace);
+    await screen.findByRole("button", { name: "Planner" });
+    expect(screen.getByLabelText("Workflow name")).toHaveValue("weekly");
+
+    history.replaceState(null, "", "/workflows/nightly");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Workflow name")).toHaveValue("nightly"),
+    );
+  });
+
+  test("an unknown workflow is named instead of leaving an empty canvas", async () => {
+    history.replaceState(null, "", "/workflows/missing");
+    backend({});
+
+    render(Workspace);
+
+    const message = await screen.findByRole("region", {
+      name: "Page not found",
+    });
+    expect(message).toHaveTextContent("missing");
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Back to the editor" }),
+    );
+    await waitFor(() => expect(location.pathname).toBe("/"));
+    expect(screen.queryByRole("region", { name: "Page not found" })).toBeNull();
+  });
+
+  test("a page the editor does not have says so", async () => {
+    history.replaceState(null, "", "/runs/42");
+    backend({});
+
+    render(Workspace);
+
+    expect(
+      await screen.findByRole("region", { name: "Page not found" }),
+    ).toHaveTextContent("/runs/42");
+  });
+
+  test("saving moves the address to the workflow without a step back into an empty editor", async () => {
+    backend({});
+    const pushed = vi.spyOn(history, "pushState");
+    render(Workspace);
+    await fireEvent.input(screen.getByLabelText("Workflow name"), {
+      target: { value: "Issue to PR" },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(location.pathname).toBe("/workflows/issue-to-pr"),
+    );
+    expect(pushed).not.toHaveBeenCalled();
+    pushed.mockRestore();
+  });
+
+  test("the graph in progress is the scratch graph, not a saved workflow", async () => {
+    history.replaceState(null, "", "/workflows/nightly");
+    backend({ nightly });
+    render(Workspace);
+    await screen.findByRole("button", { name: "Planner" });
+
+    // Nothing of the opened workflow reaches the draft the root page keeps.
+    await waitFor(() =>
+      expect(localStorage.getItem("mega-agents:draft") ?? "").not.toContain(
+        "Planner",
+      ),
+    );
   });
 });

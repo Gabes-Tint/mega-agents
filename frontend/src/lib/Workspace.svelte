@@ -19,6 +19,7 @@
     type PanelLayout,
     type PanelName,
   } from "./panelLayout.js";
+  import { parseRoute, workflowPath, type Route } from "./workflowUrl.js";
 
   // What the backend said about itself, shown in the status bar.
   let { status = "" }: { status?: string } = $props();
@@ -141,18 +142,36 @@
     );
   }
 
-  // The graph in progress survives reloads of the page in this browser.
+  // The scratch graph at "/" survives reloads of the page in this browser.
+  // A saved workflow is not kept here: it has its own address and comes back
+  // from the backend, which is where Save puts it.
   const DRAFT_KEY = "mega-agents:draft";
 
   const graph = new GraphStore();
-  try {
-    const draft = localStorage.getItem(DRAFT_KEY);
-    if (draft) graph.load(JSON.parse(draft) as WorkflowGraph);
-  } catch {
-    // A missing or unreadable draft starts an empty graph.
+  // What the address bar points at. Every saved workflow has its own URL, so
+  // it can be bookmarked and shared, and Back walks between workflows.
+  const opened = parseRoute(globalThis.location.pathname);
+  let route = $state<Route>(opened);
+  // Names what the address points at when nothing answers to it, instead of
+  // leaving an empty canvas.
+  let notFound = $state("");
+
+  function loadDraft(): void {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      graph.load(
+        draft ? (JSON.parse(draft) as WorkflowGraph) : { nodes: [], edges: [] },
+      );
+    } catch {
+      // A missing or unreadable draft starts an empty graph.
+      graph.load({ nodes: [], edges: [] });
+    }
   }
+  if (opened.kind === "scratch") loadDraft();
+
   $effect(() => {
     const draft = JSON.stringify(graph.toRequest());
+    if (route.kind !== "scratch") return;
     try {
       localStorage.setItem(DRAFT_KEY, draft);
     } catch {
@@ -353,6 +372,9 @@
       fileStatus = response.ok
         ? `Saved as ${name}`
         : (await response.text()).trim();
+      // The saved workflow now has an address. Replacing rather than pushing
+      // keeps Back out of the editor the graph was drawn in.
+      if (response.ok) moveTo(workflowPath(name), "replace");
     } catch {
       fileStatus = "Cannot reach the backend";
     }
@@ -371,19 +393,33 @@
     }
   }
 
+  // Opens the workflow chosen in the dialog and takes the editor to its
+  // address, so Back returns to the workflow that was open before it.
   async function openWorkflow(name: string): Promise<void> {
     openDialog = false;
+    if (await loadWorkflow(name)) moveTo(workflowPath(name), "push");
+  }
+
+  // Loads the named workflow onto the canvas. A name nothing answers to is
+  // reported as missing rather than leaving the canvas as it was.
+  async function loadWorkflow(name: string): Promise<boolean> {
     try {
-      const response = await fetch(`/api/workflows/${name}`);
+      const response = await fetch(
+        `/api/workflows/${encodeURIComponent(name)}`,
+      );
       if (!response.ok) {
-        fileStatus = (await response.text()).trim();
-        return;
+        if (response.status === 404)
+          notFound = `There is no workflow named “${name}”.`;
+        else fileStatus = (await response.text()).trim();
+        return false;
       }
       graph.load((await response.json()) as WorkflowGraph);
       runResult = null;
       fileStatus = `Opened ${name}`;
+      return true;
     } catch {
       fileStatus = "Cannot reach the backend";
+      return false;
     }
   }
 
@@ -412,6 +448,43 @@
   let runError = $state("");
   let logText = $state("");
   let logRequest = 0;
+
+  // Takes the address bar to the path and remembers it. A push leaves a step
+  // back to the page the editor was on; a replace does not.
+  function moveTo(path: string, how: "push" | "replace"): void {
+    if (how === "push") globalThis.history.pushState(null, "", path);
+    else globalThis.history.replaceState(null, "", path);
+    route = parseRoute(path);
+  }
+
+  // Opens what the address bar points at: the scratch graph at "/", a saved
+  // workflow at /workflows/<name>, or a message for an address the editor
+  // has no page for.
+  async function applyLocation(): Promise<void> {
+    route = parseRoute(globalThis.location.pathname);
+    notFound = "";
+    if (route.kind === "workflow") await loadWorkflow(route.name);
+    else if (route.kind === "unknown")
+      notFound = `There is no page at ${route.path}.`;
+    else loadDraft();
+  }
+
+  function backToEditor(): void {
+    // The address led nowhere, so it is replaced rather than left in history.
+    moveTo("/", "replace");
+    notFound = "";
+    loadDraft();
+  }
+
+  // The address the editor opened at. "/" already loaded the draft above.
+  if (opened.kind !== "scratch") void applyLocation();
+
+  // Back and Forward move between the workflows that were open.
+  $effect(() => {
+    const follow = () => void applyLocation();
+    globalThis.addEventListener("popstate", follow);
+    return () => globalThis.removeEventListener("popstate", follow);
+  });
 
   const loggedStep = $derived(
     runResult?.steps.find((step) => step.nodeId === graph.logNodeId),
@@ -1124,7 +1197,44 @@
   </footer>
 </div>
 
+{#if notFound}
+  <!-- The address named no workflow, so the editor says which one and offers
+       the way back instead of showing an empty canvas. -->
+  <section class="not-found" aria-label="Page not found">
+    <h2>{notFound}</h2>
+    {#if route.kind === "workflow"}
+      <p>It may have been renamed, deleted, or never saved under that name.</p>
+    {/if}
+    <button type="button" onclick={backToEditor}>Back to the editor</button>
+  </section>
+{/if}
+
 <style>
+  .not-found {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    text-align: center;
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .not-found h2 {
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .not-found p {
+    margin: 0;
+    color: var(--text-muted);
+  }
+
   .workspace {
     flex: 1;
     min-height: 0;
