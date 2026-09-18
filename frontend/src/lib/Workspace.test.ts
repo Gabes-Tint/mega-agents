@@ -2845,6 +2845,31 @@ describe("graph builder workspace", () => {
     vi.unstubAllGlobals();
   });
 
+  test("shows a passing command's output once, not twice", async () => {
+    render(Workspace);
+    await buildRunnableFlow();
+    fakeBackend({
+      "POST /api/runs": [
+        record("succeeded", [
+          {
+            nodeId: "c1",
+            name: "Tests",
+            action: "command",
+            status: "succeeded",
+            details: { exitCode: 0, output: "ok: 12 tests" },
+          },
+        ]),
+      ],
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Exit code: 0"));
+    expect(screen.getAllByText("ok: 12 tests")).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
   test("configures the delivery actions of a GitHub block", async () => {
     render(Workspace);
     await githubWithActions("issue", "commit", "pullrequest");
