@@ -35,6 +35,16 @@ describe("the marks a block header carries", () => {
     expect(end.querySelector(".chequer")).toBeInTheDocument();
   });
 
+  test("a breakpoint is a plain dot and a paused block waits behind two bars", () => {
+    const breakpoint = mark("breakpoint");
+    expect(breakpoint.querySelector(".dot")).toBeInTheDocument();
+    expect(breakpoint.querySelector(".line")).toBeNull();
+    cleanup();
+    const paused = mark("paused");
+    expect(paused.querySelectorAll(".bar")).toHaveLength(2);
+    expect(paused.querySelector(".spinner")).toBeNull();
+  });
+
   test("a running block spins and the finished ones hold still", () => {
     expect(mark("running").querySelector(".spinner")).toBeInTheDocument();
     cleanup();

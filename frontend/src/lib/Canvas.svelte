@@ -846,6 +846,13 @@
             ondragend={endNodeDrag}
             onclick={() => graph.select(node.id)}
             onkeydown={(event) => {
+              // B arms or clears the focused block's breakpoint, the way a
+              // debugger's gutter is clicked, without leaving the canvas.
+              if (event.key === "b" || event.key === "B") {
+                event.preventDefault();
+                graph.setBreakpoint(node.id, !node.breakpoint);
+                return;
+              }
               // Delete or Backspace deletes the focused block.
               if (event.key !== "Delete" && event.key !== "Backspace") return;
               event.preventDefault();
@@ -859,6 +866,9 @@
               {/if}
               {#if endingIds.has(node.id)}
                 <NodeMark kind="end" />
+              {/if}
+              {#if node.breakpoint}
+                <NodeMark kind="breakpoint" />
               {/if}
               {#if mark}
                 <NodeMark kind={mark} id="status-{node.id}" />
@@ -1561,6 +1571,21 @@
     box-shadow: 0 0 0 3px var(--info-soft);
   }
 
+  /* A block the run waits before is held, not working: it takes the warning
+     colour and a ring that breathes, so it never reads as the blue of a
+     block that is busy. */
+  .node.status-paused {
+    border-color: var(--warn);
+    box-shadow: 0 0 0 3px var(--warn-soft);
+    animation: waiting 1.6s ease-in-out infinite;
+  }
+
+  @keyframes waiting {
+    50% {
+      box-shadow: 0 0 0 7px var(--warn-soft);
+    }
+  }
+
   .node.status-succeeded {
     border-color: var(--ok);
     box-shadow: 0 0 0 3px var(--ok-soft);
@@ -1608,6 +1633,11 @@
   @media (prefers-reduced-motion: reduce) {
     .node {
       transition: none;
+    }
+
+    /* The ring stays; only its breathing stops. */
+    .node.status-paused {
+      animation: none;
     }
   }
 

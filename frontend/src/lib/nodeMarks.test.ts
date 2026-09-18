@@ -144,11 +144,17 @@ describe("the mark a run status carries", () => {
     expect(statusMark(undefined)).toBeUndefined();
   });
 
+  test("a run waiting at a breakpoint marks the block it waits before", () => {
+    expect(statusMark("paused")).toBe("paused");
+  });
+
   test("every mark says what it means", () => {
     expect(Object.values(MARK_LABELS)).toEqual([
       "Starting point",
       "Ending block",
+      "Breakpoint",
       "Running",
+      "Paused at a breakpoint",
       "Succeeded",
       "Failed",
       "Skipped",

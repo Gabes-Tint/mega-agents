@@ -4088,3 +4088,342 @@ describe("drawing arrows on the canvas", () => {
     await fireEvent.pointerUp(window);
   });
 });
+
+describe("breakpoints in the editor", () => {
+  const block = (name: string) => screen.getByRole("button", { name });
+
+  const markOf = (name: string, kind: string) =>
+    block(name).querySelector(`[data-mark="${kind}"]`);
+
+  // A block as the draft holds it: the id a run reports its steps and pauses
+  // against, and the properties a save would keep.
+  function draftNode(name: string): {
+    id: string;
+    prompt?: string;
+    breakpoint?: boolean;
+  } {
+    const draft = JSON.parse(
+      localStorage.getItem("mega-agents:draft") ?? "{}",
+    ) as {
+      nodes?: {
+        id: string;
+        name: string;
+        prompt?: string;
+        breakpoint?: boolean;
+      }[];
+    };
+    const node = draft.nodes?.find((candidate) => candidate.name === name);
+    if (!node) throw new Error(`${name} is not in the draft`);
+    return node;
+  }
+
+  const idOf = (name: string) => draftNode(name).id;
+
+  // A project holding one agent, the agent selected.
+  async function flowWithAgent(): Promise<void> {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Agent", 60, 50);
+    await fireEvent.click(screen.getByText("Agent 1"));
+  }
+
+  interface Pause {
+    nodeId: string;
+    name: string;
+    action: string;
+    inputs?: { nodeId: string; port: string; value?: unknown }[];
+    resolved: { prompt?: string; command?: string };
+    iteration?: number;
+    loop?: string;
+  }
+
+  const pausedRun = (paused: Pause[]) => () =>
+    Response.json({
+      id: "run-1",
+      workflow: "workflow",
+      status: "paused",
+      steps: paused.map((at) => ({
+        nodeId: at.nodeId,
+        name: at.name,
+        action: at.action,
+        status: "paused",
+      })),
+      paused,
+    });
+
+  const finishedRun = () =>
+    Response.json({
+      id: "run-1",
+      workflow: "workflow",
+      status: "succeeded",
+      steps: [
+        { nodeId: "a1", name: "Agent 1", action: "agent", status: "succeeded" },
+      ],
+    });
+
+  // A backend whose run pauses at the blocks given until something resumes
+  // or cancels it, recording what each request sent.
+  function pausingBackend(paused: Pause[], resume: () => Response) {
+    const sent: string[] = [];
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === "/api/runs" && init?.method === "POST")
+        return pausedRun(paused)();
+      if (input === "/api/runs/run-1/resume") {
+        sent.push(String(init?.body));
+        return resume();
+      }
+      if (input === "/api/runs/run-1/cancel") {
+        sent.push("cancel");
+        return Response.json({ id: "run-1", status: "cancelling" });
+      }
+      if (input === "/api/runs/run-1")
+        return sent.length > 0 ? finishedRun() : pausedRun(paused)();
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return sent;
+  }
+
+  // The body of the last resume the backend was asked for.
+  const resumeBody = (sent: string[]) =>
+    JSON.parse(sent.at(-1) ?? "{}") as Record<string, string>;
+
+  const accepted = () => Response.json({ id: "run-1" }, { status: 202 });
+
+  const onePause = (nodeId: string, prompt = "Fix the login bug"): Pause[] => [
+    { nodeId, name: "Agent 1", action: "agent", resolved: { prompt } },
+  ];
+
+  const pausedPanel = () =>
+    screen.queryByRole("region", { name: "Paused at a breakpoint" });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("a block's properties arm a breakpoint and the block wears the dot", async () => {
+    await flowWithAgent();
+
+    await fireEvent.click(screen.getByLabelText("Breakpoint"));
+
+    expect(markOf("Agent 1", "breakpoint")).toBeInTheDocument();
+    await waitFor(() => expect(draftNode("Agent 1").breakpoint).toBe(true));
+
+    await fireEvent.click(screen.getByLabelText("Breakpoint"));
+
+    expect(markOf("Agent 1", "breakpoint")).toBeNull();
+    await waitFor(() =>
+      expect(draftNode("Agent 1").breakpoint).toBeUndefined(),
+    );
+  });
+
+  test("pressing B on a block arms its breakpoint without leaving the canvas", async () => {
+    await flowWithAgent();
+
+    await fireEvent.keyDown(block("Agent 1"), { key: "b" });
+
+    expect(markOf("Agent 1", "breakpoint")).toBeInTheDocument();
+    expect(screen.getByLabelText("Breakpoint")).toBeChecked();
+
+    await fireEvent.keyDown(block("Agent 1"), { key: "b" });
+
+    expect(markOf("Agent 1", "breakpoint")).toBeNull();
+  });
+
+  test("a paused run says which block waits, what reached it and what it will run", async () => {
+    await flowWithAgent();
+    pausingBackend(
+      [
+        {
+          nodeId: idOf("Agent 1"),
+          name: "Agent 1",
+          action: "agent",
+          inputs: [
+            {
+              nodeId: "w1",
+              port: "workspace",
+              value: { path: "/tmp/login", branch: "feature/login" },
+            },
+          ],
+          resolved: { prompt: "Fix the login bug" },
+        },
+      ],
+      accepted,
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+
+    const panel = await screen.findByRole("region", {
+      name: "Paused at a breakpoint",
+    });
+    expect(panel).toHaveTextContent("Agent 1");
+    expect(panel).toHaveTextContent("workspace");
+    expect(panel).toHaveTextContent("/tmp/login");
+    expect(fieldText("Prompt for Agent 1 in this run")).toBe(
+      "Fix the login bug",
+    );
+    // The block the run waits before is marked apart from a running one.
+    await waitFor(() => expect(block("Agent 1")).toHaveClass("status-paused"));
+    expect(markOf("Agent 1", "paused")).toBeInTheDocument();
+    expect(markOf("Agent 1", "running")).toBeNull();
+  });
+
+  test.each(["Continue", "Step", "Skip"])(
+    "%s names the block it resumes",
+    async (action) => {
+      await flowWithAgent();
+      const coder = idOf("Agent 1");
+      const sent = pausingBackend(onePause(coder), accepted);
+
+      await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+      await fireEvent.click(
+        await screen.findByRole("button", { name: `${action} Agent 1` }),
+      );
+
+      await waitFor(() => expect(sent).toHaveLength(1));
+      expect(resumeBody(sent)).toMatchObject({
+        nodeId: coder,
+        action: action.toLowerCase(),
+      });
+      await waitFor(() => expect(pausedPanel()).toBeNull());
+    },
+  );
+
+  test("an edited prompt runs this run only and leaves the block's own text alone", async () => {
+    await flowWithAgent();
+    await editField("Prompt", "Fix the login bug");
+    const sent = pausingBackend(onePause(idOf("Agent 1")), accepted);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await screen.findByRole("region", { name: "Paused at a breakpoint" });
+    await editField(
+      "Prompt for Agent 1 in this run",
+      "Fix the login bug, smallest change",
+    );
+
+    // The panel says out loud that the edit belongs to the run, not the block.
+    expect(pausedPanel()).toHaveTextContent(/this run only/i);
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Continue Agent 1" }),
+    );
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(resumeBody(sent).prompt).toBe("Fix the login bug, smallest change");
+    expect(draftNode("Agent 1").prompt).toBe("Fix the login bug");
+  });
+
+  test("a command block is paused with its command rather than a prompt", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    await dropComponent("Command", 60, 50);
+    await fireEvent.click(screen.getByText("Command 1"));
+    const gate = idOf("Command 1");
+    const sent = pausingBackend(
+      [
+        {
+          nodeId: gate,
+          name: "Command 1",
+          action: "command",
+          resolved: { command: "make verify" },
+        },
+      ],
+      accepted,
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await screen.findByRole("region", { name: "Paused at a breakpoint" });
+    await editField("Command for Command 1 in this run", "make verify -j2");
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Step Command 1" }),
+    );
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(resumeBody(sent)).toMatchObject({
+      nodeId: gate,
+      action: "step",
+      command: "make verify -j2",
+    });
+  });
+
+  test("two blocks paused at once are resumed one at a time, by name", async () => {
+    render(Workspace);
+    await dropComponent("Project", 30, 20);
+    // A project roomy enough to hold two agents one above the other.
+    const grip = block("Project 1").querySelector(".resize-handle");
+    if (!grip) throw new Error("no resize grip");
+    await fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0 });
+    await fireEvent.pointerMove(window, { clientX: 500, clientY: 400 });
+    await fireEvent.pointerUp(window);
+    await dropComponent("Agent", 60, 50);
+    await dropComponent("Agent", 60, 200);
+    const reviewer = idOf("Agent 2");
+    const sent = pausingBackend(
+      [
+        {
+          nodeId: idOf("Agent 1"),
+          name: "Agent 1",
+          action: "agent",
+          resolved: { prompt: "Fix it" },
+        },
+        {
+          nodeId: reviewer,
+          name: "Agent 2",
+          action: "agent",
+          resolved: { prompt: "Review it" },
+        },
+      ],
+      accepted,
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await screen.findByRole("region", { name: "Paused at a breakpoint" });
+    expect(
+      screen.getByRole("button", { name: "Continue Agent 1" }),
+    ).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Skip Agent 2" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(resumeBody(sent)).toMatchObject({
+      nodeId: reviewer,
+      action: "skip",
+    });
+  });
+
+  test("a resume the run has moved past says so and shows where the run is now", async () => {
+    await flowWithAgent();
+    const coder = idOf("Agent 1");
+    pausingBackend(
+      onePause(coder),
+      () =>
+        new Response(`run run-1 is not paused here before ${coder}`, {
+          status: 409,
+        }),
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Continue Agent 1" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "is not paused here",
+    );
+    // The panel re-reads the run rather than waiting on a block the run has
+    // already left.
+    const result = screen.getByRole("region", { name: "Run result" });
+    await waitFor(() => expect(result).toHaveTextContent("Run succeeded"));
+    expect(pausedPanel()).toBeNull();
+  });
+
+  test("a paused run can still be cancelled", async () => {
+    await flowWithAgent();
+    const sent = pausingBackend(onePause(idOf("Agent 1")), accepted);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel run" }),
+    );
+
+    await waitFor(() => expect(sent).toContain("cancel"));
+  });
+});

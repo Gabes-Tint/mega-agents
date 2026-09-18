@@ -10,6 +10,7 @@
   import Canvas from "./Canvas.svelte";
   import PropertiesPanel from "./PropertiesPanel.svelte";
   import AgentHealth from "./AgentHealth.svelte";
+  import CodeEditor from "./CodeEditor.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import Splitter from "./Splitter.svelte";
   import {
@@ -33,11 +34,34 @@
     iteration?: number;
   }
 
+  // One value a block the run waits before is about to receive.
+  interface PausedInput {
+    nodeId: string;
+    port: string;
+    value?: unknown;
+  }
+
+  // A block the run stopped in front of, as the run reports it: what it is
+  // about to receive and the text it would run.
+  interface PausedAt {
+    nodeId: string;
+    name: string;
+    action: string;
+    at?: string;
+    loop?: string;
+    iteration?: number;
+    inputs?: PausedInput[];
+    resolved: { prompt?: string; command?: string };
+  }
+
   interface RunResult {
     id?: string;
     retryOf?: string;
     status: string;
     steps: RunStep[];
+    // Several branches can wait at once, so the run names every block it
+    // stopped before rather than one.
+    paused?: PausedAt[];
   }
 
   // How often a started run is polled for progress.
@@ -219,7 +243,7 @@
       }
       const opened = (await response.json()) as RunResult;
       showResult(opened);
-      if (opened.status === "running" && !running) {
+      if (inProgress(opened.status) && !running) {
         running = true;
         await follow(opened);
         running = false;
@@ -393,14 +417,93 @@
     runResult?.steps.find((step) => step.nodeId === graph.logNodeId),
   );
 
+  // The text someone typed at a breakpoint, by the block it waits before.
+  // It belongs to that pause: the block's own text never changes.
+  let edits = $state<Record<string, string>>({});
+  // The block whose resume is on its way, so one click is never sent twice.
+  let resuming = $state("");
+  let pauseError = $state("");
+
+  const pausedAt = $derived(runResult?.paused ?? []);
+
   function wait(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function showResult(result: RunResult): void {
     runResult = result;
+    // An edit belongs to the pause it was typed at, so it goes when the run
+    // leaves the block, and so does the wait for that block's resume.
+    const waiting = new Set((result.paused ?? []).map((at) => at.nodeId));
+    for (const nodeId of Object.keys(edits))
+      if (!waiting.has(nodeId)) delete edits[nodeId];
+    if (resuming && !waiting.has(resuming)) resuming = "";
     graph.showRun(result.steps, result.id ?? null);
     if (graph.logNodeId) void loadLog(graph.logNodeId);
+  }
+
+  // Which text a paused block would run, or nothing for a block whose work
+  // has no text of its own.
+  function fieldOf(at: PausedAt): "prompt" | "command" | undefined {
+    if (at.resolved.command !== undefined) return "command";
+    if (at.resolved.prompt !== undefined) return "prompt";
+    return undefined;
+  }
+
+  const resolvedText = (at: PausedAt) =>
+    at.resolved.command ?? at.resolved.prompt ?? "";
+
+  const textOf = (at: PausedAt) => edits[at.nodeId] ?? resolvedText(at);
+
+  const isEdited = (at: PausedAt) => textOf(at) !== resolvedText(at);
+
+  function undoEdit(at: PausedAt): void {
+    delete edits[at.nodeId];
+  }
+
+  function valueText(value: unknown): string {
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+
+  // Reads the run again after a resume the backend refused, so the canvas
+  // and the panel show where the run actually is.
+  async function reread(id: string): Promise<void> {
+    try {
+      const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+      if (response.ok) showResult((await response.json()) as RunResult);
+    } catch {
+      // The message already says what happened; the poll keeps trying.
+    }
+  }
+
+  // Takes one paused block on. The block is always named: with two branches
+  // waiting, a resume that named none would be refused.
+  async function resume(at: PausedAt, action: string): Promise<void> {
+    const id = runResult?.id;
+    if (!id) return;
+    resuming = at.nodeId;
+    pauseError = "";
+    const body: Record<string, string> = { nodeId: at.nodeId, action };
+    const field = fieldOf(at);
+    // A skipped block runs nothing, so an edit has nothing to apply to.
+    if (field && action !== "skip" && isEdited(at)) body[field] = textOf(at);
+    try {
+      const response = await fetch(
+        `/api/runs/${encodeURIComponent(id)}/resume`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (response.ok) return;
+      pauseError = (await response.text()).trim();
+      resuming = "";
+      await reread(id);
+    } catch {
+      pauseError = "Cannot reach the backend";
+      resuming = "";
+    }
   }
 
   async function loadLog(nodeId: string): Promise<void> {
@@ -425,11 +528,16 @@
     if (nodeId) void loadLog(nodeId);
   });
 
+  // A run waiting at a breakpoint is still in progress: it is followed, and
+  // it can still be cancelled, until someone takes it on and it finishes.
+  const inProgress = (status: string) =>
+    status === "running" || status === "paused";
+
   // A run the backend started keeps executing after the request returns;
   // poll it so the canvas and the result follow each step.
   async function follow(result: RunResult): Promise<void> {
     let current = result;
-    while (current.id && current.status === "running") {
+    while (current.id && inProgress(current.status)) {
       await wait(RUN_POLL_MS);
       try {
         const response = await fetch(
@@ -483,6 +591,9 @@
     panelTab = "run";
     runResult = null;
     runError = "";
+    pauseError = "";
+    edits = {};
+    resuming = "";
     graph.showRun([]);
     graph.openLog(null);
     try {
@@ -578,7 +689,7 @@
       >
         Runs…
       </button>
-      {#if running && runResult?.id && runResult.status === "running"}
+      {#if running && runResult?.id && inProgress(runResult.status)}
         <button type="button" class="danger" onclick={() => void cancelRun()}>
           Cancel run
         </button>
@@ -791,6 +902,105 @@
       aria-labelledby="tab-run"
       hidden={panelTab !== "run"}
     >
+      {#if pauseError}
+        <p class="error" role="alert">{pauseError}</p>
+      {/if}
+      {#if pausedAt.length > 0}
+        <section class="paused" aria-label="Paused at a breakpoint">
+          {#each pausedAt as at (at.nodeId)}
+            {@const field = fieldOf(at)}
+            <article class="pause">
+              <div class="step-line">
+                <strong>
+                  ⏸️ Paused before {at.name}: {at.action}
+                </strong>
+                {#if at.iteration}
+                  <span class="meta">repeat {at.iteration}</span>
+                {/if}
+                <button
+                  type="button"
+                  class="small ghost"
+                  aria-label="Show {at.name} on the canvas"
+                  onclick={() => graph.select(at.nodeId)}
+                >
+                  Show on canvas
+                </button>
+              </div>
+              {#if at.inputs?.length}
+                <dl class="arrivals">
+                  {#each at.inputs as input (input.nodeId + input.port)}
+                    <dt>
+                      {nameOf(input.nodeId) || input.nodeId} · {input.port}
+                    </dt>
+                    <dd><pre>{valueText(input.value)}</pre></dd>
+                  {/each}
+                </dl>
+              {:else}
+                <p class="details">Nothing reaches this block.</p>
+              {/if}
+              {#if field}
+                <div class="this-run" class:edited={isEdited(at)}>
+                  <span class="run-only">
+                    {field === "command" ? "Command" : "Prompt"} for this run only
+                  </span>
+                  <CodeEditor
+                    label="{field === 'command'
+                      ? 'Command'
+                      : 'Prompt'} for {at.name} in this run"
+                    language={field === "command" ? "shell" : "text"}
+                    minLines={3}
+                    value={textOf(at)}
+                    onchange={(value) => (edits[at.nodeId] = value)}
+                  />
+                  <p class="details">
+                    Continue and Step run this text as written. {at.name} keeps the
+                    text the workflow holds; nothing typed here is saved.
+                    {#if isEdited(at)}
+                      <button
+                        type="button"
+                        class="small ghost"
+                        aria-label="Undo the edit to {at.name}"
+                        onclick={() => undoEdit(at)}
+                      >
+                        Undo the edit
+                      </button>
+                    {/if}
+                  </p>
+                </div>
+              {/if}
+              <div class="group">
+                <button
+                  type="button"
+                  class="small"
+                  aria-label="Continue {at.name}"
+                  disabled={resuming === at.nodeId}
+                  onclick={() => void resume(at, "continue")}
+                >
+                  Continue
+                </button>
+                <button
+                  type="button"
+                  class="small"
+                  aria-label="Step {at.name}"
+                  disabled={resuming === at.nodeId}
+                  onclick={() => void resume(at, "step")}
+                >
+                  Step
+                </button>
+                <button
+                  type="button"
+                  class="small"
+                  aria-label="Skip {at.name}"
+                  disabled={resuming === at.nodeId}
+                  onclick={() => void resume(at, "skip")}
+                >
+                  Skip
+                </button>
+              </div>
+            </article>
+          {/each}
+        </section>
+      {/if}
       <section aria-label="Run result" aria-live="polite">
         <div class="run-summary">
           {#if runResult && !runError}
@@ -1291,6 +1501,66 @@
     padding-left: 1rem;
     color: var(--text-muted);
     font-size: 12px;
+  }
+
+  /* A paused run is the one thing in the panel waiting on the person
+     reading it, so each block it waits before is a card of its own. */
+  .paused {
+    display: grid;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .pause {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--warn);
+    border-left-width: 3px;
+    border-radius: var(--radius);
+    background: var(--warn-soft);
+  }
+
+  .arrivals {
+    margin: 0;
+    padding-left: 1rem;
+    font-size: 12px;
+  }
+
+  .arrivals dt {
+    color: var(--text-muted);
+  }
+
+  .arrivals dd {
+    margin: 0;
+  }
+
+  /* The text of the run, not of the block: dashed so it never reads as one
+     of the saved fields in the properties panel. */
+  .this-run {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.4rem;
+    border: 1px dashed var(--warn);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  .run-only {
+    color: var(--warn);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .this-run.edited {
+    border-style: solid;
+    box-shadow: 0 0 0 2px var(--warn-soft);
+  }
+
+  .this-run.edited .run-only::after {
+    content: " · edited";
   }
 
   .details a {

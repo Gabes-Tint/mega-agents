@@ -23,9 +23,13 @@ max_binary=${MAX_BINARY_BYTES:-33554432}
 # the bundle to 540437 bytes and raised the limit to 544 KiB, which it did
 # not need: the build still fit under 528 KiB. Colouring each arrow with the
 # hue of the block it leaves replaced three arrowheads with one and left the
-# bundle at 540414 bytes, so the limit is back at the snug step above it.
+# bundle at 540414 bytes, so the limit went back to the snug step above it.
+# 544 KiB again: the breakpoint editor took the bundle to 545874 bytes, for
+# the marks a block carries, the paused panel listing every block a run waits
+# before with the values that reached it, and a code editor for the prompt or
+# command that block would run, which the resume endpoint takes back.
 # Re-baselined deliberately in review rather than trimming features.
-max_javascript=${MAX_JAVASCRIPT_BYTES:-540672}
+max_javascript=${MAX_JAVASCRIPT_BYTES:-557056}
 max_css=${MAX_CSS_BYTES:-51200}
 
 test -f "$binary" || { echo "Missing binary: $binary" >&2; exit 1; }

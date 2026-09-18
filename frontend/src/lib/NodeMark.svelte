@@ -27,10 +27,15 @@
           d="M7 4h4v4.5H7zM15 4h4v4.5h-4zM11 8.5h4V13h-4z"
         />
       {/if}
+    {:else if kind === "breakpoint"}
+      <path class="dot" d="M4.5 12a7.5 7.5 0 1 0 15 0a7.5 7.5 0 1 0-15 0" />
     {:else}
       <path class="tone" d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0" />
       {#if kind === "running"}
         <path class="spinner" d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" />
+      {:else if kind === "paused"}
+        <path class="bar" d="M10 8v8" />
+        <path class="bar" d="M14 8v8" />
       {:else if kind === "succeeded"}
         <path class="line" d="M7.5 12.5 11 16l5.5-7" />
       {:else if kind === "failed"}
@@ -110,6 +115,27 @@
     color: var(--info);
   }
 
+  /* A debugger's red dot, drawn solid so a block carrying a breakpoint reads
+     as armed even before a run reaches it. */
+  .breakpoint .dot {
+    fill: var(--fail);
+    stroke: var(--fail-soft);
+    stroke-width: 3;
+  }
+
+  /* Waiting is not working, so the paused mark takes the warning colour
+     rather than the blue a running block spins in. */
+  .paused {
+    color: var(--warn);
+  }
+
+  .bar {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.6;
+    stroke-linecap: round;
+  }
+
   .succeeded {
     color: var(--ok);
   }
@@ -148,16 +174,29 @@
     animation: spin 0.9s linear infinite;
   }
 
+  /* The paused mark breathes instead of spinning: it is waiting for someone,
+     not working. */
+  .paused svg {
+    animation: breathe 1.6s ease-in-out infinite;
+  }
+
   @keyframes spin {
     to {
       transform: rotate(1turn);
     }
   }
 
-  /* Without motion the arc still reads as a part-drawn ring, so the block
-     keeps a mark of its own. */
+  @keyframes breathe {
+    50% {
+      opacity: 0.35;
+    }
+  }
+
+  /* Without motion the arc still reads as a part-drawn ring and the two bars
+     still read as paused, so the block keeps a mark of its own. */
   @media (prefers-reduced-motion: reduce) {
-    .running svg {
+    .running svg,
+    .paused svg {
       animation: none;
     }
   }
