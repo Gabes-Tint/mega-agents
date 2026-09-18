@@ -3603,14 +3603,24 @@ describe("zooming the canvas", () => {
     expect(level()).toHaveTextContent("100%");
   });
 
-  test("Ctrl and the wheel zooms, and the wheel alone scrolls", async () => {
+  test("the wheel zooms, on its own or with Ctrl held", async () => {
     render(Workspace);
 
     await fireEvent.wheel(canvas(), { deltaY: -100, ctrlKey: true });
     expect(level()).toHaveTextContent("128%");
 
+    // A notch on its own zooms too, now that it no longer scrolls.
     await fireEvent.wheel(canvas(), { deltaY: -100 });
-    expect(level()).toHaveTextContent("128%");
+    expect(level()).toHaveTextContent("165%");
+
+    // Two fingers on a trackpad wander sideways and move in fractions of a
+    // pixel: the canvas scrolls, and the zoom stays where it was.
+    await fireEvent.wheel(canvas(), { deltaX: -3, deltaY: -12.5 });
+    expect(level()).toHaveTextContent("165%");
+
+    // The shift key sends a wheel sideways rather than zooming.
+    await fireEvent.wheel(canvas(), { deltaY: -100, shiftKey: true });
+    expect(level()).toHaveTextContent("165%");
   });
 
   test("the zoom level is remembered", async () => {
