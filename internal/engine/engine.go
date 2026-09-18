@@ -60,6 +60,12 @@ type Task struct {
 	// WaitForAny runs the task once its needs settle if any of them arrived,
 	// with the inputs that did, as where exclusive branches join again.
 	WaitForAny bool
+	// Breakpoint pauses the run before the task runs, every time it runs,
+	// so whoever watches decides what happens next.
+	Breakpoint bool
+	// Resolve is the text the task is about to run, shown at a breakpoint
+	// and kept as the original beside an edit made there.
+	Resolve func(inputs []Input) Edit
 }
 
 // Loop repeats Body, a plan of its own, until the body task Until names
@@ -98,11 +104,17 @@ type Step struct {
 	// the step shows.
 	Loop      string `json:"loop,omitempty"`
 	Iteration int    `json:"iteration,omitempty"`
+	// Edited is set on a step that ran with an edit made at a breakpoint: it
+	// keeps both what ran and what the workflow holds.
+	Edited *Edited `json:"edited,omitempty"`
 }
 
 type Run struct {
 	Status Status `json:"status"`
 	Steps  []Step `json:"steps"`
+	// Paused are the breakpoints the run waits at, one for each block
+	// stopped before it runs; the blocks beside them keep running.
+	Paused []Pause `json:"paused,omitempty"`
 }
 
 // Observer receives a snapshot of the run each time a step changes status.
@@ -126,6 +138,16 @@ type Options struct {
 	// DefaultCancelGrace. A task that ignores cancellation cannot hold a run
 	// open forever.
 	CancelGrace time.Duration
+	// Loop names the loop whose body this plan is, and Iteration the repeat
+	// it runs, so a breakpoint inside a loop says where it stopped. A loop
+	// sets them on the plan it repeats.
+	Loop      string
+	Iteration int
+	// Pause answers a breakpoint: it is called before a task with one runs,
+	// on that task's own goroutine, and blocks for as long as the run stays
+	// paused, which is as long as it takes. Nil ignores breakpoints, so a run
+	// nobody watches never waits for an answer that cannot come.
+	Pause func(ctx context.Context, at Pause) Resume
 }
 
 // DefaultParallelism is how many independent tasks run at once.
@@ -175,7 +197,11 @@ func Execute(ctx context.Context, tasks []Task, options Options) (Run, error) {
 		// A settled run abandons the tasks that never reported, so the channel
 		// buffers their results rather than leaving their goroutines stuck.
 		finished: make(chan int, len(tasks)), progress: make(chan func()), grace: grace,
+		resolved: make(map[int]Edit), done: make(chan struct{}),
 	}
+	// Nothing a task reports after the run ended can change it, and its
+	// goroutine must not block trying.
+	defer close(execution.done)
 	execution.notify()
 	running := 0
 	for remaining := len(tasks); remaining > 0; {
@@ -266,6 +292,23 @@ type execution struct {
 	progress chan func()
 	begun    []time.Time
 	grace    time.Duration
+	// stepping makes the next task the run starts pause, after a resume that
+	// asked to step.
+	stepping bool
+	// resolved is what each paused task would have run, kept as the original
+	// beside an edit made at its breakpoint.
+	resolved map[int]Edit
+	// done is closed when the run has ended.
+	done chan struct{}
+}
+
+// report hands a change to the scheduler, which applies it while it waits.
+// A run that has already ended drops it rather than holding the goroutine.
+func (e *execution) report(apply func()) {
+	select {
+	case e.progress <- apply:
+	case <-e.done:
+	}
 }
 
 // noTask is what next returns when no task will report: a cancelled run
@@ -309,6 +352,8 @@ func (e *execution) settle(status Status, reason string) {
 		}
 		break
 	}
+	// A run that ends waits at no breakpoint, including one it never answered.
+	e.run.Paused = nil
 	for i := range e.tasks {
 		if e.settled[i] {
 			continue
@@ -324,6 +369,10 @@ func (e *execution) settle(status Status, reason string) {
 type taskResult struct {
 	result Result
 	err    error
+	// settled is the status of a task that never ran, such as one skipped at
+	// a breakpoint, with the reason it carries.
+	settled Status
+	reason  string
 }
 
 func (e *execution) notify() {
@@ -397,31 +446,49 @@ func (e *execution) settleStep(i int, status Status, reason string) {
 }
 
 func (e *execution) start(i int) {
+	inputs, _ := e.gather(e.tasks[i])
+	e.started[i] = true
+	log := e.log(i)
+	if e.pausing(i) {
+		e.pause(i, inputs, log)
+		return
+	}
+	e.begin(i, Edit{})
+	e.launch(i, inputs, log, Edit{})
+}
+
+// begin starts a task's clock, which a breakpoint before it never did.
+func (e *execution) begin(i int, edit Edit) {
 	task, step := e.tasks[i], &e.run.Steps[e.stepOf[i]]
-	inputs, _ := e.gather(task)
 	started, startedAt := e.stamp()
 	if e.begun == nil {
 		e.begun = make([]time.Time, len(e.tasks))
 	}
 	e.begun[i] = started
-	e.started[i] = true
 	step.Status, step.StartedAt = Running, startedAt
-	log := e.log(i)
-	fmt.Fprintf(log, "%s %s started at %s\n", Running.Emoji(), labelOf(task), startedAt)
+	if !edit.empty() {
+		step.Edited = &Edited{Ran: edit, Original: e.resolved[i]}
+	}
+	fmt.Fprintf(e.log(i), "%s %s started at %s\n", Running.Emoji(), labelOf(task), startedAt)
 	e.notify()
+}
+
+// launch runs the task on a goroutine of its own, with the edit made at its
+// breakpoint when there was one.
+func (e *execution) launch(i int, inputs []Input, log io.Writer, edit Edit) {
+	task := e.tasks[i]
 	if task.Loop != nil {
 		runner := e.loopRunner(i, inputs, log)
 		go func() {
 			result, err := runner.run()
-			e.results.Store(i, taskResult{result: result, err: err})
-			e.finished <- i
+			e.finish(i, taskResult{result: result, err: err})
 		}()
 		return
 	}
+	ctx := editing(e.ctx, edit)
 	go func() {
-		result, err := task.Run(e.ctx, inputs, log)
-		e.results.Store(i, taskResult{result: result, err: err})
-		e.finished <- i
+		result, err := task.Run(ctx, inputs, log)
+		e.finish(i, taskResult{result: result, err: err})
 	}()
 }
 
@@ -431,6 +498,13 @@ func (e *execution) complete(i int) {
 	task, step := e.tasks[i], &e.run.Steps[e.stepOf[i]]
 	finished, finishedAt := e.stamp()
 	e.settled[i] = true
+	if outcome.settled != "" {
+		// The task never ran: it was settled at the breakpoint before it.
+		step.Status, step.Error, step.FinishedAt = outcome.settled, outcome.reason, finishedAt
+		fmt.Fprintf(e.log(i), "%s %s %s: %s\n", outcome.settled.Emoji(), labelOf(task), outcome.settled, outcome.reason)
+		e.notify()
+		return
+	}
 	step.Details, step.FinishedAt = outcome.result.Details, finishedAt
 	elapsed := finished.Sub(e.begun[i]).Round(time.Millisecond)
 	log := e.log(i)
@@ -592,5 +666,5 @@ func snapshot(run Run) Run {
 		step.Outputs = maps.Clone(step.Outputs)
 		steps[i] = step
 	}
-	return Run{Status: run.Status, Steps: steps}
+	return Run{Status: run.Status, Steps: steps, Paused: slices.Clone(run.Paused)}
 }
