@@ -15,6 +15,7 @@
   import BlockIcon from "./BlockIcon.svelte";
   import NodeMark from "./NodeMark.svelte";
   import { endingNodeIds, statusMark } from "./nodeMarks.js";
+  import { arrowScope, routeArrow, type Box } from "./routing.js";
 
   let { graph }: { graph: GraphStore } = $props();
 
@@ -162,33 +163,43 @@
 
   const extent = $derived.by(() => edgeBounds());
 
-  // Point where the straight line to (targetX, targetY) crosses this box's
-  // border, so arrowheads stay visible instead of hiding under the box.
-  function borderPoint(
-    node: GraphNode,
-    x: number,
-    y: number,
-    targetX: number,
-    targetY: number,
-  ): { x: number; y: number } {
-    const dx = targetX - x;
-    const dy = targetY - y;
-    const t = Math.min(
-      dx === 0 ? Number.POSITIVE_INFINITY : node.w / 2 / Math.abs(dx),
-      dy === 0 ? Number.POSITIVE_INFINITY : node.h / 2 / Math.abs(dy),
-    );
-    return Number.isFinite(t) ? { x: x + dx * t, y: y + dy * t } : { x, y };
+  // Every block as the arrow router sees it, in canvas content space. The
+  // list is rebuilt whenever a block moves, and each arrow takes from it
+  // the blocks that stand in its own way.
+  const levels = $derived(
+    graph.nodes.map((node) => ({
+      id: node.id,
+      parentId: node.parentId,
+      box: boxOf(node),
+    })),
+  );
+
+  function boxOf(node: GraphNode): Box {
+    const origin = graph.absolutePosition(node);
+    return { x: origin.x, y: origin.y, w: node.w, h: node.h };
   }
 
-  function borderToward(node: GraphNode, x: number, y: number) {
-    const origin = graph.absolutePosition(node);
-    return borderPoint(
-      node,
-      origin.x + node.w / 2,
-      origin.y + node.h / 2,
-      x,
-      y,
+  // The way an arrow runs: orthogonal segments with rounded corners that go
+  // around the blocks drawn at its own level.
+  function routeOf(from: GraphNode, to: GraphNode) {
+    return routeArrow(
+      boxOf(from),
+      boxOf(to),
+      arrowScope(levels, from.id, to.id),
     );
+  }
+
+  // The arrow being drawn or moved, routed the same way, with the pointer
+  // standing in for the end that has not landed on a block yet.
+  function previewRoute(
+    active: NonNullable<typeof linking>,
+    anchor: GraphNode,
+  ) {
+    const pointer: Box = { x: active.x, y: active.y, w: 0, h: 0 };
+    const scope = arrowScope(levels, anchor.id, active.targetId);
+    return active.end === "to"
+      ? routeArrow(boxOf(anchor), pointer, scope)
+      : routeArrow(pointer, boxOf(anchor), scope);
   }
 
   // Top left corner of a handle, just outside the middle of a block's side.
@@ -202,24 +213,6 @@
       bottom: { x: middleX, y: y + node.h },
       left: { x: x - HANDLE_SIZE, y: middleY },
     }[side];
-  }
-
-  // Pulls a line's ends in, so an arrow's click target leaves the resize
-  // strips of the blocks it joins alone.
-  function inset(
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-  ) {
-    const length = Math.hypot(end.x - start.x, end.y - start.y);
-    const k = length > 20 ? 8 / length : 0;
-    const dx = (end.x - start.x) * k;
-    const dy = (end.y - start.y) * k;
-    return {
-      x1: start.x + dx,
-      y1: start.y + dy,
-      x2: end.x - dx,
-      y2: end.y - dy,
-    };
   }
 
   function contentPoint(event: { clientX: number; clientY: number }) {
@@ -615,26 +608,15 @@
         {@const from = nodeById(edge.from)}
         {@const to = nodeById(edge.to)}
         {#if from && to}
-          {@const fromPosition = graph.absolutePosition(from)}
-          {@const toPosition = graph.absolutePosition(to)}
-          {@const start = borderToward(
-            from,
-            toPosition.x + to.w / 2,
-            toPosition.y + to.h / 2,
-          )}
-          {@const end = borderToward(
-            to,
-            fromPosition.x + from.w / 2,
-            fromPosition.y + from.h / 2,
-          )}
+          {@const route = routeOf(from, to)}
           {@const selected = edge.id === graph.selectedEdgeId}
-          <line
+          <path
             class="edge-hit"
             role="option"
             tabindex="0"
             aria-selected={selected}
             aria-label="Arrow from {from.name} to {to.name}"
-            {...inset(start, end)}
+            d={route.hitPath}
             onpointerenter={() => showEnds(edge.id)}
             onpointerleave={leaveEnds}
             onclick={(event) => {
@@ -647,26 +629,23 @@
               event.preventDefault();
               graph.removeEdge(edge.id);
             }}
-          ></line>
-          <line
+          ></path>
+          <path
             class="edge-line"
             class:selected
             class:moving={linking?.edgeId === edge.id}
-            x1={start.x}
-            y1={start.y}
-            x2={end.x}
-            y2={end.y}
+            d={route.path}
             marker-end={selected
               ? "url(#edge-arrowhead-active)"
               : "url(#edge-arrowhead)"}
-          ></line>
+          ></path>
           {#if graph.portOf(edge)}
             <text
               class="edge-port"
               aria-hidden="true"
-              x={(start.x + end.x) / 2}
-              y={(start.y + end.y) / 2 - 4}
-              text-anchor="middle">{graph.portOf(edge)}</text
+              x={route.label.x}
+              y={route.label.y}
+              text-anchor={route.label.anchor}>{graph.portOf(edge)}</text
             >
           {/if}
           {#if (selected || hoverEdgeId === edge.id) && !linking}
@@ -676,8 +655,8 @@
               aria-hidden="true"
               onpointerenter={() => showEnds(edge.id)}
               onpointerleave={leaveEnds}
-              cx={start.x}
-              cy={start.y}
+              cx={route.start.x}
+              cy={route.start.y}
               r="5"
               onpointerdown={(event) =>
                 startLink(event, edge.to, "from", edge.id)}
@@ -688,8 +667,8 @@
               aria-hidden="true"
               onpointerenter={() => showEnds(edge.id)}
               onpointerleave={leaveEnds}
-              cx={end.x}
-              cy={end.y}
+              cx={route.end.x}
+              cy={route.end.y}
               r="5"
               onpointerdown={(event) =>
                 startLink(event, edge.from, "to", edge.id)}
@@ -701,19 +680,14 @@
     {#if linking}
       {@const anchor = nodeById(linking.anchorId)}
       {#if anchor}
-        {@const border = borderToward(anchor, linking.x, linking.y)}
-        {@const tail = linking.end === "to" ? border : linking}
-        {@const head = linking.end === "to" ? linking : border}
+        {@const preview = previewRoute(linking, anchor)}
         {@const refused = linking.targetId !== undefined && !linking.valid}
-        <line
+        <path
           class="edge-preview"
           class:invalid={refused}
-          x1={tail.x}
-          y1={tail.y}
-          x2={head.x}
-          y2={head.y}
+          d={preview.path}
           marker-end="url(#edge-arrowhead-{refused ? 'invalid' : 'active'})"
-        ></line>
+        ></path>
       {/if}
     {/if}
   </svg>
@@ -897,9 +871,13 @@
     overflow: visible;
   }
 
+  /* Arrows are routed paths, so they must never be filled: only the stroke
+     of the corners and runs is drawn. */
   .edge-line {
+    fill: none;
     stroke: var(--edge);
     stroke-width: 1.5;
+    stroke-linejoin: round;
   }
 
   .edge-arrow {
@@ -909,6 +887,7 @@
   /* A wide invisible stroke under each arrow takes its clicks, the only
      part of the layer that does. */
   .edge-hit {
+    fill: none;
     stroke: transparent;
     stroke-width: 12;
     pointer-events: stroke;
@@ -935,9 +914,11 @@
   }
 
   .edge-preview {
+    fill: none;
     stroke: var(--accent);
     stroke-width: 2;
     stroke-dasharray: 6 4;
+    stroke-linejoin: round;
   }
 
   .edge-preview.invalid {

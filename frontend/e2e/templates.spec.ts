@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { routePoint } from "./fixtures";
 
 // Templates come from the real backend's embedded workflows.
 test.describe("Templates", () => {
@@ -33,13 +34,14 @@ test.describe("Templates", () => {
       content: ".edges, .edge-line { pointer-events: auto !important; }",
     });
     const line = page.locator(".edge-line").first();
-    const box = await line.boundingBox();
-    if (!box) throw new Error("no arrow");
+    // Arrows bend around the blocks in the way, so the middle of the box
+    // around one need not be on it: walk the route instead.
+    const middle = await routePoint(line);
     const topmost = await page.evaluate(
       ([x, y]) => document.elementsFromPoint(x, y).map((el) => el.tagName),
-      [box.x + box.width / 2, box.y + box.height / 2],
+      [middle.x, middle.y],
     );
-    expect(topmost[0]).toBe("line");
+    expect(topmost[0]).toBe("path");
     await page.screenshot({ path: "test-results/template-gate-and-fix.png" });
   });
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { canvas, connect, mouseDrag } from "./fixtures";
+import { canvas, connect, mouseDrag, routePoints } from "./fixtures";
 
 test.describe("graph builder workspace", () => {
   test.beforeEach(async ({ page }) => {
@@ -319,32 +319,25 @@ test.describe("graph builder workspace", () => {
 
     const line = page.locator(".edge-line");
     await expect(line).toHaveCount(1);
-    // The arrow tip is trimmed to the project box's border on the side
-    // facing the source. The line's x2 is canvas-content space, so convert
-    // it with the canvas box and its scroll offset before comparing.
+    // The arrow stops on the border of the project box it points at, so its
+    // head stays visible instead of hiding under the box.
     await expect
       .poll(async () => {
-        const x2 = parseFloat(
-          await line.evaluate((el) => el.getAttribute("x2") ?? "0"),
+        const points = await routePoints(line, 40);
+        const tip = points[points.length - 1]!;
+        const box = await node.boundingBox();
+        const onSide =
+          Math.abs(tip.x - box.x) < 3 ||
+          Math.abs(tip.x - (box.x + box.width)) < 3 ||
+          Math.abs(tip.y - box.y) < 3 ||
+          Math.abs(tip.y - (box.y + box.height)) < 3;
+        return (
+          onSide &&
+          tip.x > box.x - 3 &&
+          tip.x < box.x + box.width + 3 &&
+          tip.y > box.y - 3 &&
+          tip.y < box.y + box.height + 3
         );
-        const canvasBox = await canvas(page).boundingBox();
-        const scrollLeft = await canvas(page).evaluate((el) => el.scrollLeft);
-        const targetBox = await node.boundingBox();
-        const sourceBox = await page
-          .getByRole("button", { name: "Project 1" })
-          .boundingBox();
-        const dx =
-          sourceBox.x +
-          sourceBox.width / 2 -
-          (targetBox.x + targetBox.width / 2);
-        const dy =
-          sourceBox.y +
-          sourceBox.height / 2 -
-          (targetBox.y + targetBox.height / 2);
-        const tx = dx === 0 ? Infinity : targetBox.width / 2 / Math.abs(dx);
-        const ty = dy === 0 ? Infinity : targetBox.height / 2 / Math.abs(dy);
-        const tip = targetBox.x + targetBox.width / 2 + dx * Math.min(tx, ty);
-        return Math.abs(canvasBox.x + x2 - scrollLeft - tip) < 3;
       })
       .toBe(true);
   });

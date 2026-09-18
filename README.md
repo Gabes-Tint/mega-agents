@@ -74,7 +74,12 @@ To connect two blocks, hover one and drag an arrow handle from any of its
 sides onto the other; the block under the pointer turns green where the arrow
 may go and red, along with the arrow, where it may not, and Escape cancels. An
 arrow from a block with several outputs (a command, schema check, router or
-loop) asks which output it takes. Click an arrow to select it, then press
+loop) asks which output it takes. An arrow leaves each block on the side
+facing the other one and runs in horizontal and vertical segments with
+rounded corners, going around the blocks between them instead of cutting
+across them, and its output label rides its longest straight run. Blocks
+moved around the canvas are given way to as they go. Click an arrow to
+select it, then press
 Delete or choose **Delete arrow**. Hovering or selecting an arrow shows its
 ends; drag either end onto another block to move it. Deleting an arrow
 between Git actions does not rejoin their sequence: the actions after it stop

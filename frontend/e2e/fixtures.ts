@@ -239,3 +239,33 @@ export async function connect(page: Page, from: Locator, to: Locator) {
     await menu.getByRole("menuitem").first().click();
   await expect(edges).toHaveCount(drawn + 1);
 }
+
+// An arrow is a routed SVG path in canvas content space. Walking it with
+// the path's own screen matrix gives the points it passes through in the
+// viewport, which is where blocks are measured.
+export async function routePoints(
+  arrow: Locator,
+  samples = 100,
+): Promise<{ x: number; y: number }[]> {
+  return arrow.evaluate((element, count) => {
+    const path = element as unknown as SVGPathElement;
+    const matrix = path.getScreenCTM();
+    const total = path.getTotalLength();
+    const points: { x: number; y: number }[] = [];
+    for (let step = 0; step <= count; step++) {
+      const at = path.getPointAtLength((total * step) / count);
+      const point = matrix ? at.matrixTransform(matrix) : at;
+      points.push({ x: point.x, y: point.y });
+    }
+    return points;
+  }, samples);
+}
+
+// A point a fraction of the way along an arrow, to click or hover it.
+export async function routePoint(
+  arrow: Locator,
+  at = 0.5,
+): Promise<{ x: number; y: number }> {
+  const points = await routePoints(arrow, 100);
+  return points[Math.round(at * 100)] ?? points[0]!;
+}
