@@ -30,6 +30,11 @@ type Env struct {
 	// Context bounds a run; nil stops it on an interrupt (Ctrl-C), which
 	// records the run as cancelled.
 	Context context.Context
+	// Stdin answers the breakpoints a run stops at.
+	Stdin io.Reader
+	// Interactive says whether a terminal is there to answer questions. A
+	// run without one never waits at a breakpoint.
+	Interactive bool
 }
 
 const usage = `Usage: mega-agents [command]
@@ -107,7 +112,8 @@ func runWorkflow(args []string, env Env) int {
 	if !ok {
 		return 2
 	}
-	record, execute, err := app.Runs{Store: store}.Start(request)
+	service := app.Runs{Store: store, Pause: answerBreakpoints(request, env)}
+	record, execute, err := service.Start(request)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return 2
@@ -125,7 +131,8 @@ func retryRun(args []string, env Env) int {
 	if !ok {
 		return 2
 	}
-	record, execute, err := app.Runs{Store: store}.Retry(args[0])
+	service := app.Runs{Store: store}
+	record, execute, err := service.Retry(args[0])
 	if errors.Is(err, runs.ErrNotFound) {
 		fmt.Fprintf(env.Stderr, "run %s not found\n", args[0])
 		return 1
@@ -175,6 +182,8 @@ func stepLine(step engine.Step) string {
 		return fmt.Sprintf("%s %s failed: %s", step.Status.Emoji(), step.Name, step.Error)
 	case engine.Skipped:
 		return fmt.Sprintf("%s %s skipped: %s", step.Status.Emoji(), step.Name, step.Error)
+	case engine.Paused:
+		return fmt.Sprintf("%s %s paused before it runs", step.Status.Emoji(), step.Name)
 	}
 	return ""
 }
@@ -273,6 +282,10 @@ func showRun(store *runs.Store, id string, env Env) int {
 	fmt.Fprint(env.Stdout, "\n")
 	if line := usageLine(record); line != "" {
 		fmt.Fprintln(env.Stdout, line)
+	}
+	for _, at := range record.Paused {
+		fmt.Fprintf(env.Stdout, "%s waiting before %s since %s\n", engine.Paused.Emoji(), labelOf(at), at.At)
+		showResolved(env.Stdout, at)
 	}
 	fmt.Fprint(env.Stdout, "\n")
 	for _, step := range record.Steps {

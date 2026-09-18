@@ -92,6 +92,14 @@ retry`) starts a new run of a failed, cancelled or interrupted run's workflow in
 which the steps that already succeeded give back their recorded outputs
 instead of running again.
 
+A command-line run meets the breakpoints saved in the workflow too. At a
+terminal it stops and asks — continue, step, skip or inspect what arrives —
+one question at a time. With no terminal (CI, a piped run, `make e2e`) it
+never waits for an answer that cannot come: it names the blocks whose
+breakpoints it is running past on stderr and carries on, so a headless run
+can never hang silently. `mega-agents runs show` says where a paused run
+waits and the prompt or command it is about to run.
+
 ## Blocks that run
 
 Steps run as soon as everything they need has finished, up to four at a
@@ -151,6 +159,33 @@ refs.
   exclusive branches again: the block runs as soon as its incoming blocks
   have settled if any of them arrived, with `{{result}}` naming the one that
   did, instead of being skipped because a branch was not taken.
+- **Breakpoints** stop a run *before* a block runs, like a debugger, so you
+  see what it is about to receive and can stop an expensive agent before it
+  spends anything. A breakpoint is a property of the block (`breakpoint: true`
+  in the workflow file, beside `start: true`), so it is saved with the flow and
+  survives a reload. The run reports `paused` with the block it waits before,
+  the values that arrived and the prompt or command it is about to run, and
+  waits indefinitely: the block's clock only starts when it runs. Only that
+  block waits — everything already running beside it keeps going, and blocks
+  that do not depend on it still start. Resume it with `POST
+  /api/runs/{id}/resume`:
+
+  ```sh
+  curl -X POST -H 'Content-Type: application/json' \
+    -d '{"nodeId": "a1", "action": "continue", "prompt": "Write the smallest fix"}' \
+    http://localhost:8080/api/runs/<run-id>/resume
+  ```
+
+  `continue` runs the block and goes on to the next breakpoint or the end,
+  `step` runs it and stops before the next block, and `skip` settles it as
+  skipped, which skips everything downstream of it as any other skip does. A
+  `prompt` or `command` runs the block with that text instead, **for this run
+  only**: the text is used as written, the saved workflow is never changed, and
+  the step records both what ran and what the workflow holds, so a recorded run
+  never misrepresents what was executed. `nodeId` may be left out when the run
+  waits at a single block. Resuming a run that is not paused is a conflict.
+  **Cancel run** works while paused. A breakpoint on a block inside a loop
+  stops on **every repeat**, and the pause says which repeat it is.
 - **Router** sends the one value connected to it down the first case whose
   CEL condition over `value` holds (for example `value.verdict == "approve"`),
   or down `default`, as `{"case": ..., "value": ...}`. Expressions are
