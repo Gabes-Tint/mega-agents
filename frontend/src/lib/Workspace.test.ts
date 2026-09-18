@@ -1819,14 +1819,16 @@ describe("graph builder workspace", () => {
 
     await drawArrow("Project 1", "Project 2");
 
-    // Project 2 centers at (480, 432); the trimmed line must stop on its top
-    // edge (y = 400) rather than at the hidden center point.
+    // Project 2 spans x 400 to 560 from y 400; the routed arrow must arrive
+    // on the top edge facing Project 1 rather than at the hidden centre.
     const line = canvas().querySelector(".edge-line");
     expect(line).not.toBeNull();
-    expect(parseFloat(line!.getAttribute("y2") ?? "")).toBeCloseTo(400, 0);
-    const x2 = parseFloat(line!.getAttribute("x2") ?? "");
-    expect(x2).toBeGreaterThan(400);
-    expect(x2).toBeLessThan(560);
+    const numbers = (line!.getAttribute("d") ?? "").match(/-?[\d.]+/g) ?? [];
+    const y = parseFloat(numbers[numbers.length - 1] ?? "");
+    const x = parseFloat(numbers[numbers.length - 2] ?? "");
+    expect(y).toBeCloseTo(400, 0);
+    expect(x).toBeGreaterThan(400);
+    expect(x).toBeLessThan(560);
   });
 
   async function githubWithActions(...labels: string[]): Promise<void> {
