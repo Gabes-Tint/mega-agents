@@ -90,6 +90,6 @@ func newHandler(assets fs.FS, service Runs, workflows WorkflowStore, health *age
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DirectoriesResponse{Path: absolute, Directories: directories})
 	})
-	mux.Handle("/", http.FileServer(http.FS(assets)))
+	mux.Handle("/", spaFileServer(assets, workflows))
 	return mux
 }

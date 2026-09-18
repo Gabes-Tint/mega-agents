@@ -37,6 +37,9 @@ test.describe("Workflow files", () => {
       page.getByRole("status", { name: "Workflow file" }),
     ).toHaveText(`Saved as ${name}`);
 
+    // Saving moved the address to the workflow, so a fresh editor starts
+    // from the scratch page again.
+    await page.goto("/");
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await expect(page.getByRole("button", { name: "GitHub 1" })).toHaveCount(0);
@@ -117,6 +120,7 @@ nodes:
     await expect(
       page.getByRole("status", { name: "Workflow file" }),
     ).toHaveText(`Saved as ${name}`);
+    await page.goto("/");
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await page.getByRole("button", { name: "Open…" }).click();

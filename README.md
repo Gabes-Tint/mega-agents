@@ -60,8 +60,21 @@ or the **Fit_ development flow**, the fitflow driver drawn as blocks: pick a
 story, whose call, slice, failing tests in a bounded loop, the capability
 rung, implementation loops that escalate mechanic → builder → solver, the
 pull request with review and CI fix rounds, merge, deploy and cleanup, with
-every stop handed to Gabriel or marked blocked. The graph in progress is also kept in
-the browser, so reloading the page does not lose it.
+every stop handed to Gabriel or marked blocked.
+
+Every saved workflow has its own address. **Open…** takes the editor to
+`/workflows/<name>`, so a workflow can be bookmarked, shared or reopened by
+link, and Back and Forward walk between the workflows that were open. **Save**
+moves the address to the workflow it has just written, replacing the entry
+instead of adding one, so Back never lands in the empty editor again. An
+address that names no saved workflow says which one is missing and offers the
+way back to the editor; the server answers 404 for it while still serving the
+editor, and a missing asset stays a plain 404 so a broken build is not hidden
+behind an HTML page.
+
+The unsaved graph in progress is the page at `/`, and it is kept in the browser,
+so reloading that page does not lose it; a saved workflow comes back from its
+file instead.
 
 As the graph changes, the editor's **Problems** panel lists what to fix
 before running: errors a run would stop on (a missing prompt, an arrow
