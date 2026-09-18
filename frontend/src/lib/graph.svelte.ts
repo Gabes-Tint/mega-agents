@@ -403,8 +403,6 @@ export class GraphStore {
   selectedId = $state<string | null>(null);
   // The selected arrow; selecting a block or an arrow clears the other.
   selectedEdgeId = $state<string | null>(null);
-  connecting = $state(false);
-  connectFromId = $state<string | null>(null);
   // Component type currently dragged from the palette; dataTransfer.getData
   // is protected while a drag is in flight, so the type travels through the
   // store to power live dragover validation on the canvas.
@@ -425,7 +423,6 @@ export class GraphStore {
     this.edges = workflow.edges ?? [];
     this.workflowName = workflow.name ?? "workflow";
     this.select(null);
-    this.cancelConnect();
     this.showRun([]);
     this.logNodeId = null;
   }
@@ -562,16 +559,6 @@ export class GraphStore {
       }
     }
     node.start = isStart;
-  }
-
-  startConnect(id: string): void {
-    this.connectFromId = id;
-    this.connecting = true;
-  }
-
-  cancelConnect(): void {
-    this.connecting = false;
-    this.connectFromId = null;
   }
 
   // Boxes connect through arrows only within their own level: two top-level
@@ -718,8 +705,6 @@ export class GraphStore {
     if (!this.selectedEdge) this.selectedEdgeId = null;
     if (this.logNodeId && removed.includes(this.logNodeId))
       this.logNodeId = null;
-    if (this.connectFromId && removed.includes(this.connectFromId))
-      this.cancelConnect();
   }
 
   hasChildren(id: string): boolean {

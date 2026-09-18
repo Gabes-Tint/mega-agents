@@ -4,10 +4,10 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   addAction,
   canvas,
+  connect,
   enlarge,
   mouseDrag,
   projectClone,
-  selectBlock,
   type ProjectClone,
 } from "./fixtures";
 
@@ -84,11 +84,11 @@ test.describe("Agent blocks", () => {
       .getByLabel("Prompt")
       .fill("Implement login on {{workspace.branch}}");
 
-    await selectBlock(
+    await connect(
+      page,
       page.getByRole("button", { name: "Create worktree", exact: true }),
+      agent,
     );
-    await page.getByRole("button", { name: "Connect" }).click();
-    await selectBlock(agent);
     await expect(canvas(page).locator(".edge-line")).toHaveCount(1);
     await page.getByRole("button", { name: "Run flow" }).click();
 
@@ -139,9 +139,7 @@ test.describe("Agent blocks", () => {
       .getByLabel("Continue the connected agent's conversation")
       .check();
 
-    await selectBlock(reviewer);
-    await page.getByRole("button", { name: "Connect" }).click();
-    await selectBlock(merger);
+    await connect(page, reviewer, merger);
     await page.getByRole("button", { name: "Run flow" }).click();
 
     const result = page.getByRole("region", { name: "Run result" });

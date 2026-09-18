@@ -327,15 +327,6 @@
       portMenu = null;
   }
 
-  function selectOrConnect(node: GraphNode): void {
-    if (graph.connecting && graph.connectFromId) {
-      graph.connect(graph.connectFromId, node.id);
-      graph.cancelConnect();
-      return;
-    }
-    graph.select(node.id);
-  }
-
   function draggedType(): NodeType | undefined {
     return (
       graph.draggingType ??
@@ -741,7 +732,7 @@
       style:height="{node.h}px"
       ondragstart={(event) => startNodeDrag(event, node)}
       ondragend={endNodeDrag}
-      onclick={() => selectOrConnect(node)}
+      onclick={() => graph.select(node.id)}
       onkeydown={(event) => {
         // Delete or Backspace deletes the focused block.
         if (event.key !== "Delete" && event.key !== "Backspace") return;

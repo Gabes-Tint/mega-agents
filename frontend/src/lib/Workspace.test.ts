@@ -58,6 +58,41 @@ function canvas() {
   return screen.getByRole("region", { name: "Graph canvas" });
 }
 
+// The middle of a block in canvas content coordinates. jsdom reports no
+// layout, so the point comes from the position the canvas gives the block,
+// which the canvas reads back the same way when the pointer moves over it.
+function middleOf(block: HTMLElement) {
+  const at = (name: string) => parseFloat(block.style.getPropertyValue(name));
+  return {
+    clientX: at("left") + at("width") / 2,
+    clientY: at("top") + at("height") / 2,
+  };
+}
+
+// Draws an arrow between two named blocks the way a user does: select the
+// source, press the arrow handle on its right side and release the pointer
+// over the target. A source with several outputs asks which one the arrow
+// takes, and it takes the first.
+async function drawArrow(from: string, to: string): Promise<void> {
+  await fireEvent.click(screen.getByRole("button", { name: from }));
+  // Handles show on the selected block first, so its own handle comes first.
+  const handle = canvas().querySelector('.link-handle[data-side="right"]');
+  if (!handle) throw new Error(`no arrow handle on ${from}`);
+  await fireEvent.pointerDown(handle, {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+  });
+  await fireEvent.pointerMove(
+    window,
+    middleOf(screen.getByRole("button", { name: to })),
+  );
+  await fireEvent.pointerUp(window);
+  const port = screen.queryAllByRole("menuitem")[0];
+  if (port) await fireEvent.click(port);
+}
+
 // fireEvent does not propagate coordinates in this environment, so drag
 // events that depend on clientX/clientY are dispatched manually. Svelte
 // applies DOM updates in a microtask after dispatchEvent returns, so the
@@ -1749,48 +1784,14 @@ describe("graph builder workspace", () => {
     expect(title?.querySelector(".start-flag")).toBeInTheDocument();
   });
 
-  test("connects two top-level boxes with an arrow from properties", async () => {
-    render(Workspace);
-
-    await dropComponent("Project");
-    await dropComponent("Project", 400, 400);
-    await fireEvent.click(screen.getByText("Project 1"));
-
-    const connect = screen.getByRole("button", { name: "Connect" });
-    await fireEvent.click(connect);
-    expect(connect).toBePressed();
-
-    await fireEvent.click(screen.getByText("Project 2"));
-
-    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(1);
-    expect(connect).not.toBePressed();
-  });
-
-  test("rejects connecting a box to a node on another level", async () => {
-    render(Workspace);
-
-    await dropComponent("Project");
-    await dropComponent("Agent");
-    const child = screen.getByRole("button", { name: "Agent 1" });
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-
-    await fireEvent.click(screen.getByText("Project 1"));
-
-    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(0);
-    expect(child).toBeInTheDocument();
-  });
-
   test("ignores a second connection attempt for the same pair", async () => {
     render(Workspace);
 
     await dropComponent("Project");
     await dropComponent("Project", 400, 400);
-    await fireEvent.click(screen.getByText("Project 1"));
 
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Project 2"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Project 2"));
+    await drawArrow("Project 1", "Project 2");
+    await drawArrow("Project 1", "Project 2");
 
     expect(canvas().querySelectorAll(".edge-line")).toHaveLength(1);
   });
@@ -1800,10 +1801,8 @@ describe("graph builder workspace", () => {
 
     await dropComponent("Project");
     await dropComponent("Project", 400, 400);
-    await fireEvent.click(screen.getByText("Project 1"));
 
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Project 2"));
+    await drawArrow("Project 1", "Project 2");
 
     // Project 2 centers at (480, 432); the trimmed line must stop on its top
     // edge (y = 400) rather than at the hidden center point.
@@ -1813,21 +1812,6 @@ describe("graph builder workspace", () => {
     const x2 = parseFloat(line!.getAttribute("x2") ?? "");
     expect(x2).toBeGreaterThan(400);
     expect(x2).toBeLessThan(560);
-  });
-
-  test("canceling connect mode deselects without drawing an edge", async () => {
-    render(Workspace);
-
-    await dropComponent("Project");
-    await dropComponent("Project", 400, 400);
-
-    const connect = screen.getByRole("button", { name: "Connect" });
-    await fireEvent.click(connect);
-    await fireEvent.click(connect);
-
-    expect(connect).not.toBePressed();
-    await fireEvent.click(screen.getByText("Project 2"));
-    expect(canvas().querySelectorAll(".edge-line")).toHaveLength(0);
   });
 
   async function githubWithActions(...labels: string[]): Promise<void> {
@@ -2286,9 +2270,7 @@ describe("graph builder workspace", () => {
     await fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Fixer" },
     });
-    await fireEvent.click(screen.getByText("Check"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Fixer"));
+    await drawArrow("Check", "Fixer");
 
     await fireEvent.click(screen.getByText("Check"));
     expect(fieldText("Schema")).toBe('{"type": "object"}');
@@ -2348,9 +2330,7 @@ describe("graph builder workspace", () => {
     await fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Fix" },
     });
-    await fireEvent.click(screen.getByText("Router 1"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Fix"));
+    await drawArrow("Router 1", "Fix");
     await fireEvent.click(screen.getByText("Router 1"));
 
     expect(screen.getByLabelText("Case 1 name")).toHaveValue("approved");
@@ -2794,9 +2774,7 @@ describe("graph builder workspace", () => {
     await dropComponent("Agent", 410, 410);
     // Beside the agent, which spans 410..570, and still inside the project.
     await dropComponent("Command", 572, 478);
-    await fireEvent.click(screen.getByText("Agent 1"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(screen.getByText("Command 1"));
+    await drawArrow("Agent 1", "Command 1");
     await fireEvent.click(screen.getByText("Command 1"));
 
     const field = screen.getByLabelText("Command");
@@ -3704,8 +3682,7 @@ describe("drawing arrows on the canvas", () => {
 
   test("an arrow is selected by clicking it and deleted with Delete", async () => {
     await twoProjects();
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(block("Project 2"));
+    await drawArrow("Project 1", "Project 2");
     const arrow = screen.getByRole("option", {
       name: "Arrow from Project 1 to Project 2",
     });
@@ -3728,8 +3705,7 @@ describe("drawing arrows on the canvas", () => {
 
   test("the properties panel deletes the selected arrow", async () => {
     await twoProjects();
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(block("Project 2"));
+    await drawArrow("Project 1", "Project 2");
     await fireEvent.click(
       screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
     );
@@ -3745,9 +3721,7 @@ describe("drawing arrows on the canvas", () => {
   test("dragging a selected arrow's head moves it onto another block", async () => {
     await twoProjects();
     await dropComponent("Project", 30, 400);
-    await fireEvent.click(block("Project 1"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(block("Project 2"));
+    await drawArrow("Project 1", "Project 2");
     await fireEvent.click(
       screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
     );
@@ -3771,9 +3745,7 @@ describe("drawing arrows on the canvas", () => {
 
   test("moving an arrow's tail onto a block with outputs asks which one", async () => {
     await gateAndAgents();
-    await fireEvent.click(block("Agent 1"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(block("Agent 2"));
+    await drawArrow("Agent 1", "Agent 2");
     await fireEvent.click(
       screen.getByRole("option", { name: "Arrow from Agent 1 to Agent 2" }),
     );
@@ -3814,8 +3786,7 @@ describe("drawing arrows on the canvas", () => {
     expect(preview()).not.toHaveClass("invalid");
     await fireEvent.pointerUp(window);
 
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(block("Project 2"));
+    await drawArrow("Project 1", "Project 2");
     await fireEvent.click(
       screen.getByRole("option", { name: "Arrow from Project 1 to Project 2" }),
     );
@@ -3834,9 +3805,7 @@ describe("drawing arrows on the canvas", () => {
   test("hovering an arrow shows its ends, which drag without selecting it", async () => {
     await twoProjects();
     await dropComponent("Project", 30, 400);
-    await fireEvent.click(block("Project 1"));
-    await fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await fireEvent.click(block("Project 2"));
+    await drawArrow("Project 1", "Project 2");
     const arrow = screen.getByRole("option", {
       name: "Arrow from Project 1 to Project 2",
     });
