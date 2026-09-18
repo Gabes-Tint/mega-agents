@@ -46,6 +46,11 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput) (engine.Task, erro
 	if err != nil {
 		return engine.Task{}, err
 	}
+	sources := planner.sourcesOf(needs)
+	sources.anyOne = planner.waitsForAny(node)
+	if err := checkTemplate(node.Command, sources); err != nil {
+		return fail("%v", err)
+	}
 	handlesFailure := false
 	for _, edge := range planner.request.Edges {
 		if edge.From != node.ID {
@@ -62,9 +67,9 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput) (engine.Task, erro
 	handlesFailure = handlesFailure || planner.loopOf(node).UntilNode == node.ID
 	limit := time.Duration(timeout * float64(time.Minute))
 	return engine.Task{
-		ID: node.ID, Name: node.Name, Kind: "command", Needs: needs, WaitForAny: planner.waitsForAny(node),
-		Resolve: func([]engine.Input) engine.Edit {
-			return engine.Edit{Command: node.Command}
+		ID: node.ID, Name: node.Name, Kind: "command", Needs: needs, WaitForAny: sources.anyOne,
+		Resolve: func(inputs []engine.Input) engine.Edit {
+			return engine.Edit{Command: renderShellTemplate(node.Command, inputs, sources)}
 		},
 		Run: func(ctx context.Context, inputs []engine.Input, log io.Writer) (engine.Result, error) {
 			environment := gitops.CleanEnvironment(os.Environ())
@@ -88,7 +93,8 @@ func (planner runPlanner) commandTask(node WorkflowNodeInput) (engine.Task, erro
 			}
 			ctx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
-			exitCode, output, err := runShell(ctx, dir, editedCommand(ctx, node.Command), environment, log)
+			command := editedCommand(ctx, renderShellTemplate(node.Command, inputs, sources))
+			exitCode, output, err := runShell(ctx, dir, command, environment, log)
 			details := map[string]any{"exitCode": exitCode, "output": output, "dir": dir}
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return engine.Result{Details: details}, fmt.Errorf("%s stopped after its %s timeout", node.Name, limit)

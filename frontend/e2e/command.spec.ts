@@ -81,6 +81,23 @@ test.describe("Command blocks", () => {
     await expect(gate).toHaveClass(/status-succeeded/);
   });
 
+  test("a command fills in the placeholders that reach it", async ({
+    page,
+  }) => {
+    const { gate, worktree } = await gatedWorktree(
+      page,
+      // The filled-in value is one quoted word, which still joins the path.
+      'test -f {{workspace.path}}/README.md && echo "on {{workspace.branch}} in {{workspace.path}}"',
+    );
+
+    await page.getByRole("button", { name: "Run flow" }).click();
+
+    const result = page.getByRole("region", { name: "Run result" });
+    await expect(result).toContainText("Run succeeded", { timeout: 15_000 });
+    await expect(result).toContainText(`on gate in ${worktree}`);
+    await expect(gate).toHaveClass(/status-succeeded/);
+  });
+
   test("a failing command sends its output to a fixer agent", async ({
     page,
   }) => {
