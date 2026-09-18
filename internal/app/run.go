@@ -158,6 +158,9 @@ func reuseSucceededSteps(tasks []engine.Task, previous runs.Record) {
 		details["reusedFrom"] = previous.ID
 		name := task.Name
 		tasks[i].Loop = nil
+		// A reused step gives back what it recorded instead of running, so
+		// there is nothing to stop before.
+		tasks[i].Breakpoint = false
 		tasks[i].Run = func(context.Context, []engine.Input, io.Writer) (engine.Result, error) {
 			return engine.Result{Outputs: outputs, Details: details}, nil
 		}

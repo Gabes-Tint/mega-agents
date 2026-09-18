@@ -98,7 +98,9 @@ one question at a time. With no terminal (CI, a piped run, `make e2e`) it
 never waits for an answer that cannot come: it names the blocks whose
 breakpoints it is running past on stderr and carries on, so a headless run
 can never hang silently. `mega-agents runs show` says where a paused run
-waits and the prompt or command it is about to run.
+waits and the prompt or command it is about to run. `mega-agents retry` meets
+the same breakpoints, except on the steps it reuses: a step that gives back
+what it recorded does not run, so nothing stops before it.
 
 ## Blocks that run
 

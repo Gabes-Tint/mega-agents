@@ -55,6 +55,37 @@ nodes:
 `, project)
 }
 
+// failingGateWorkflow is an agent followed by a gate that always fails and
+// carries the breakpoint, so a retry runs the gate again.
+func failingGateWorkflow(t *testing.T, project string) string {
+	t.Helper()
+	return fmt.Sprintf(`apiVersion: megaagents.dev/v1alpha1
+kind: Workflow
+metadata:
+  name: gated
+nodes:
+  api:
+    uses: project@v1
+    with:
+      path: %q
+    children:
+      coder:
+        uses: agent@v1
+        name: "Coder"
+        start: true
+        with:
+          backend: "claude"
+          prompt: "Write the fix"
+      gate:
+        uses: command@v1
+        name: "Tests"
+        needs: [coder]
+        breakpoint: true
+        with:
+          command: "exit 3"
+`, project)
+}
+
 // runAnswering runs the command line with a terminal that answers the
 // questions a breakpoint asks.
 func runAnswering(t *testing.T, answers string, args ...string) result {
@@ -153,6 +184,37 @@ func TestSkippingAtABreakpointAtATerminalSkipsTheRestOfTheFlow(t *testing.T) {
 	}
 	if got.code != 0 {
 		t.Fatalf("code = %d, want skipping a block not to fail the run", got.code)
+	}
+}
+
+func TestARetryAtATerminalStopsAtTheBreakpointsThatAreLeft(t *testing.T) {
+	t.Setenv("MEGA_AGENTS_HOME", t.TempDir())
+	fakeClaude(t)
+	project := t.TempDir()
+	path := writeWorkflow(t, "gated.yaml", failingGateWorkflow(t, project))
+	first := run(t, "run", path)
+	if first.code != 1 {
+		t.Fatalf("the first run = %d, want the gate to have failed\nstdout:\n%s\nstderr:\n%s",
+			first.code, first.stdout, first.stderr)
+	}
+	if !strings.Contains(first.stderr, "Ignoring the breakpoint on Tests") {
+		t.Fatalf("stderr = %q", first.stderr)
+	}
+	id := runID.FindStringSubmatch(first.stdout)
+	if id == nil {
+		t.Fatalf("no run id in:\n%s", first.stdout)
+	}
+
+	got := runAnswering(t, "k\n", "retry", id[1])
+
+	if !strings.Contains(got.stdout, "⏸️ Tests is about to run") {
+		t.Fatalf("the retry ran past the breakpoint it should have stopped at:\n%s", got.stdout)
+	}
+	if !strings.Contains(got.stdout, "⏭️ Tests skipped: skipped at a breakpoint") {
+		t.Fatalf("stdout does not report the skipped block:\n%s", got.stdout)
+	}
+	if strings.Contains(got.stdout, "⏸️ Coder is about to run") {
+		t.Fatalf("the retry stopped before a step it reused:\n%s", got.stdout)
 	}
 }
 

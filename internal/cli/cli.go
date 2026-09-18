@@ -131,7 +131,7 @@ func retryRun(args []string, env Env) int {
 	if !ok {
 		return 2
 	}
-	service := app.Runs{Store: store}
+	service := app.Runs{Store: store, Pause: retriedBreakpoints(store, args[0], env)}
 	record, execute, err := service.Retry(args[0])
 	if errors.Is(err, runs.ErrNotFound) {
 		fmt.Fprintf(env.Stderr, "run %s not found\n", args[0])

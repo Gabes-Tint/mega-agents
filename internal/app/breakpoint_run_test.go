@@ -289,6 +289,41 @@ func TestResumeRefusesWhatItCannotAnswer(t *testing.T) {
 	}
 }
 
+func TestARetryDoesNotStopBeforeTheStepsItReuses(t *testing.T) {
+	fakeClaude(t)
+	project := t.TempDir()
+	body := fmt.Sprintf(`{"name": "gated", "nodes": [
+		{"id": "p1", "type": "project", "name": "api", "path": %q},
+		{"id": "a1", "type": "agent", "name": "Coder", "parentId": "p1", "start": true,
+		 "backend": "claude", "prompt": "Write the fix", "breakpoint": true},
+		{"id": "c1", "type": "command", "name": "Tests", "parentId": "p1", "command": "exit 3"}
+	], "edges": [{"id": "e1", "from": "a1", "to": "c1"}]}`, project)
+	response, handler := postRun(t, body)
+	started := decodeRecord(t, response)
+	awaitPaused(t, handler, started.ID, "a1")
+	if code := resume(t, handler, started.ID, `{"action": "continue"}`); code != http.StatusAccepted {
+		t.Fatalf("resume = %d", code)
+	}
+	if first := awaitRun(t, handler, started.ID); first.Status != engine.Failed {
+		t.Fatalf("record = %+v, want the command to have failed", first)
+	}
+
+	retry := workflowRequest(t, handler, http.MethodPost, "/api/runs/"+started.ID+"/retry", "{}", "application/json")
+	if retry.Code != http.StatusAccepted {
+		t.Fatalf("retry = %d: %s", retry.Code, retry.Body.String())
+	}
+	// Nothing answers a breakpoint here, so a retry that stopped before the
+	// step it reuses would never finish.
+	record := awaitRun(t, handler, decodeRecord(t, retry).ID)
+
+	if record.Status != engine.Failed {
+		t.Fatalf("record = %+v", record)
+	}
+	if record.Steps[0].Status != engine.Succeeded || record.Steps[0].Details["reusedFrom"] != started.ID {
+		t.Fatalf("step = %+v, want the coder reused rather than stopped before", record.Steps[0])
+	}
+}
+
 func TestAPausedRunHasNothingToRetryYet(t *testing.T) {
 	fakeClaude(t)
 	response, handler := postRun(t, breakpointFlow(t))

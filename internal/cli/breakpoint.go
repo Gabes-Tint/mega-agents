@@ -11,6 +11,7 @@ import (
 
 	"github.com/Gabes-Tint/mega-agents/internal/app"
 	"github.com/Gabes-Tint/mega-agents/internal/engine"
+	"github.com/Gabes-Tint/mega-agents/internal/runs"
 )
 
 // breakpointBlocks names the blocks of a workflow that carry a breakpoint,
@@ -47,6 +48,21 @@ func answerBreakpoints(request app.WorkflowRequest, env Env) func(context.Contex
 	}
 	prompt := &terminalBreakpoints{env: env, reader: bufio.NewReader(env.Stdin)}
 	return prompt.answer
+}
+
+// retriedBreakpoints answers the breakpoints of the workflow a run recorded,
+// so a retry stops where the run it repeats would have. A run whose workflow
+// cannot be read stops nowhere; the retry itself then reports why.
+func retriedBreakpoints(store *runs.Store, id string, env Env) func(context.Context, string, engine.Pause) engine.Resume {
+	previous, err := store.Load(id)
+	if err != nil {
+		return nil
+	}
+	var request app.WorkflowRequest
+	if json.Unmarshal(previous.Graph, &request) != nil {
+		return nil
+	}
+	return answerBreakpoints(request, env)
 }
 
 // joinNames spells a list as "a, b and c".
