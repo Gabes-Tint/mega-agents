@@ -11,6 +11,7 @@
     type GraphNode,
     type NodeType,
   } from "./graph.svelte.js";
+  import { edgeHue, linkSourceId } from "./edgeTint.js";
   import { hideDragImage } from "./dragImage.js";
   import BlockIcon from "./BlockIcon.svelte";
   import NodeMark from "./NodeMark.svelte";
@@ -331,6 +332,15 @@
     id: string,
   ): [string, string] {
     return active.end === "to" ? [active.anchorId, id] : [id, active.anchorId];
+  }
+
+  // The block an arrow being drawn leaves, which colours the preview. A tail
+  // dragged over empty canvas has none yet, and the preview keeps the accent.
+  function linkSource(
+    active: NonNullable<typeof linking>,
+  ): GraphNode | undefined {
+    const id = linkSourceId(active);
+    return id === undefined ? undefined : nodeById(id);
   }
 
   function startLink(
@@ -697,6 +707,11 @@
           style:height="{extent.height}px"
         >
           <defs>
+            <!-- One head for every arrow: a marker does not inherit the
+               colour of the path that carries it, but context-stroke asks
+               for that path's own stroke, so the head follows the line
+               through its source colour, the selected weight and the red
+               of a refused target without a marker per state. -->
             <marker
               id="edge-arrowhead"
               markerWidth="8"
@@ -705,27 +720,7 @@
               refY="4"
               orient="auto"
             >
-              <path class="edge-arrow" d="M0 0 L8 4 L0 8 Z" />
-            </marker>
-            <marker
-              id="edge-arrowhead-active"
-              markerWidth="8"
-              markerHeight="8"
-              refX="7"
-              refY="4"
-              orient="auto"
-            >
-              <path class="edge-arrow-active" d="M0 0 L8 4 L0 8 Z" />
-            </marker>
-            <marker
-              id="edge-arrowhead-invalid"
-              markerWidth="8"
-              markerHeight="8"
-              refX="7"
-              refY="4"
-              orient="auto"
-            >
-              <path class="edge-arrow-invalid" d="M0 0 L8 4 L0 8 Z" />
+              <path fill="context-stroke" d="M0 0 L8 4 L0 8 Z" />
             </marker>
           </defs>
           <g role="listbox" aria-label="Arrows">
@@ -735,6 +730,13 @@
               {#if from && to}
                 {@const route = routeOf(from, to)}
                 {@const selected = edge.id === graph.selectedEdgeId}
+                {#if selected}
+                  <!-- The selected arrow keeps its source colour, so it is
+                     marked the way a selected block is: with a ring of the
+                     accent around it, which reads on every hue. -->
+                  <path class="edge-halo" aria-hidden="true" d={route.path}
+                  ></path>
+                {/if}
                 <path
                   class="edge-hit"
                   role="option"
@@ -760,10 +762,9 @@
                   class="edge-line"
                   class:selected
                   class:moving={linking?.edgeId === edge.id}
+                  style:--block-hue={edgeHue(from.type)}
                   d={route.path}
-                  marker-end={selected
-                    ? "url(#edge-arrowhead-active)"
-                    : "url(#edge-arrowhead)"}
+                  marker-end="url(#edge-arrowhead)"
                 ></path>
                 {#if graph.portOf(edge)}
                   <text
@@ -812,10 +813,9 @@
               <path
                 class="edge-preview"
                 class:invalid={refused}
+                style:--block-hue={edgeHue(linkSource(linking)?.type)}
                 d={preview.path}
-                marker-end="url(#edge-arrowhead-{refused
-                  ? 'invalid'
-                  : 'active'})"
+                marker-end="url(#edge-arrowhead)"
               ></path>
             {/if}
           {/if}
@@ -1137,15 +1137,15 @@
      size on screen at every zoom: a stroke that scaled with the content
      would all but disappear once the whole flow is on screen, and an 8px
      target would be 2px wide at a quarter size. */
+  /* An arrow is drawn in the colour of the block it leaves, so a line can
+     be traced back to its source without following it. The canvas hands it
+     that block's hue and the stylesheet derives the accent a block already
+     wears; an arrow whose source has no hue keeps the neutral colour. */
   .edge-line {
     fill: none;
-    stroke: var(--edge);
+    stroke: var(--block-accent, var(--edge));
     stroke-width: calc(1.5 * var(--screen-px));
     stroke-linejoin: round;
-  }
-
-  .edge-arrow {
-    fill: var(--edge);
   }
 
   /* A wide invisible stroke under each arrow takes its clicks, the only
@@ -1159,38 +1159,45 @@
     outline: none;
   }
 
-  .edge-hit:hover + .edge-line {
-    stroke: var(--text-muted);
-  }
-
+  /* Weight, not colour, answers the pointer and the keyboard now that the
+     colour says where the arrow comes from. */
+  .edge-hit:hover + .edge-line,
   .edge-line.selected,
   .edge-hit:focus-visible + .edge-line {
-    stroke: var(--accent);
     stroke-width: calc(2.25 * var(--screen-px));
+  }
+
+  /* The ring around the selected arrow, the same accent a selected block is
+     ringed with, so selection reads even on a block whose own hue is close
+     to the accent. It is drawn before the arrow, and so under it. */
+  .edge-halo {
+    fill: none;
+    stroke: var(--focus);
+    stroke-width: calc(7 * var(--screen-px));
+    stroke-linejoin: round;
+    stroke-linecap: round;
   }
 
   .edge-line.moving {
     opacity: 0.3;
   }
 
-  .edge-arrow-active {
-    fill: var(--accent);
-  }
-
+  /* The arrow being drawn takes its source's colour too, and falls back to
+     the accent while the pointer has not found a source. */
   .edge-preview {
     fill: none;
-    stroke: var(--accent);
+    stroke: var(--block-accent, var(--accent));
     stroke-width: calc(2 * var(--screen-px));
     stroke-dasharray: calc(6 * var(--screen-px)) calc(4 * var(--screen-px));
     stroke-linejoin: round;
   }
 
+  /* A refused target drops the source colour for the failure red and breaks
+     the line into dots, which still says no when the source is itself red. */
   .edge-preview.invalid {
     stroke: var(--fail);
-  }
-
-  .edge-arrow-invalid {
-    fill: var(--fail);
+    stroke-dasharray: calc(1 * var(--screen-px)) calc(4 * var(--screen-px));
+    stroke-linecap: round;
   }
 
   /* The ends of the selected arrow, dragged onto another block to move it. */
@@ -1291,6 +1298,9 @@
     box-shadow: inset 0 0 0 2px var(--focus);
   }
 
+  /* The output an arrow takes, written on its route. It stays in the muted
+     text colour rather than the arrow's: the block tints are chosen to stand
+     out as a line, not to carry 11px text over the canvas. */
   .edge-port {
     fill: var(--text-muted);
     font-size: 11px;

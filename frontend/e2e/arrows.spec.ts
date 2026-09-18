@@ -218,10 +218,7 @@ test.describe("drawing arrows by dragging", () => {
     await expect(preview).not.toHaveClass(/invalid/);
     await page.mouse.move(box.x + 260, box.y + box.height - 20, { steps: 6 });
     await expect(preview).toHaveClass(/invalid/);
-    await expect(preview).toHaveAttribute(
-      "marker-end",
-      "url(#edge-arrowhead-invalid)",
-    );
+    await expect(preview).toHaveAttribute("marker-end", "url(#edge-arrowhead)");
     await page.mouse.up();
 
     await connect(page, coder, reviewer);
