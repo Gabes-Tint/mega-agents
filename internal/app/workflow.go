@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Gabes-Tint/mega-agents/internal/cron"
 	"github.com/Gabes-Tint/mega-agents/internal/router"
 )
 
@@ -96,9 +97,12 @@ func (node WorkflowNodeInput) ignoreLabels() []string {
 }
 
 type WorkflowRequest struct {
-	Name  string              `json:"name"`
-	Nodes []WorkflowNodeInput `json:"nodes"`
-	Edges []WorkflowEdgeInput `json:"edges"`
+	Name string `json:"name"`
+	// Schedule is the cron expression the workflow runs itself on, empty
+	// when it only runs when someone asks for it.
+	Schedule string              `json:"schedule,omitempty"`
+	Nodes    []WorkflowNodeInput `json:"nodes"`
+	Edges    []WorkflowEdgeInput `json:"edges"`
 }
 
 var knownComponentTypes = map[string]bool{
@@ -366,6 +370,11 @@ func validateGraph(request WorkflowRequest) (map[string]WorkflowNodeInput, error
 	if len(request.Nodes) == 0 {
 		return nil, fmt.Errorf("no nodes to export")
 	}
+	if request.Schedule != "" {
+		if err := cron.Valid(request.Schedule); err != nil {
+			return nil, err
+		}
+	}
 	for _, node := range request.Nodes {
 		if !knownComponentTypes[node.Type] {
 			return nil, fmt.Errorf("unknown component type %q", node.Type)
@@ -441,6 +450,13 @@ func BuildWorkflowYAML(request WorkflowRequest) (string, error) {
 	builder.WriteString("metadata:\n")
 	builder.WriteString(fmt.Sprintf("  name: %s\n", metadataName))
 	builder.WriteString("\n")
+	if request.Schedule != "" {
+		// The schedule sits beside the graph rather than in it: it says when
+		// the whole workflow runs, so it travels with the file and can be
+		// read, committed and diffed like everything else about it.
+		builder.WriteString(fmt.Sprintf("schedule: %s\n", yamlString(request.Schedule)))
+		builder.WriteString("\n")
+	}
 	builder.WriteString("nodes:\n")
 	for _, node := range request.Nodes {
 		if node.ParentID != "" {

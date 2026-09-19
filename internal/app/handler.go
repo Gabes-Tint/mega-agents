@@ -29,7 +29,22 @@ func NewHandler(assets fs.FS) http.Handler {
 }
 
 // NewHandlerWithHealth serves the editor, reporting the given agent check.
+// Nothing is scheduled: only a server that means to keep the schedule takes
+// the scheduler NewEditor hands back.
 func NewHandlerWithHealth(assets fs.FS, health *agents.HealthChecker) http.Handler {
+	handler, _ := NewEditor(assets, health)
+	return handler
+}
+
+// NewEditor serves the editor and hands back the scheduler for the
+// workflows it has saved. The scheduler comes back rather than starting
+// itself, so only a real server keeps the schedule, and it shares the
+// editor's runs: a scheduled run that stops at a breakpoint waits for the
+// same resume endpoint as any other.
+func NewEditor(assets fs.FS, health *agents.HealthChecker) (http.Handler, Scheduler) {
+	if health == nil {
+		health = agents.NewHealthChecker()
+	}
 	store, err := runs.DefaultStore()
 	if err != nil {
 		// Without a home there is nowhere to record runs; starting one then
@@ -46,17 +61,21 @@ func NewHandlerWithHealth(assets fs.FS, health *agents.HealthChecker) http.Handl
 }
 
 func NewHandlerWithRuns(assets fs.FS, service Runs, workflows WorkflowStore) http.Handler {
-	return newHandler(assets, service, workflows, agents.NewHealthChecker())
+	handler, _ := newHandler(assets, service, workflows, agents.NewHealthChecker())
+	return handler
 }
 
-func newHandler(assets fs.FS, service Runs, workflows WorkflowStore, health *agents.HealthChecker) http.Handler {
+func newHandler(
+	assets fs.FS, service Runs, workflows WorkflowStore, health *agents.HealthChecker,
+) (http.Handler, Scheduler) {
 	mux := http.NewServeMux()
 	registerAgentHealthHandler(mux, health)
 	registerWorkflowYAMLHandler(mux)
 	registerProblemsHandler(mux)
 	registerWorkflowStoreHandler(mux, workflows)
+	registerScheduleHandler(mux, workflows)
 	registerTemplateHandler(mux)
-	registerRunHandler(mux, service)
+	scheduled := registerRunHandler(mux, service)
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(StatusResponse{Message: "Mega Agents backend is running"})
@@ -91,5 +110,5 @@ func newHandler(assets fs.FS, service Runs, workflows WorkflowStore, health *age
 		_ = json.NewEncoder(w).Encode(DirectoriesResponse{Path: absolute, Directories: directories})
 	})
 	mux.Handle("/", spaFileServer(assets, workflows))
-	return mux
+	return mux, Scheduler{Workflows: workflows, Runs: scheduled}
 }

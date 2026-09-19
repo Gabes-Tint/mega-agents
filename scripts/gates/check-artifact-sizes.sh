@@ -41,11 +41,15 @@ max_binary=${MAX_BINARY_BYTES:-33554432}
 # and is held to its own budget below, so the drop is what the first paint
 # stops paying for, not weight that went away.
 max_javascript=${MAX_JAVASCRIPT_BYTES:-200704}
-# 544 KiB: every chunk together, the figure this gate used to check. Splitting
-# the editor out added 1901 bytes of chunk boilerplate (549933 to 551834), so
-# the budget review last set stands, and a lazily fetched chunk still cannot
-# grow without a deliberate re-baseline.
-max_total_javascript=${MAX_TOTAL_JAVASCRIPT_BYTES:-557056}
+# 548 KiB: every chunk together, the figure this gate used to check. Splitting
+# the editor out added 1901 bytes of chunk boilerplate (549933 to 551834),
+# which the 544 KiB budget still covered. The workflows page, where a
+# workflow is put on a cron schedule and shown the runs it has coming, then
+# took the whole bundle to 559984 bytes: it is a page of its own, fetched
+# only when it is opened, so the first paint pays nothing for it and its
+# weight lands here. Re-baselined deliberately in review to the snug step
+# above that figure rather than trimming the page.
+max_total_javascript=${MAX_TOTAL_JAVASCRIPT_BYTES:-561152}
 max_css=${MAX_CSS_BYTES:-51200}
 
 test -f "$binary" || { echo "Missing binary: $binary" >&2; exit 1; }

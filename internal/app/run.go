@@ -74,7 +74,13 @@ type Execution func(ctx context.Context, observe func(runs.Record)) runs.Record
 // along their arrows, or a plain fetch when it holds no actions. Actions not
 // reachable from a starting action do not run.
 func (service Runs) Start(request WorkflowRequest) (runs.Record, Execution, error) {
-	return service.start(request, nil)
+	return service.start(request, nil, runs.ByHand)
+}
+
+// StartScheduled records a run the workflow's own schedule started, so the
+// run history can tell it from one someone asked for.
+func (service Runs) StartScheduled(request WorkflowRequest) (runs.Record, Execution, error) {
+	return service.start(request, nil, runs.Scheduled)
 }
 
 var errNothingToRetry = errors.New("there is nothing to retry")
@@ -100,10 +106,13 @@ func (service Runs) Retry(id string) (runs.Record, Execution, error) {
 	if err := json.Unmarshal(previous.Graph, &request); err != nil || len(previous.Graph) == 0 {
 		return runs.Record{}, nil, fmt.Errorf("run %s did not record its workflow; %w", id, errNothingToRetry)
 	}
-	return service.start(request, &previous)
+	// Someone asked for the retry, whatever started the run it retries.
+	return service.start(request, &previous, runs.ByHand)
 }
 
-func (service Runs) start(request WorkflowRequest, previous *runs.Record) (runs.Record, Execution, error) {
+func (service Runs) start(
+	request WorkflowRequest, previous *runs.Record, trigger runs.Trigger,
+) (runs.Record, Execution, error) {
 	tasks, err := planRun(request)
 	if err != nil {
 		return runs.Record{}, nil, err
@@ -123,6 +132,7 @@ func (service Runs) start(request WorkflowRequest, previous *runs.Record) (runs.
 	if err != nil {
 		return runs.Record{}, nil, err
 	}
+	record.Trigger = trigger
 	record.Graph, _ = json.Marshal(request)
 	if previous != nil {
 		record.RetryOf = previous.ID
@@ -760,7 +770,11 @@ func projectDir(project WorkflowNodeInput) (string, error) {
 	return project.Path, nil
 }
 
-func registerRunHandler(mux *http.ServeMux, service Runs) {
+// registerRunHandler serves runs and returns the service the endpoints use,
+// which answers breakpoints through the editor. The scheduler runs
+// workflows through the same service, so its runs pause and resume the same
+// way.
+func registerRunHandler(mux *http.ServeMux, service Runs) Runs {
 	// Cancel functions of the runs this server is executing, by run id.
 	var active sync.Map
 	// The editor answers the breakpoints its runs stop at, so the server
@@ -888,6 +902,8 @@ func registerRunHandler(mux *http.ServeMux, service Runs) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, text)
 	})
+
+	return service
 }
 
 func storeError(w http.ResponseWriter, what string, err error) {

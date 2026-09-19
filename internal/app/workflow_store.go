@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Gabes-Tint/mega-agents/internal/megahome"
+	"gopkg.in/yaml.v3"
 )
 
 var workflowName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -31,6 +32,14 @@ type WorkflowStore struct {
 type WorkflowSummary struct {
 	Name      string `json:"name"`
 	UpdatedAt string `json:"updatedAt"`
+	// Schedule is the cron expression the workflow runs itself on, empty
+	// when it has none.
+	Schedule string `json:"schedule,omitempty"`
+	// NextRuns are the runs the schedule still has coming, so the list can
+	// show when a workflow will next start without reading the expression
+	// itself. It is empty for a workflow with no schedule, and for one
+	// whose expression names a date that never comes round.
+	NextRuns []string `json:"nextRuns,omitempty"`
 }
 
 // DefaultWorkflowStore keeps workflows under the Mega Agents home.
@@ -126,10 +135,64 @@ func (store WorkflowStore) List() ([]WorkflowSummary, error) {
 		if err != nil {
 			continue
 		}
-		workflows = append(workflows, WorkflowSummary{Name: name, UpdatedAt: info.ModTime().UTC().Format(time.RFC3339)})
+		schedule, err := store.Schedule(name)
+		if err != nil {
+			continue
+		}
+		workflows = append(workflows, summarise(name, info.ModTime(), schedule))
 	}
 	slices.SortFunc(workflows, func(a, b WorkflowSummary) int { return strings.Compare(a.Name, b.Name) })
 	return workflows, nil
+}
+
+// Schedule is the cron expression the named workflow runs itself on, read
+// without rebuilding its whole graph so listing many workflows stays cheap.
+func (store WorkflowStore) Schedule(name string) (string, error) {
+	if err := checkWorkflowName(name); err != nil {
+		return "", errWorkflowNotFound
+	}
+	document, err := os.ReadFile(store.Path(name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", errWorkflowNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("cannot read workflow %s: %w", name, err)
+	}
+	var head struct {
+		Schedule string `yaml:"schedule"`
+	}
+	if err := yaml.Unmarshal(document, &head); err != nil {
+		return "", fmt.Errorf("cannot read the schedule of workflow %s: %w", name, err)
+	}
+	return strings.TrimSpace(head.Schedule), nil
+}
+
+// SetSchedule puts the workflow on the schedule, or takes it off with an
+// empty expression, leaving the graph it is on alone.
+func (store WorkflowStore) SetSchedule(name string, schedule string) (WorkflowSummary, error) {
+	request, err := store.Load(name)
+	if err != nil {
+		return WorkflowSummary{}, err
+	}
+	request.Schedule = strings.TrimSpace(schedule)
+	if err := store.Save(name, request); err != nil {
+		return WorkflowSummary{}, err
+	}
+	return summarise(name, time.Now(), request.Schedule), nil
+}
+
+// summarise describes one saved workflow, working out the runs its schedule
+// still has coming.
+func summarise(name string, updatedAt time.Time, schedule string) WorkflowSummary {
+	summary := WorkflowSummary{
+		Name:      name,
+		UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
+		Schedule:  schedule,
+	}
+	if schedule != "" {
+		summary.NextRuns = nextRuns(schedule, time.Now())
+	}
+	return summary
 }
 
 func registerWorkflowStoreHandler(mux *http.ServeMux, store WorkflowStore) {
@@ -172,7 +235,7 @@ func registerWorkflowStoreHandler(mux *http.ServeMux, store WorkflowStore) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, WorkflowSummary{Name: r.PathValue("name"), UpdatedAt: time.Now().UTC().Format(time.RFC3339)})
+		writeJSON(w, http.StatusOK, summarise(r.PathValue("name"), time.Now(), strings.TrimSpace(request.Schedule)))
 	})
 
 	// Import only translates a YAML document into the graph; it saves nothing.

@@ -19,7 +19,12 @@
     type PanelLayout,
     type PanelName,
   } from "./panelLayout.js";
-  import { parseRoute, workflowPath, type Route } from "./workflowUrl.js";
+  import {
+    parseRoute,
+    workflowPath,
+    SCHEDULES_PATH,
+    type Route,
+  } from "./workflowUrl.js";
 
   // What the backend said about itself, shown in the status bar.
   let { status = "" }: { status?: string } = $props();
@@ -749,6 +754,7 @@
       <button type="button" class="ghost" onclick={() => void downloadYaml()}>
         Download YAML
       </button>
+      <a class="ghost ghost-like" href={SCHEDULES_PATH}>Schedules…</a>
     </div>
     <div class="spacer"></div>
     <div class="group" role="group" aria-label="Run actions">

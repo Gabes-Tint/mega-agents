@@ -51,9 +51,10 @@ func hasAsset(assets fs.FS, requested string) bool {
 }
 
 // editorPageExists reports whether the editor has something to show at the
-// path: the scratch graph at the root, or a saved workflow.
+// path: the scratch graph at the root, the list of saved workflows and their
+// schedules, or a saved workflow.
 func editorPageExists(requested string, workflows WorkflowStore) bool {
-	if requested == "/" {
+	if requested == "/" || requested == "/workflows" {
 		return true
 	}
 	name, isWorkflow := strings.CutPrefix(requested, "/workflows/")
