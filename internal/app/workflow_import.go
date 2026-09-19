@@ -33,7 +33,8 @@ type yamlWorkflow struct {
 	Metadata   struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
-	Nodes yaml.Node `yaml:"nodes"`
+	Schedule string    `yaml:"schedule"`
+	Nodes    yaml.Node `yaml:"nodes"`
 }
 
 // ParseWorkflowYAML rebuilds the editor graph from a workflow document as
@@ -51,7 +52,7 @@ func ParseWorkflowYAML(document []byte) (WorkflowRequest, error) {
 	if workflow.APIVersion != workflowAPIVersion {
 		return WorkflowRequest{}, fmt.Errorf("apiVersion %q is not supported; use %s", workflow.APIVersion, workflowAPIVersion)
 	}
-	request := WorkflowRequest{Name: workflow.Metadata.Name}
+	request := WorkflowRequest{Name: workflow.Metadata.Name, Schedule: strings.TrimSpace(workflow.Schedule)}
 	if request.Name == "" {
 		request.Name = "workflow"
 	}

@@ -40,9 +40,23 @@ var ErrNotFound = errors.New("not found")
 // identifier restricts run and step ids to one safe path segment.
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
+// Trigger says what started a run.
+type Trigger string
+
+const (
+	// ByHand marks a run someone started, from the editor or the command
+	// line. A record written before runs recorded what started them has no
+	// trigger at all, and is read as one started by hand.
+	ByHand Trigger = "manual"
+	// Scheduled marks a run the workflow's own schedule started.
+	Scheduled Trigger = "schedule"
+)
+
 type Record struct {
-	ID         string        `json:"id"`
-	Workflow   string        `json:"workflow"`
+	ID       string `json:"id"`
+	Workflow string `json:"workflow"`
+	// Trigger says whether someone started this run or its schedule did.
+	Trigger    Trigger       `json:"trigger,omitempty"`
 	Status     engine.Status `json:"status"`
 	StartedAt  string        `json:"startedAt"`
 	FinishedAt string        `json:"finishedAt,omitempty"`

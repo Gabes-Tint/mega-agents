@@ -10,6 +10,14 @@ describe("what the address bar points at", () => {
     expect(parseRoute("")).toEqual({ kind: "scratch" });
   });
 
+  test("the workflows path is the list of workflows and their schedules", () => {
+    expect(parseRoute("/workflows")).toEqual({ kind: "schedules" });
+  });
+
+  test("a trailing slash still opens the list", () => {
+    expect(parseRoute("/workflows/")).toEqual({ kind: "schedules" });
+  });
+
   test("a workflow path names the saved workflow it opens", () => {
     expect(parseRoute("/workflows/issue-to-pr")).toEqual({
       kind: "workflow",
@@ -35,17 +43,6 @@ describe("what the address bar points at", () => {
     expect(parseRoute("/workflows/%zz")).toEqual({
       kind: "unknown",
       path: "/workflows/%zz",
-    });
-  });
-
-  test("the workflow list itself is not a workflow", () => {
-    expect(parseRoute("/workflows")).toEqual({
-      kind: "unknown",
-      path: "/workflows",
-    });
-    expect(parseRoute("/workflows/")).toEqual({
-      kind: "unknown",
-      path: "/workflows/",
     });
   });
 

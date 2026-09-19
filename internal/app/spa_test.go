@@ -117,3 +117,18 @@ func TestUnknownAPIPathStaysNotFoundAndIsNotTheEditor(t *testing.T) {
 		t.Fatalf("body = %q, want a plain not found", body)
 	}
 }
+
+// The list of workflows and their schedules is a page of the editor, so a
+// link straight to it is served like any other.
+func TestLinkToTheWorkflowListServesTheEditor(t *testing.T) {
+	handler := spaHandler(t)
+
+	response := get(t, handler, "/workflows")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if body := response.Body.String(); body != indexDocument {
+		t.Fatalf("body = %q, want the index document", body)
+	}
+}

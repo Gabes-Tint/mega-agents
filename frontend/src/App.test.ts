@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import App from "./App.svelte";
 
 afterEach(() => {
@@ -9,7 +9,42 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// The address bar chooses the page: the editor at the root, the list of
+// workflows and their schedules at /workflows.
+describe("which page the address opens", () => {
+  test("the workflows path opens the list of workflows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => [] }),
+    );
+    globalThis.history.replaceState(null, "", "/workflows");
+
+    render(App);
+
+    expect(
+      await screen.findByRole("heading", { name: "Workflows" }),
+    ).toBeInTheDocument();
+  });
+
+  test("the root opens the editor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: "Mega Agents backend is running" }),
+      }),
+    );
+    globalThis.history.replaceState(null, "", "/");
+
+    render(App);
+
+    expect(await screen.findByLabelText("Workflow name")).toBeInTheDocument();
+  });
+});
+
 describe("status display", () => {
+  beforeEach(() => globalThis.history.replaceState(null, "", "/"));
+
   test("shows the backend status", async () => {
     vi.stubGlobal(
       "fetch",

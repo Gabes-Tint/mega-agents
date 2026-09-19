@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -44,9 +45,15 @@ func serve() error {
 	// so the status bar can show which ones answer.
 	health := app.AgentHealthFromEnvironment()
 	health.Start()
+	handler, scheduler := app.NewEditor(assets, health)
+	// The schedule is kept for as long as the server is up: workflows with
+	// a cron expression start themselves, and stop when the server stops.
+	keeping, stop := context.WithCancel(context.Background())
+	defer stop()
+	go scheduler.Run(keeping)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           app.NewHandlerWithHealth(assets, health),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()

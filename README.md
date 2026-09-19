@@ -76,6 +76,25 @@ The unsaved graph in progress is the page at `/`, and it is kept in the browser,
 so reloading that page does not lose it; a saved workflow comes back from its
 file instead.
 
+**Schedules…** opens `/workflows`, which lists every saved workflow and the
+schedule it runs on. A schedule is a cron expression in this machine's time
+zone — five fields, with lists, ranges, steps and names (`0 9 * * 1-5` for
+every weekday at nine), or one of `@hourly`, `@daily`, `@weekly`, `@monthly`
+and `@yearly`. As it is typed, the server reads it back and the page shows
+the next three runs it would start, so what is shown is what will happen; an
+expression that cannot run says why and cannot be saved. A schedule is kept
+in the workflow's own YAML file, beside its graph, so it is committed and
+diffed like everything else about the workflow.
+
+The server keeps the schedule while it is up: it looks at the clock each
+minute and starts every workflow due in that minute, recording the run as one
+the schedule started rather than one someone asked for. Runs already going
+never hold the next one back — a workflow due again while it is still running
+starts another run beside it — and a scheduled run stops at the breakpoints
+its blocks carry, so the editor can answer it. Nothing is caught up: a
+schedule that came round while the server was down is missed rather than
+replayed, so a restart never lets loose a burst of runs.
+
 As the graph changes, the editor's **Problems** panel lists what to fix
 before running: errors a run would stop on (a missing prompt, an arrow
 without a route, no starting point) and warnings such as blocks no starting
